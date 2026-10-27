@@ -1,0 +1,167 @@
+{{define "title"}}Server: {{.Server.Name}}{{end}}
+{{define "content"}}
+<div class="row g-4">
+    <div class="col-lg-8">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div>
+                        <h3 class="fw-bold mb-1">{{.Server.Name}}</h3>
+                        <p class="text-muted small mb-0">ID: {{.Server.ID}} | Created: {{.Server.CreatedAt.Format "2006-01-02 15:04"}}</p>
+                    </div>
+                    {{if eq .Server.Status "running"}}
+                    <span class="badge bg-success fs-6">Running</span>
+                    {{else if eq .Server.Status "stopped"}}
+                    <span class="badge bg-secondary fs-6">Stopped</span>
+                    {{else if eq .Server.Status "migrating"}}
+                    <span class="badge bg-warning text-dark fs-6">Migrating</span>
+                    {{else if eq .Server.Status "suspended"}}
+                    <span class="badge bg-danger fs-6">Suspended</span>
+                    {{else}}
+                    <span class="badge bg-info text-dark fs-6">{{.Server.Status}}</span>
+                    {{end}}
+                </div>
+
+                <div class="row g-3 my-2">
+                    <div class="col-sm-6">
+                        <div class="p-3 bg-light rounded">
+                            <span class="text-muted small">Assigned Port</span>
+                            <div class="fw-bold fs-5">{{.Server.Port}}</div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6">
+                        <div class="p-3 bg-light rounded">
+                            <span class="text-muted small">Current Host</span>
+                            <div class="fw-bold fs-5">{{.Server.Host.Hostname}}</div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6">
+                        <div class="p-3 bg-light rounded">
+                            <span class="text-muted small">Hardware Plan</span>
+                            <div class="fw-bold fs-5">{{.Server.Plan.Name}} ({{.Server.Plan.CPULimit}} Core / {{.Server.Plan.MemLimitMB}}MB)</div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6">
+                        <div class="p-3 bg-light rounded">
+                            <span class="text-muted small">Disk Allocation</span>
+                            <div class="fw-bold fs-5">{{.Server.Plan.DiskLimitGB}} GB Loop Mount</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 mt-4">
+                    {{if eq .Server.Status "running"}}
+                    <form method="POST" action="/dashboard/servers/{{.Server.ID}}/stop">
+                        <button type="submit" class="btn btn-warning">Stop Server</button>
+                    </form>
+                    {{else if eq .Server.Status "stopped"}}
+                    <form method="POST" action="/dashboard/servers/{{.Server.ID}}/start">
+                        <button type="submit" class="btn btn-success">Start Server</button>
+                    </form>
+                    {{end}}
+                    <a href="/dashboard/servers/{{.Server.ID}}/files" class="btn btn-outline-primary">File Manager</a>
+                    <a href="/dashboard/servers/{{.Server.ID}}/backups" class="btn btn-outline-info">Manage Backups</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Backups Summary Card -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white border-0 pt-4 pb-0 d-flex justify-content-between align-items-center">
+                <h5 class="fw-bold mb-0">World Backups</h5>
+                <form method="POST" action="/dashboard/servers/{{.Server.ID}}/backups/now">
+                    <button type="submit" class="btn btn-sm btn-primary">Backup Now</button>
+                </form>
+            </div>
+            <div class="card-body">
+                {{if .Backups}}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr class="text-muted small">
+                                <th>Snapshot ID</th>
+                                <th>Created</th>
+                                <th>Size</th>
+                                <th>Status</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Backups}}
+                            <tr>
+                                <td class="fw-semibold">#{{.ID}}</td>
+                                <td>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+                                <td>{{div .SizeBytes 1048576}} MB</td>
+                                <td><span class="badge bg-success">{{.Status}}</span></td>
+                                <td class="text-end">
+                                    <form method="POST" action="/dashboard/servers/{{$.Server.ID}}/backups/{{.ID}}/restore" class="d-inline" onsubmit="return confirm('Restore this snapshot? Active changes will be replaced.');">
+                                        <button type="submit" class="btn btn-sm btn-outline-warning">Restore</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <p class="text-muted small mb-0">No backups found. Trigger a manual backup or wait for scheduled daily sweeps.</p>
+                {{end}}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <!-- Live Worker Diagnostics -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-body p-4">
+                <h5 class="fw-bold mb-3">Host Worker Status</h5>
+                <p class="text-muted small">
+                    <strong>Worker URL:</strong> {{.Server.Host.WorkerBaseURL}}<br>
+                    <strong>Container ID:</strong> <code>{{.Server.ContainerID}}</code><br>
+                    <strong>Mount Path:</strong> <code>{{.Server.MountPath}}</code>
+                </p>
+                {{if .LiveStatus}}
+                <div class="alert alert-info py-2 mb-0 small">
+                    Live Status: <strong>{{.LiveStatus.Status}}</strong>
+                </div>
+                {{end}}
+            </div>
+        </div>
+
+        <!-- Migration Card -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-body p-4">
+                <h5 class="fw-bold mb-2">Host Migration</h5>
+                <p class="text-muted small">Transfer this server to another cluster host with blue/green verification while preserving port <code>{{.Server.Port}}</code>.</p>
+                <form method="POST" action="/dashboard/servers/{{.Server.ID}}/migrate">
+                    <div class="mb-3">
+                        <label for="destination_host_id" class="form-label small fw-semibold">Destination Host</label>
+                        <select class="form-select form-select-sm" id="destination_host_id" name="destination_host_id">
+                            <option value="0">(Recommended) Let cluster scheduler choose</option>
+                            {{range .AvailableHosts}}
+                            {{if ne .ID $.Server.HostID}}
+                            <option value="{{.ID}}">{{.Hostname}} (Max: {{.MaxServers}})</option>
+                            {{end}}
+                            {{end}}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-outline-warning w-100" onsubmit="return confirm('Begin live host migration?');">
+                        Initiate Migration
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Danger Zone -->
+        <div class="card shadow-sm border-danger">
+            <div class="card-body p-4">
+                <h5 class="fw-bold text-danger mb-2">Danger Zone</h5>
+                <p class="text-muted small mb-3">Permanent deletion will unmount and erase all local storage and container files.</p>
+                <form method="POST" action="/dashboard/servers/{{.Server.ID}}/delete" onsubmit="return confirm('Are you sure you want to delete this server? This action cannot be undone.');">
+                    <button type="submit" class="btn btn-outline-danger btn-sm w-100">Delete Server</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

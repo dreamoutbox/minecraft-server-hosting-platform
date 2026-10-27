@@ -107,16 +107,16 @@ Decisions locked in:
   - [x] Link subscription status to server lifecycle: on repeated charge failure, suspend the server (stop container via hosting module, keep volume intact) rather than deleting
 - Done when: Mock provider drives a full charge→renew→charge-fails→suspend cycle in tests; webhook handler verifies signatures and rejects tampered/unsigned payloads; billing cron correctly advances/stalls `next_billing_date` based on charge outcome.
 
-## Phase 9: Dashboard module (`internal/dashboard` + Bootstrap frontend)
+## Phase 9: Dashboard module (`internal/dashboard` + Bootstrap frontend) [DONE]
 - Goal: Web UI for server management, file management, billing status, migration — decoupled from hosting-core.
 - Tasks:
-  - [ ] Server templates (Go `html/template`) with Bootstrap layout
-  - [ ] Dashboard calls into `hosting`, `backup`, `billing` packages only through their public interfaces
-  - [ ] Server list/detail/create/delete UI; create flow includes plan selection (CPU/RAM/disk + price per plan)
-  - [ ] File management UI: browse/upload/download world files (via storage interface, scoped to that server's backup prefix)
-  - [ ] Manual backup/restore buttons wired to Phase 6 endpoints
-  - [ ] Admin: manual migration trigger UI (pick destination host or let scheduler choose)
-  - [ ] Billing/subscription status + saved payment method UI
+  - [x] Server templates (Go `html/template`) with Bootstrap layout
+  - [x] Dashboard calls into `hosting`, `backup`, `billing` packages only through their public interfaces
+  - [x] Server list/detail/create/delete UI; create flow includes plan selection (CPU/RAM/disk + price per plan)
+  - [x] File management UI: browse/upload/download world files (via storage interface, scoped to that server's backup prefix)
+  - [x] Manual backup/restore buttons wired to Phase 6 endpoints
+  - [x] Admin: manual migration trigger UI (pick destination host or let scheduler choose)
+  - [x] Billing/subscription status + saved payment method UI
 - Done when: End-to-end flow works through the browser: register → add payment method (mock) → create server → see it running → manage files → trigger backup → trigger migration.
 
 ## Phase 10: Hardening & polish

@@ -12,6 +12,7 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/config"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/storage"
@@ -78,6 +79,17 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	billingService := billing.NewService(db, paymentProvider, hostingService, cfg.StripeWebhookSecret)
 	billingHandler := billing.NewHandler(billingService)
 	billingHandler.RegisterRoutes(r, cfg.JWTSecret)
+
+	dashboardService := dashboard.NewService(
+		db,
+		hostingService,
+		backupService,
+		billingService,
+		migrationService,
+		storageProvider,
+		cfg.JWTSecret,
+	)
+	dashboardService.RegisterRoutes(r)
 
 	return r
 }

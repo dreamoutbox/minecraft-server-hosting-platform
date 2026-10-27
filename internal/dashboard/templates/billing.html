@@ -1,0 +1,85 @@
+{{define "title"}}Billing & Subscriptions{{end}}
+{{define "content"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-0">Billing & Subscriptions</h2>
+        <p class="text-muted mb-0">Manage saved payment methods and recurring platform subscriptions</p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-8">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white border-0 pt-4 pb-2">
+                <h5 class="fw-bold mb-0">Active Subscriptions</h5>
+            </div>
+            <div class="card-body">
+                {{if .Subscriptions}}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr class="text-muted small">
+                                <th>Sub ID</th>
+                                <th>Plan</th>
+                                <th>Monthly Rate</th>
+                                <th>Next Billing</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Subscriptions}}
+                            <tr>
+                                <td class="fw-semibold">#{{.ID}}</td>
+                                <td>{{.Plan.Name}}</td>
+                                <td>${{div .Plan.PriceCents 100}}/mo</td>
+                                <td>{{.NextBillingDate.Format "2006-01-02"}}</td>
+                                <td>
+                                    {{if eq .Status "active"}}
+                                    <span class="badge bg-success">Active</span>
+                                    {{else if eq .Status "past_due"}}
+                                    <span class="badge bg-warning text-dark">Past Due</span>
+                                    {{else if eq .Status "suspended"}}
+                                    <span class="badge bg-danger">Suspended</span>
+                                    {{else}}
+                                    <span class="badge bg-secondary">{{.Status}}</span>
+                                    {{end}}
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <p class="text-muted small mb-0 py-3 text-center">No active subscriptions found.</p>
+                {{end}}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-body p-4">
+                <h5 class="fw-bold mb-3">Saved Payment Method</h5>
+                {{if .User.PaymentMethodID}}
+                <div class="alert alert-success py-2 small mb-3">
+                    Payment Method Active: <code>{{.User.PaymentMethodID}}</code>
+                </div>
+                {{else}}
+                <div class="alert alert-warning py-2 small mb-3">
+                    No payment method on file. Add one before provisioning paid servers.
+                </div>
+                {{end}}
+
+                <form method="POST" action="/dashboard/billing/payment-methods">
+                    <div class="mb-3">
+                        <label for="payment_method_id" class="form-label small fw-semibold">Payment Method ID</label>
+                        <input type="text" class="form-control form-control-sm" id="payment_method_id" name="payment_method_id" placeholder="pm_card_visa or test_pm" required>
+                        <div class="form-text small">In development mode, enter any mock card ID.</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm w-100">Save Payment Method</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

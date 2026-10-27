@@ -1,0 +1,27 @@
+{{define "title"}}Sign In{{end}}
+{{define "content"}}
+<div class="row justify-content-center">
+    <div class="col-md-5">
+        <div class="card shadow-sm border-0">
+            <div class="card-body p-4">
+                <h3 class="card-title fw-bold text-center mb-3">Sign In</h3>
+                <form method="POST" action="/login">
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email address</label>
+                        <input type="email" class="form-control" id="email" name="email" required autofocus>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 py-2">Sign In</button>
+                </form>
+                <div class="text-center mt-3">
+                    <span class="text-muted small">Need an account?</span>
+                    <a href="/register" class="small ms-1">Register</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}
