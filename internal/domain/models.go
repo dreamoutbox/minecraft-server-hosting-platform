@@ -65,12 +65,14 @@ const (
 
 // User represents an authenticated account on the hosting platform.
 type User struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Email        string    `gorm:"uniqueIndex;not null" json:"email"`
-	PasswordHash string    `gorm:"not null" json:"-"`
-	Role         UserRole  `gorm:"type:varchar(32);not null;default:'user'" json:"role"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	Email           string    `gorm:"uniqueIndex;not null" json:"email"`
+	PasswordHash    string    `gorm:"not null" json:"-"`
+	Role            UserRole  `gorm:"type:varchar(32);not null;default:'user'" json:"role"`
+	CustomerID      string    `gorm:"type:varchar(128)" json:"customer_id,omitempty"`
+	PaymentMethodID string    `gorm:"type:varchar(128)" json:"payment_method_id,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Plan defines hardware resource limits and monthly cost for a Minecraft server tier.
@@ -125,6 +127,7 @@ type Subscription struct {
 	PlanID          uint               `gorm:"not null" json:"plan_id"`
 	ServerID        *uint              `gorm:"index" json:"server_id,omitempty"`
 	Status          SubscriptionStatus `gorm:"type:varchar(32);not null;default:'active'" json:"status"`
+	FailureCount    int                `gorm:"default:0;not null" json:"failure_count"`
 	NextBillingDate time.Time          `gorm:"not null" json:"next_billing_date"`
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`

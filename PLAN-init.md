@@ -94,17 +94,17 @@ Decisions locked in:
   - [x] On failure: leave source running untouched, mark migration failed, clean up any partial destination-side resources
 - Done when: A running server can be migrated to a different host via API/admin trigger, keeps its port, world data is intact post-migration, source host resources are fully released, and a forced failure mid-migration leaves the original server running and reachable.
 
-## Phase 8: Billing (`internal/billing`)
+## Phase 8: Billing (`internal/billing`) [DONE]
 - Goal: Monthly billing driven by our own subscription state, using Stripe purely to move money.
 - Tasks:
-  - [ ] `PaymentProvider` interface: `CreatePayment`, `GetPayment`, `Refund`, `SavePaymentMethod`, `ChargeSavedPaymentMethod` (no `CreateSubscription`/`CancelSubscription` — subscription *state* is ours)
-  - [ ] Mock implementation: in-memory/DB-backed, deterministic responses, for dev config
-  - [ ] Real Stripe implementation using Stripe Go SDK (PaymentIntents / saved PaymentMethods, not Stripe Subscriptions)
-  - [ ] Config switch (env var) selects provider — wired via DI at startup
-  - [ ] Our own billing cron: for each active `Subscription` whose `next_billing_date` has passed, call `ChargeSavedPaymentMethod` for the plan's price (price stored in our `Plan`/config, not Stripe), record result, advance `next_billing_date` on success
-  - [ ] Stripe webhook endpoint (payment succeeded/failed) with mandatory signature verification (`Stripe-Signature` header + webhook secret) — reject unverified requests outright
-  - [ ] Mock provider also emits equivalent local "webhook" events so dev exercises the same handler path as prod
-  - [ ] Link subscription status to server lifecycle: on repeated charge failure, suspend the server (stop container via hosting module, keep volume intact) rather than deleting
+  - [x] `PaymentProvider` interface: `CreatePayment`, `GetPayment`, `Refund`, `SavePaymentMethod`, `ChargeSavedPaymentMethod` (no `CreateSubscription`/`CancelSubscription` — subscription *state* is ours)
+  - [x] Mock implementation: in-memory/DB-backed, deterministic responses, for dev config
+  - [x] Real Stripe implementation using Stripe Go SDK (PaymentIntents / saved PaymentMethods, not Stripe Subscriptions)
+  - [x] Config switch (env var) selects provider — wired via DI at startup
+  - [x] Our own billing cron: for each active `Subscription` whose `next_billing_date` has passed, call `ChargeSavedPaymentMethod` for the plan's price (price stored in our `Plan`/config, not Stripe), record result, advance `next_billing_date` on success
+  - [x] Stripe webhook endpoint (payment succeeded/failed) with mandatory signature verification (`Stripe-Signature` header + webhook secret) — reject unverified requests outright
+  - [x] Mock provider also emits equivalent local "webhook" events so dev exercises the same handler path as prod
+  - [x] Link subscription status to server lifecycle: on repeated charge failure, suspend the server (stop container via hosting module, keep volume intact) rather than deleting
 - Done when: Mock provider drives a full charge→renew→charge-fails→suspend cycle in tests; webhook handler verifies signatures and rejects tampered/unsigned payloads; billing cron correctly advances/stalls `next_billing_date` based on charge outcome.
 
 ## Phase 9: Dashboard module (`internal/dashboard` + Bootstrap frontend)

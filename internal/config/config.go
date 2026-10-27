@@ -8,11 +8,14 @@ import (
 
 // Config encapsulates runtime configuration settings for the platform orchestrator.
 type Config struct {
-	ServerPort   string
-	DatabaseDSN  string
-	PortRangeMin int
-	PortRangeMax int
-	JWTSecret    string
+	ServerPort          string
+	DatabaseDSN         string
+	PortRangeMin        int
+	PortRangeMax        int
+	JWTSecret           string
+	BillingProvider     string
+	StripeSecretKey     string
+	StripeWebhookSecret string
 }
 
 // LoadFromEnv loads environment configuration and validates critical constraints.
@@ -36,6 +39,9 @@ func LoadFromEnv() (*Config, error) {
 	dbName := getEnv("DB_NAME", "minecraft_hosting")
 	dbSSL := getEnv("DB_SSLMODE", "disable")
 	jwtSecret := getEnv("JWT_SECRET", "dev-platform-jwt-secret-key-change-in-prod")
+	billingProvider := getEnv("BILLING_PROVIDER", "mock")
+	stripeSecretKey := getEnv("STRIPE_SECRET_KEY", "")
+	stripeWebhookSecret := getEnv("STRIPE_WEBHOOK_SECRET", "whsec_dev_mock_key")
 
 	dsn := fmt.Sprintf(
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
@@ -61,11 +67,14 @@ func LoadFromEnv() (*Config, error) {
 	}
 
 	return &Config{
-		ServerPort:   serverPort,
-		DatabaseDSN:  dsn,
-		PortRangeMin: minPort,
-		PortRangeMax: maxPort,
-		JWTSecret:    jwtSecret,
+		ServerPort:          serverPort,
+		DatabaseDSN:         dsn,
+		PortRangeMin:        minPort,
+		PortRangeMax:        maxPort,
+		JWTSecret:           jwtSecret,
+		BillingProvider:     billingProvider,
+		StripeSecretKey:     stripeSecretKey,
+		StripeWebhookSecret: stripeWebhookSecret,
 	}, nil
 }
 

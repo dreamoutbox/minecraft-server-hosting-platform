@@ -10,6 +10,7 @@ import (
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/config"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
@@ -67,6 +68,16 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	migrationService := hosting.NewMigrationService(hostingService, backupService, storageProvider, nil)
 	hostingHandler.SetMigrationService(migrationService)
+
+	var paymentProvider billing.PaymentProvider
+	if cfg.BillingProvider == "stripe" && cfg.StripeSecretKey != "" {
+		paymentProvider = billing.NewStripePaymentProvider(cfg.StripeSecretKey)
+	} else {
+		paymentProvider = billing.NewMockPaymentProvider()
+	}
+	billingService := billing.NewService(db, paymentProvider, hostingService, cfg.StripeWebhookSecret)
+	billingHandler := billing.NewHandler(billingService)
+	billingHandler.RegisterRoutes(r, cfg.JWTSecret)
 
 	return r
 }
