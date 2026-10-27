@@ -58,12 +58,13 @@ type S3StorageProvider struct {
 //   - cfg: S3 connectivity credentials and endpoints.
 //
 // Example usage:
-//   provider, err := storage.NewS3StorageProvider(ctx, storage.S3Config{
-//       Endpoint:     "http://localhost:8333",
-//       Region:       "us-east-1",
-//       Bucket:       "minecraft-backups",
-//       UsePathStyle: true,
-//   })
+//
+//	provider, err := storage.NewS3StorageProvider(ctx, storage.S3Config{
+//	    Endpoint:     "http://localhost:8333",
+//	    Region:       "us-east-1",
+//	    Bucket:       "minecraft-backups",
+//	    UsePathStyle: true,
+//	})
 func NewS3StorageProvider(ctx context.Context, cfg S3Config) (*S3StorageProvider, error) {
 	if cfg.Bucket == "" {
 		cfg.Bucket = "minecraft-backups"
@@ -133,7 +134,8 @@ func NewS3StorageProvider(ctx context.Context, cfg S3Config) (*S3StorageProvider
 //   - data: Raw binary byte slice of object contents.
 //
 // Example usage:
-//   err := provider.Put(ctx, "backups/server-1/world.tar", data)
+//
+//	err := provider.Put(ctx, "backups/server-1/world.tar", data)
 func (s *S3StorageProvider) Put(ctx context.Context, key string, data []byte) error {
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
@@ -153,7 +155,8 @@ func (s *S3StorageProvider) Put(ctx context.Context, key string, data []byte) er
 //   - key: Path key of the object to retrieve.
 //
 // Example usage:
-//   data, err := provider.Get(ctx, "backups/server-1/world.tar")
+//
+//	data, err := provider.Get(ctx, "backups/server-1/world.tar")
 func (s *S3StorageProvider) Get(ctx context.Context, key string) ([]byte, error) {
 	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
@@ -178,7 +181,8 @@ func (s *S3StorageProvider) Get(ctx context.Context, key string) ([]byte, error)
 //   - key: Path key of the object to remove.
 //
 // Example usage:
-//   err := provider.Delete(ctx, "backups/server-1/world.tar")
+//
+//	err := provider.Delete(ctx, "backups/server-1/world.tar")
 func (s *S3StorageProvider) Delete(ctx context.Context, key string) error {
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucket),
@@ -197,7 +201,8 @@ func (s *S3StorageProvider) Delete(ctx context.Context, key string) error {
 //   - prefix: Directory or key prefix filter.
 //
 // Example usage:
-//   keys, err := provider.List(ctx, "backups/server-1/")
+//
+//	keys, err := provider.List(ctx, "backups/server-1/")
 func (s *S3StorageProvider) List(ctx context.Context, prefix string) ([]string, error) {
 	var keys []string
 	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
@@ -232,7 +237,8 @@ type MemoryStorageProvider struct {
 //   - None.
 //
 // Example usage:
-//   memProvider := storage.NewMemoryStorageProvider()
+//
+//	memProvider := storage.NewMemoryStorageProvider()
 func NewMemoryStorageProvider() *MemoryStorageProvider {
 	return &MemoryStorageProvider{
 		data: make(map[string][]byte),
@@ -285,7 +291,8 @@ func (m *MemoryStorageProvider) List(ctx context.Context, prefix string) ([]stri
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
-//   sp, err := storage.NewStorageProviderFromEnv(ctx)
+//
+//	sp, err := storage.NewStorageProviderFromEnv(ctx)
 func NewStorageProviderFromEnv(ctx context.Context) (StorageProvider, error) {
 	storageType := os.Getenv("STORAGE_TYPE")
 	if storageType == string(StorageTypeMemory) {

@@ -65,6 +65,9 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	backupHandler := backup.NewHandler(backupService)
 	backupHandler.RegisterRoutes(r, cfg.JWTSecret)
 
+	migrationService := hosting.NewMigrationService(hostingService, backupService, storageProvider, nil)
+	hostingHandler.SetMigrationService(migrationService)
+
 	return r
 }
 

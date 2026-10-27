@@ -82,16 +82,16 @@ Decisions locked in:
   - [x] Keep backup/restore functions callable from a future admin CLI (no web-request-specific state; explicit context/params)
 - Done when: Manual backup produces an object in SeaweedFS via the worker export path; restore on the same or a different host reproduces world data; cron job runs on schedule in dev.
 
-## Phase 7: Server migration
+## Phase 7: Server migration [DONE]
 - Goal: Move a running server to a different host with minimal downtime, preserving its port.
 - Tasks:
-  - [ ] `Server.status = migrating`; block other lifecycle actions on it while in this state
-  - [ ] Trigger a fresh backup via Phase 6's backup function to guarantee an up-to-date snapshot
-  - [ ] Scheduler selects a destination host with capacity whose worker can accept the server's **existing port** (reject migration if the port can't be preserved — don't silently reassign, since that breaks the port-routing assumption)
-  - [ ] Provision volume + container on destination host via worker API, restore from the backup snapshot
-  - [ ] Health-check the new container (e.g. port open / basic server-list ping) before tearing down the source — blue/green, don't destroy source until destination is verified
-  - [ ] On success: update `Server.host_id`/`container_id`/`mount_path`, tear down source container + volume via source worker API, release source-side worker resources
-  - [ ] On failure: leave source running untouched, mark migration failed, clean up any partial destination-side resources
+  - [x] `Server.status = migrating`; block other lifecycle actions on it while in this state
+  - [x] Trigger a fresh backup via Phase 6's backup function to guarantee an up-to-date snapshot
+  - [x] Scheduler selects a destination host with capacity whose worker can accept the server's **existing port** (reject migration if the port can't be preserved — don't silently reassign, since that breaks the port-routing assumption)
+  - [x] Provision volume + container on destination host via worker API, restore from the backup snapshot
+  - [x] Health-check the new container (e.g. port open / basic server-list ping) before tearing down the source — blue/green, don't destroy source until destination is verified
+  - [x] On success: update `Server.host_id`/`container_id`/`mount_path`, tear down source container + volume via source worker API, release source-side worker resources
+  - [x] On failure: leave source running untouched, mark migration failed, clean up any partial destination-side resources
 - Done when: A running server can be migrated to a different host via API/admin trigger, keeps its port, world data is intact post-migration, source host resources are fully released, and a forced failure mid-migration leaves the original server running and reachable.
 
 ## Phase 8: Billing (`internal/billing`)

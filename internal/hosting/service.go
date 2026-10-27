@@ -195,6 +195,10 @@ func (s *Service) StopServer(ctx context.Context, userID uint, serverID uint) (*
 		return nil, err
 	}
 
+	if server.Status == domain.ServerStatusMigrating {
+		return nil, ErrServerMigrating
+	}
+
 	if server.ContainerID != "" {
 		wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
 		if err := wClient.StopContainer(ctx, server.ContainerID); err != nil {
@@ -223,6 +227,10 @@ func (s *Service) StartServer(ctx context.Context, userID uint, serverID uint) (
 	server, host, err := s.getServerAndHost(ctx, userID, serverID)
 	if err != nil {
 		return nil, err
+	}
+
+	if server.Status == domain.ServerStatusMigrating {
+		return nil, ErrServerMigrating
 	}
 
 	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
@@ -262,6 +270,10 @@ func (s *Service) DeleteServer(ctx context.Context, userID uint, serverID uint) 
 	server, host, err := s.getServerAndHost(ctx, userID, serverID)
 	if err != nil {
 		return err
+	}
+
+	if server.Status == domain.ServerStatusMigrating {
+		return ErrServerMigrating
 	}
 
 	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
@@ -340,5 +352,6 @@ func (s *Service) getServerAndHost(ctx context.Context, userID uint, serverID ui
 		return nil, nil, errors.New("unauthorized access to server")
 	}
 
-	return &server, &server.Host, nil
+	hostCopy := server.Host
+	return &server, &hostCopy, nil
 }

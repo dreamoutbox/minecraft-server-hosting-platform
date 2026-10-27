@@ -146,24 +146,31 @@ func TestSchedulerLeastLoaded(t *testing.T) {
 	}
 	_ = domain.AutoMigrate(db)
 
-	// Clean up previous hosts for clean test
-	db.Exec("DELETE FROM servers")
-	db.Exec("DELETE FROM hosts")
+	// Disable any pre-existing hosts so they don't interfere with load calculation
+	db.Model(&domain.Host{}).Where("1 = 1").Update("status", domain.HostStatusDisabled)
 
 	// Host 1: capacity 2, 1 server -> 50%
-	h1 := domain.Host{Hostname: "node-1", WorkerBaseURL: "http://node-1:9090", APIKey: "k1", APIKeyHash: "h1", MaxServers: 2, Status: domain.HostStatusActive}
+	h1 := domain.Host{Hostname: fmt.Sprintf("node-1-%d", time.Now().UnixNano()), WorkerBaseURL: "http://node-1:9090", APIKey: "k1", APIKeyHash: "h1", MaxServers: 2, Status: domain.HostStatusActive}
 	db.Create(&h1)
 
 	// Host 2: capacity 10, 1 server -> 10% (should be picked)
-	h2 := domain.Host{Hostname: "node-2", WorkerBaseURL: "http://node-2:9090", APIKey: "k2", APIKeyHash: "h2", MaxServers: 10, Status: domain.HostStatusActive}
+	h2 := domain.Host{Hostname: fmt.Sprintf("node-2-%d", time.Now().UnixNano()), WorkerBaseURL: "http://node-2:9090", APIKey: "k2", APIKeyHash: "h2", MaxServers: 10, Status: domain.HostStatusActive}
 	db.Create(&h2)
 
 	var plan domain.Plan
 	_ = db.First(&plan)
 
+	port1 := 25501
+	port2 := 25502
+	db.Where("port IN (?)", []int{port1, port2}).Delete(&domain.Server{})
+
 	// Add 1 server to each
-	db.Create(&domain.Server{UserID: 1, PlanID: plan.ID, HostID: h1.ID, Name: "s1", Port: 25565, Status: domain.ServerStatusRunning})
-	db.Create(&domain.Server{UserID: 1, PlanID: plan.ID, HostID: h2.ID, Name: "s2", Port: 25566, Status: domain.ServerStatusRunning})
+	if err := db.Create(&domain.Server{UserID: 1, PlanID: plan.ID, HostID: h1.ID, Name: "s1", Port: port1, Status: domain.ServerStatusRunning}).Error; err != nil {
+		t.Fatalf("failed inserting server 1: %v", err)
+	}
+	if err := db.Create(&domain.Server{UserID: 1, PlanID: plan.ID, HostID: h2.ID, Name: "s2", Port: port2, Status: domain.ServerStatusRunning}).Error; err != nil {
+		t.Fatalf("failed inserting server 2: %v", err)
+	}
 
 	scheduler := NewLeastLoadedScheduler(db)
 	picked, err := scheduler.SelectHost(context.Background())

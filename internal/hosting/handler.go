@@ -11,7 +11,8 @@ import (
 
 // Handler serves HTTP endpoints for server lifecycle and host management.
 type Handler struct {
-	service *Service
+	service      *Service
+	migrationSvc *MigrationService
 }
 
 // NewHandler instantiates a hosting HTTP controller.
@@ -23,6 +24,16 @@ type Handler struct {
 //   h := hosting.NewHandler(svc)
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+// SetMigrationService sets the migration coordinator for server transfer endpoints.
+func (h *Handler) SetMigrationService(m *MigrationService) {
+	h.migrationSvc = m
+}
+
+// MigrateServerRequest specifies optional destination host parameter.
+type MigrateServerRequest struct {
+	DestinationHostID uint `json:"destination_host_id"`
 }
 
 // RegisterHostRequest holds payload fields for registering a worker node.
@@ -251,6 +262,42 @@ func (h *Handler) DeleteServer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "server deleted successfully"})
 }
 
+// MigrateServer moves the server to a different host node preserving its assigned port.
+//
+// Arguments:
+//   - c: Active Gin request context with URL param 'id' and optional destination JSON.
+//
+// Example usage:
+//   POST /api/v1/servers/:id/migrate
+func (h *Handler) MigrateServer(c *gin.Context) {
+	if h.migrationSvc == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "migration service not configured"})
+		return
+	}
+
+	userID, err := auth.GetUserIDFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	serverID, err := parseIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var req MigrateServerRequest
+	_ = c.ShouldBindJSON(&req)
+
+	if err := h.migrationSvc.MigrateServer(c.Request.Context(), userID, serverID, req.DestinationHostID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "server migrated successfully"})
+}
+
 // parseIDParam extracts and converts a URL route parameter to an unsigned integer.
 func parseIDParam(c *gin.Context, paramName string) (uint, error) {
 	raw := c.Param(paramName)
@@ -289,5 +336,6 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 		servers.POST("/:id/start", h.StartServer)
 		servers.POST("/:id/stop", h.StopServer)
 		servers.DELETE("/:id", h.DeleteServer)
+		servers.POST("/:id/migrate", h.MigrateServer)
 	}
 }
