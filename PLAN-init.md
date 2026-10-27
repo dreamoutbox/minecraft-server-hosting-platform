@@ -119,15 +119,15 @@ Decisions locked in:
   - [x] Billing/subscription status + saved payment method UI
 - Done when: End-to-end flow works through the browser: register → add payment method (mock) → create server → see it running → manage files → trigger backup → trigger migration.
 
-## Phase 10: Hardening & polish
+## Phase 10: Hardening & polish [DONE]
 - Goal: Production-readiness pass.
 - Tasks:
-  - [ ] Rate limiting on auth and payment endpoints
-  - [ ] Structured logging + request IDs, propagated into worker daemon calls for cross-service tracing
-  - [ ] Input validation on all handlers (file paths — path traversal risk in file manager; server name constraints)
-  - [ ] Worker API key rotation flow (issue new key, update worker config, revoke old)
-  - [ ] Dockerfile for both binaries + production deploy notes (worker daemon deployment with required caps documented)
-  - [ ] Basic test coverage report, CI pipeline (lint + test + build for both binaries)
+  - [x] Rate limiting on auth and payment endpoints
+  - [x] Structured logging + request IDs, propagated into worker daemon calls for cross-service tracing
+  - [x] Input validation on all handlers (file paths — path traversal risk in file manager; server name constraints)
+  - [x] Worker API key rotation flow (issue new key, update worker config, revoke old)
+  - [x] Dockerfile for both binaries + production deploy notes (worker daemon deployment with required caps documented)
+  - [x] Basic test coverage report, CI pipeline (lint + test + build for both binaries)
 - Done when: CI green on lint/test/build; manual security pass on file manager, webhook signature verification, and worker API key handling confirmed.
 
 ## Unknowns, risks, assumptions

@@ -15,6 +15,7 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/middleware"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/storage"
 )
 
@@ -29,6 +30,7 @@ import (
 //   router.Run(":8080")
 func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	r := gin.Default()
+	r.Use(middleware.RequestIDMiddleware())
 
 	r.GET("/health", func(c *gin.Context) {
 		sqlDB, err := db.DB()
@@ -49,6 +51,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	authHandler := auth.NewHandler(db, cfg.JWTSecret)
 	authGroup := r.Group("/api/v1/auth")
+	authGroup.Use(middleware.RateLimitMiddleware(10, 20))
 	authHandler.RegisterRoutes(authGroup)
 
 	scheduler := hosting.NewLeastLoadedScheduler(db)

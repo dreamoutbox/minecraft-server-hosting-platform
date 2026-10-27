@@ -58,6 +58,10 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body io
 	}
 
 	req.Header.Set(APIKeyHeader, c.apiKey)
+	if reqID, ok := ctx.Value("request_id").(string); ok && reqID != "" {
+		req.Header.Set("X-Request-ID", reqID)
+	}
+
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

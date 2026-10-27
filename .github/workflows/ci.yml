@@ -1,0 +1,66 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-test-build:
+    name: Lint, Test and Build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: minecraft_hosting
+          PGDATA: /var/lib/postgresql
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      seaweedfs:
+        image: chrislusf/seaweedfs:latest
+        ports:
+          - 8333:8333
+          - 9333:9333
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          check-latest: true
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.5
+
+      - name: Run unit and integration tests
+        env:
+          TEST_DATABASE_DSN: "host=localhost user=postgres password=postgrespassword dbname=minecraft_hosting port=5432 sslmode=disable"
+          S3_ENDPOINT: "http://localhost:8333"
+          S3_REGION: "us-east-1"
+          S3_BUCKET: "minecraft-backups"
+          S3_ACCESS_KEY: "dev"
+          S3_SECRET_KEY: "dev"
+          S3_USE_PATH_STYLE: "true"
+        run: go test -v -race ./...
+
+      - name: Build server binary
+        run: go build -v -o /dev/null ./cmd/server
+
+      - name: Build worker binary
+        run: go build -v -o /dev/null ./cmd/worker

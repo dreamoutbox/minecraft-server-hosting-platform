@@ -85,6 +85,34 @@ func (s *Service) RegisterHost(ctx context.Context, hostname string, workerBaseU
 	return &host, rawAPIKey, nil
 }
 
+// RotateHostAPIKey generates a new secure API key for the host, updates its hash, and returns the new key once.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - hostID: Host primary key.
+//
+// Example usage:
+//   newKey, err := svc.RotateHostAPIKey(ctx, 5)
+func (s *Service) RotateHostAPIKey(ctx context.Context, hostID uint) (string, error) {
+	var host domain.Host
+	if err := s.db.WithContext(ctx).First(&host, hostID).Error; err != nil {
+		return "", fmt.Errorf("host %d not found: %w", hostID, err)
+	}
+
+	rawAPIKey := fmt.Sprintf("mc_%s_%s", uuid.New().String(), uuid.New().String())
+	hashBytes := sha256.Sum256([]byte(rawAPIKey))
+	hashHex := hex.EncodeToString(hashBytes[:])
+
+	host.APIKey = rawAPIKey
+	host.APIKeyHash = hashHex
+
+	if err := s.db.WithContext(ctx).Save(&host).Error; err != nil {
+		return "", fmt.Errorf("failed saving rotated host key: %w", err)
+	}
+
+	return rawAPIKey, nil
+}
+
 // ListHosts returns all registered nodes in the platform cluster.
 //
 // Arguments:

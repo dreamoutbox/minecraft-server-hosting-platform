@@ -92,6 +92,33 @@ func (h *Handler) ListHosts(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"hosts": hosts})
 }
 
+// RotateHostKey generates and applies a new worker API key for the target host node.
+//
+// Arguments:
+//   - c: Active Gin request context with URL param 'id'.
+//
+// Example usage:
+//   POST /api/v1/hosts/:id/rotate-key
+func (h *Handler) RotateHostKey(c *gin.Context) {
+	hostID, err := parseIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid host id"})
+		return
+	}
+
+	newKey, err := h.service.RotateHostAPIKey(c.Request.Context(), hostID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"host_id": hostID,
+		"api_key": newKey,
+		"notice":  "Update WORKER_API_KEY in the host's worker daemon environment immediately.",
+	})
+}
+
 // CreateServer provisions a new server on an available host.
 //
 // Arguments:
@@ -324,6 +351,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 	{
 		hosts.POST("", h.RegisterHost)
 		hosts.GET("", h.ListHosts)
+		hosts.POST("/:id/rotate-key", h.RotateHostKey)
 	}
 
 	// Server endpoints (authenticated user self-service)
