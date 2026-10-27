@@ -20,17 +20,17 @@ Decisions locked in:
 - Plans: Small (1 CPU / 1GB RAM / 10GB disk), Medium (2 CPU / 2GB RAM / 20GB disk), Large (4 CPU / 4GB RAM / 40GB disk).
 - Migration: moving a running server to a different host is a first-class operation, built on the backup/restore primitives, preserving the server's port.
 
-## Phase 1: Project skeleton & core domain
+## Phase 1: Project skeleton & core domain [DONE]
 - Goal: Repo builds, connects to Postgres, module boundaries in place for both binaries.
 - Tasks:
-  - [ ] Init Go module; layout: `/internal/hosting`, `/internal/billing`, `/internal/dashboard`, `/internal/storage`, `/internal/backup`, `/internal/worker` (shared client/types), `/cmd/server`, `/cmd/worker`
-  - [ ] Gin bootstrap for `cmd/server` with health check route
-  - [ ] GORM + Postgres connection, config via env
-  - [ ] Core models: `User`, `Plan` (name, cpu_limit, mem_limit, disk_limit, stripe-unrelated — no price_id here), `Host` (hostname/address, worker_base_url, api_key_hash, max_servers, status), `Server` (status, port, container_id, plan_id, host_id, mount_path), `Subscription` (plan_id, status, next_billing_date — no stripe subscription id), `PaymentRecord`, `BackupRecord`
-  - [ ] Migrations via GORM AutoMigrate, run on app startup
-  - [ ] Seed `Plan` rows: Small (1/1/10), Medium (2/2/20), Large (4/4/40)
-  - [ ] Config: global `PORT_RANGE_MIN`/`PORT_RANGE_MAX` env vars, validated at startup (min < max)
-  - [ ] docker-compose.dev.yml: postgres, seaweedfs
+  - [x] Init Go module; layout: `/internal/hosting`, `/internal/billing`, `/internal/dashboard`, `/internal/storage`, `/internal/backup`, `/internal/worker` (shared client/types), `/cmd/server`, `/cmd/worker`
+  - [x] Gin bootstrap for `cmd/server` with health check route
+  - [x] GORM + Postgres connection, config via env
+  - [x] Core models: `User`, `Plan` (name, cpu_limit, mem_limit, disk_limit, stripe-unrelated — no price_id here), `Host` (hostname/address, worker_base_url, api_key_hash, max_servers, status), `Server` (status, port, container_id, plan_id, host_id, mount_path), `Subscription` (plan_id, status, next_billing_date — no stripe subscription id), `PaymentRecord`, `BackupRecord`
+  - [x] Migrations via GORM AutoMigrate, run on app startup
+  - [x] Seed `Plan` rows: Small (1/1/10), Medium (2/2/20), Large (4/4/40)
+  - [x] Config: global `PORT_RANGE_MIN`/`PORT_RANGE_MAX` env vars, validated at startup (min < max)
+  - [x] docker-compose.dev.yml: postgres, seaweedfs
 - Done when: `go build ./...` succeeds for both binaries, app boots, migrates schema against docker-compose postgres, `/health` returns 200.
 
 ## Phase 2: Auth & user management
