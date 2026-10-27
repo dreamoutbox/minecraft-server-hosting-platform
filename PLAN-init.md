@@ -63,12 +63,12 @@ Decisions locked in:
   - [x] Host registration endpoint/flow: generates and returns the API key once (stored hashed), admin configures it into that host's worker daemon
 - Done when: Can create a server via API with a plan, scheduler places it on a host with capacity, worker daemon provisions the loop-mounted volume + container, server reachable on its globally-unique assigned port, stop/delete tears down container + volume + frees the port via the worker API.
 
-## Phase 5: Storage abstraction (SeaweedFS dev / S3 prod)
+## Phase 5: Storage abstraction (SeaweedFS dev / S3 prod) [DONE]
 - Goal: Pluggable object storage interface used by backup/restore and migration.
 - Tasks:
-  - [ ] `StorageProvider` interface: `Put`, `Get`, `Delete`, `List`
-  - [ ] SeaweedFS S3-compatible implementation (dev)
-  - [ ] Real S3 implementation (prod) — same interface, swap via config
+  - [x] `StorageProvider` interface: `Put`, `Get`, `Delete`, `List`
+  - [x] SeaweedFS S3-compatible implementation (dev)
+  - [x] Real S3 implementation (prod) — same interface, swap via config
 - Done when: Integration test writes/reads/deletes an object against SeaweedFS in docker-compose.
 
 ## Phase 6: Backup & restore (`internal/backup`)
