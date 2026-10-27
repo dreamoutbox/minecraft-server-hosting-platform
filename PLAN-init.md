@@ -71,15 +71,15 @@ Decisions locked in:
   - [x] Real S3 implementation (prod) — same interface, swap via config
 - Done when: Integration test writes/reads/deletes an object against SeaweedFS in docker-compose.
 
-## Phase 6: Backup & restore (`internal/backup`)
+## Phase 6: Backup & restore (`internal/backup`) [DONE]
 - Goal: World data backed up on schedule and on-demand; restorable. Built on the worker's export/import endpoints.
 - Tasks:
-  - [ ] Dedicated backup function: call worker's volume export endpoint for the server's host → push resulting stream via `StorageProvider`
-  - [ ] Dedicated restore function: pull from storage → call worker's volume import endpoint (worker stops container first if running) → restart
-  - [ ] Cron scheduler (`robfig/cron`) sweeping active servers on schedule
-  - [ ] Manual trigger endpoints (backup now, restore from a given snapshot) — reuse the same functions cron uses
-  - [ ] `BackupRecord` tracking: timestamp, size, storage key, status
-  - [ ] Keep backup/restore functions callable from a future admin CLI (no web-request-specific state; explicit context/params)
+  - [x] Dedicated backup function: call worker's volume export endpoint for the server's host → push resulting stream via `StorageProvider`
+  - [x] Dedicated restore function: pull from storage → call worker's volume import endpoint (worker stops container first if running) → restart
+  - [x] Cron scheduler (`robfig/cron`) sweeping active servers on schedule
+  - [x] Manual trigger endpoints (backup now, restore from a given snapshot) — reuse the same functions cron uses
+  - [x] `BackupRecord` tracking: timestamp, size, storage key, status
+  - [x] Keep backup/restore functions callable from a future admin CLI (no web-request-specific state; explicit context/params)
 - Done when: Manual backup produces an object in SeaweedFS via the worker export path; restore on the same or a different host reproduces world data; cron job runs on schedule in dev.
 
 ## Phase 7: Server migration

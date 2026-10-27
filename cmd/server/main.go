@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 
@@ -8,9 +9,11 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/config"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/storage"
 )
 
 // SetupRouter initializes HTTP routes and middleware for the orchestrator API.
@@ -51,6 +54,16 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	hostingService := hosting.NewService(db, scheduler, portAllocator, nil)
 	hostingHandler := hosting.NewHandler(hostingService)
 	hostingHandler.RegisterRoutes(r, cfg.JWTSecret)
+
+	storageProvider, err := storage.NewStorageProviderFromEnv(context.Background())
+	if err != nil {
+		log.Printf("[WARN] using in-memory storage fallback: %v", err)
+		storageProvider = storage.NewMemoryStorageProvider()
+	}
+
+	backupService := backup.NewService(db, storageProvider, nil)
+	backupHandler := backup.NewHandler(backupService)
+	backupHandler.RegisterRoutes(r, cfg.JWTSecret)
 
 	return r
 }
