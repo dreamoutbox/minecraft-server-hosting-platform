@@ -33,12 +33,12 @@ Decisions locked in:
   - [x] docker-compose.dev.yml: postgres, seaweedfs
 - Done when: `go build ./...` succeeds for both binaries, app boots, migrates schema against docker-compose postgres, `/health` returns 200.
 
-## Phase 2: Auth & user management
+## Phase 2: Auth & user management [DONE]
 - Goal: Users can register/login; sessions protect routes.
 - Tasks:
-  - [ ] Password hashing (bcrypt/argon2), register/login/logout endpoints
-  - [ ] JWT issuance (access + refresh token) and auth middleware
-  - [ ] User CRUD (self-service profile)
+  - [x] Password hashing (bcrypt/argon2), register/login/logout endpoints
+  - [x] JWT issuance (access + refresh token) and auth middleware
+  - [x] User CRUD (self-service profile)
 - Done when: Auth integration tests pass; protected route returns 401 without valid/expired JWT.
 
 ## Phase 3: Worker daemon (`cmd/worker`)

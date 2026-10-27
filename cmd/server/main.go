@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/config"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 )
@@ -39,6 +40,10 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			"port_range_max": cfg.PortRangeMax,
 		})
 	})
+
+	authHandler := auth.NewHandler(db, cfg.JWTSecret)
+	authGroup := r.Group("/api/v1/auth")
+	authHandler.RegisterRoutes(authGroup)
 
 	return r
 }

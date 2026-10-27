@@ -12,6 +12,7 @@ type Config struct {
 	DatabaseDSN  string
 	PortRangeMin int
 	PortRangeMax int
+	JWTSecret    string
 }
 
 // LoadFromEnv loads environment configuration and validates critical constraints.
@@ -34,6 +35,7 @@ func LoadFromEnv() (*Config, error) {
 	dbPassword := getEnv("DB_PASSWORD", "postgrespassword")
 	dbName := getEnv("DB_NAME", "minecraft_hosting")
 	dbSSL := getEnv("DB_SSLMODE", "disable")
+	jwtSecret := getEnv("JWT_SECRET", "dev-platform-jwt-secret-key-change-in-prod")
 
 	dsn := fmt.Sprintf(
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
@@ -63,6 +65,7 @@ func LoadFromEnv() (*Config, error) {
 		DatabaseDSN:  dsn,
 		PortRangeMin: minPort,
 		PortRangeMax: maxPort,
+		JWTSecret:    jwtSecret,
 	}, nil
 }
 
