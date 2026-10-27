@@ -41,16 +41,16 @@ Decisions locked in:
   - [x] User CRUD (self-service profile)
 - Done when: Auth integration tests pass; protected route returns 401 without valid/expired JWT.
 
-## Phase 3: Worker daemon (`cmd/worker`)
+## Phase 3: Worker daemon (`cmd/worker`) [DONE]
 - Goal: A standalone daemon that manages Docker containers and loop-mounted volumes on one host, reachable only via authenticated HTTP API.
 - Tasks:
-  - [ ] HTTP server with API-key middleware: reject any request without a valid key matching this host's configured secret (constant-time compare)
-  - [ ] Docker SDK integration (not raw `exec`) scoped to the local Docker socket only
-  - [ ] Endpoints: `POST /containers` (create+start, given plan limits + port + mount path), `POST /containers/:id/stop`, `DELETE /containers/:id`, `GET /containers/:id/status`
-  - [ ] Volume provisioning endpoints: `POST /volumes` (fallocate sparse file sized to plan's disk_limit, `mkfs.ext4`, `mount -o loop`), `DELETE /volumes/:id` (unmount + remove image file)
-  - [ ] Volume export/import endpoints for backup/restore and migration: `GET /volumes/:id/export` (streams tar of mounted contents), `POST /volumes/:id/import` (stops write access, replaces contents from uploaded tar)
-  - [ ] Deployment doc/task: worker process or its container must run with `--cap-add=SYS_ADMIN` and access to `/dev/loop-control` + loop devices — document this as a hard requirement, not optional
-  - [ ] Local health/capacity endpoint: `GET /status` (active container count, free disk) for the scheduler to poll or for the host to self-report on registration/heartbeat
+  - [x] HTTP server with API-key middleware: reject any request without a valid key matching this host's configured secret (constant-time compare)
+  - [x] Docker SDK integration (not raw `exec`) scoped to the local Docker socket only
+  - [x] Endpoints: `POST /containers` (create+start, given plan limits + port + mount path), `POST /containers/:id/stop`, `DELETE /containers/:id`, `GET /containers/:id/status`
+  - [x] Volume provisioning endpoints: `POST /volumes` (fallocate sparse file sized to plan's disk_limit, `mkfs.ext4`, `mount -o loop`), `DELETE /volumes/:id` (unmount + remove image file)
+  - [x] Volume export/import endpoints for backup/restore and migration: `GET /volumes/:id/export` (streams tar of mounted contents), `POST /volumes/:id/import` (stops write access, replaces contents from uploaded tar)
+  - [x] Deployment doc/task: worker process or its container must run with `--cap-add=SYS_ADMIN` and access to `/dev/loop-control` + loop devices — document this as a hard requirement, not optional
+  - [x] Local health/capacity endpoint: `GET /status` (active container count, free disk) for the scheduler to poll or for the host to self-report on registration/heartbeat
 - Done when: Worker daemon running standalone can create a container with a loop-mounted, size-capped volume on its host, reachable only with a valid API key; export/import round-trips volume contents correctly.
 
 ## Phase 4: Hosting core (`internal/hosting`, Web API side)
