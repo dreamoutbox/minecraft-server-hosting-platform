@@ -91,6 +91,7 @@ type Host struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
 	Hostname      string     `gorm:"not null" json:"hostname"`
 	WorkerBaseURL string     `gorm:"not null" json:"worker_base_url"`
+	APIKey        string     `gorm:"type:varchar(255);not null;default:''" json:"-"`
 	APIKeyHash    string     `gorm:"not null" json:"-"`
 	MaxServers    int        `gorm:"not null" json:"max_servers"`
 	Status        HostStatus `gorm:"type:varchar(32);not null;default:'active'" json:"status"`

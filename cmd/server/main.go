@@ -10,6 +10,7 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/config"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
 )
 
 // SetupRouter initializes HTTP routes and middleware for the orchestrator API.
@@ -44,6 +45,12 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authHandler := auth.NewHandler(db, cfg.JWTSecret)
 	authGroup := r.Group("/api/v1/auth")
 	authHandler.RegisterRoutes(authGroup)
+
+	scheduler := hosting.NewLeastLoadedScheduler(db)
+	portAllocator := hosting.NewPortAllocator(db, cfg.PortRangeMin, cfg.PortRangeMax)
+	hostingService := hosting.NewService(db, scheduler, portAllocator, nil)
+	hostingHandler := hosting.NewHandler(hostingService)
+	hostingHandler.RegisterRoutes(r, cfg.JWTSecret)
 
 	return r
 }

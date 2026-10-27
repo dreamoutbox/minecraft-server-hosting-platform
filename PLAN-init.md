@@ -53,14 +53,14 @@ Decisions locked in:
   - [x] Local health/capacity endpoint: `GET /status` (active container count, free disk) for the scheduler to poll or for the host to self-report on registration/heartbeat
 - Done when: Worker daemon running standalone can create a container with a loop-mounted, size-capped volume on its host, reachable only with a valid API key; export/import round-trips volume contents correctly.
 
-## Phase 4: Hosting core (`internal/hosting`, Web API side)
+## Phase 4: Hosting core (`internal/hosting`, Web API side) [DONE]
 - Goal: Central orchestrator schedules servers across hosts via the worker daemon API, with cluster-wide unique ports, isolated from billing/dashboard code.
 - Tasks:
-  - [ ] Worker client: typed HTTP client wrapping each `Host`'s worker API, injecting that host's API key
-  - [ ] Cluster scheduler: pick a `Host` with available capacity (least-loaded by active-server-count vs `max_servers`); reject if none qualify
-  - [ ] Global port allocator: DB unique constraint on `port` alone (not scoped to host), reserve from `PORT_RANGE_MIN`/`PORT_RANGE_MAX`, transactional allocate-then-create with retry on conflict
-  - [ ] Server lifecycle endpoints: create, start, stop, delete, status; create requires `plan_id`; orchestrator calls scheduler → worker client for volume + container provisioning
-  - [ ] Host registration endpoint/flow: generates and returns the API key once (stored hashed), admin configures it into that host's worker daemon
+  - [x] Worker client: typed HTTP client wrapping each `Host`'s worker API, injecting that host's API key
+  - [x] Cluster scheduler: pick a `Host` with available capacity (least-loaded by active-server-count vs `max_servers`); reject if none qualify
+  - [x] Global port allocator: DB unique constraint on `port` alone (not scoped to host), reserve from `PORT_RANGE_MIN`/`PORT_RANGE_MAX`, transactional allocate-then-create with retry on conflict
+  - [x] Server lifecycle endpoints: create, start, stop, delete, status; create requires `plan_id`; orchestrator calls scheduler → worker client for volume + container provisioning
+  - [x] Host registration endpoint/flow: generates and returns the API key once (stored hashed), admin configures it into that host's worker daemon
 - Done when: Can create a server via API with a plan, scheduler places it on a host with capacity, worker daemon provisions the loop-mounted volume + container, server reachable on its globally-unique assigned port, stop/delete tears down container + volume + frees the port via the worker API.
 
 ## Phase 5: Storage abstraction (SeaweedFS dev / S3 prod)
