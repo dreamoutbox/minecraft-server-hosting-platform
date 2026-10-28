@@ -144,63 +144,71 @@ func (s *Service) CreateServer(ctx context.Context, userID uint, name string, pl
 		return nil, fmt.Errorf("invalid plan ID %d: %w", planID, err)
 	}
 
-	host, err := s.scheduler.SelectHost(ctx)
+	candidates, err := s.scheduler.SelectCandidates(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("scheduling failed: %w", err)
 	}
 
-	var server domain.Server
-	allocatedPort, err := s.portAllocator.AllocateWithRetry(ctx, 5, func(port int) error {
-		server = domain.Server{
-			UserID: userID,
-			PlanID: plan.ID,
-			HostID: host.ID,
-			Name:   name,
-			Port:   port,
-			Status: domain.ServerStatusProvisioning,
+	var lastErr error
+	for _, host := range candidates {
+		var server domain.Server
+		allocatedPort, err := s.portAllocator.AllocateWithRetry(ctx, 5, func(port int) error {
+			server = domain.Server{
+				UserID: userID,
+				PlanID: plan.ID,
+				HostID: host.ID,
+				Name:   name,
+				Port:   port,
+				Status: domain.ServerStatusProvisioning,
+			}
+			return s.db.WithContext(ctx).Create(&server).Error
+		})
+		if err != nil {
+			lastErr = fmt.Errorf("failed allocating server port on host %d: %w", host.ID, err)
+			continue
 		}
-		return s.db.WithContext(ctx).Create(&server).Error
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed allocating server port: %w", err)
+
+		wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
+
+		// Step 1: Provision volume
+		volResp, err := wClient.CreateVolume(ctx, server.ID, plan.DiskLimitGB)
+		if err != nil {
+			s.cleanupFailedServer(ctx, &server, wClient)
+			lastErr = fmt.Errorf("worker on host %s (%s) failed creating volume: %w", host.Hostname, host.WorkerBaseURL, err)
+			continue
+		}
+
+		// Step 2: Create and start container
+		ctrReq := worker.CreateContainerRequest{
+			ServerID:    server.ID,
+			Port:        allocatedPort,
+			CPULimit:    plan.CPULimit,
+			MemLimitMB:  plan.MemLimitMB,
+			DiskLimitGB: plan.DiskLimitGB,
+			MountPath:   volResp.MountPath,
+		}
+
+		ctrResp, err := wClient.CreateContainer(ctx, ctrReq)
+		if err != nil {
+			_ = wClient.DeleteVolume(ctx, strconv.FormatUint(uint64(server.ID), 10))
+			s.cleanupFailedServer(ctx, &server, wClient)
+			lastErr = fmt.Errorf("worker on host %s (%s) failed creating container: %w", host.Hostname, host.WorkerBaseURL, err)
+			continue
+		}
+
+		// Step 3: Mark server active
+		server.Status = domain.ServerStatusRunning
+		server.ContainerID = ctrResp.ContainerID
+		server.MountPath = volResp.MountPath
+
+		if err := s.db.WithContext(ctx).Save(&server).Error; err != nil {
+			return nil, fmt.Errorf("failed updating server state: %w", err)
+		}
+
+		return &server, nil
 	}
 
-	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
-
-	// Step 1: Provision volume
-	volResp, err := wClient.CreateVolume(ctx, server.ID, plan.DiskLimitGB)
-	if err != nil {
-		s.cleanupFailedServer(ctx, &server, wClient)
-		return nil, fmt.Errorf("worker failed creating volume: %w", err)
-	}
-
-	// Step 2: Create and start container
-	ctrReq := worker.CreateContainerRequest{
-		ServerID:    server.ID,
-		Port:        allocatedPort,
-		CPULimit:    plan.CPULimit,
-		MemLimitMB:  plan.MemLimitMB,
-		DiskLimitGB: plan.DiskLimitGB,
-		MountPath:   volResp.MountPath,
-	}
-
-	ctrResp, err := wClient.CreateContainer(ctx, ctrReq)
-	if err != nil {
-		_ = wClient.DeleteVolume(ctx, strconv.FormatUint(uint64(server.ID), 10))
-		s.cleanupFailedServer(ctx, &server, wClient)
-		return nil, fmt.Errorf("worker failed creating container: %w", err)
-	}
-
-	// Step 3: Mark server active
-	server.Status = domain.ServerStatusRunning
-	server.ContainerID = ctrResp.ContainerID
-	server.MountPath = volResp.MountPath
-
-	if err := s.db.WithContext(ctx).Save(&server).Error; err != nil {
-		return nil, fmt.Errorf("failed updating server state: %w", err)
-	}
-
-	return &server, nil
+	return nil, fmt.Errorf("all candidate hosts failed deployment: %w", lastErr)
 }
 
 // cleanupFailedServer purges database state for failed provisioning to free ports.

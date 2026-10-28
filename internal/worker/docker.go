@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -65,6 +66,7 @@ func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateC
 		if pullErr != nil {
 			return nil, fmt.Errorf("failed pulling docker image %s: %w", img, pullErr)
 		}
+		_, _ = io.Copy(io.Discard, rc)
 		_ = rc.Close()
 	}
 

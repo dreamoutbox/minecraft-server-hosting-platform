@@ -76,7 +76,7 @@ func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *mockSus
 		PlanID:    plan.ID,
 		HostID:    host.ID,
 		Name:      "BilledServer",
-		Port:      25580 + int(time.Now().UnixNano()%10),
+		Port:      25540 + int(time.Now().UnixNano()%10),
 		Status:    domain.ServerStatusRunning,
 		MountPath: "/var/lib/mounts/billed",
 	}

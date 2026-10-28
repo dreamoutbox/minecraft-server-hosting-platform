@@ -207,8 +207,9 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	var plan domain.Plan
 	_ = dashSvc.db.First(&plan)
 
+	srvName := fmt.Sprintf("DashboardSurvival-%d", time.Now().UnixNano())
 	formSrv := url.Values{}
-	formSrv.Set("name", "DashboardSurvival")
+	formSrv.Set("name", srvName)
 	formSrv.Set("plan_id", fmt.Sprintf("%d", plan.ID))
 	wCreateSrv := httptest.NewRecorder()
 	reqCreateSrv, _ := http.NewRequest(http.MethodPost, "/dashboard/servers/new", strings.NewReader(formSrv.Encode()))
@@ -222,7 +223,7 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 
 	// Find the created server
 	var server domain.Server
-	if err := dashSvc.db.Where("name = ?", "DashboardSurvival").First(&server).Error; err != nil {
+	if err := dashSvc.db.Where("name = ?", srvName).First(&server).Error; err != nil {
 		t.Fatalf("failed finding created server: %v", err)
 	}
 
@@ -231,7 +232,7 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	reqDetail, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d", server.ID), nil)
 	reqDetail.AddCookie(authCookie)
 	r.ServeHTTP(wDetail, reqDetail)
-	if wDetail.Code != http.StatusOK || !strings.Contains(wDetail.Body.String(), "DashboardSurvival") {
+	if wDetail.Code != http.StatusOK || !strings.Contains(wDetail.Body.String(), srvName) {
 		t.Fatalf("server detail failed: %d", wDetail.Code)
 	}
 

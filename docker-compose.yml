@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: mc_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: minecraft_hosting
+      PGDATA: /var/lib/postgresql
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "minecraft_hosting"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: mc_seaweedfs
+    restart: unless-stopped
+    command: ["server", "-dir=/data", "-s3"]
+    ports:
+      - "8333:8333"
+      - "9333:9333"
+    volumes:
+      - seaweedfs_data:/data
+
+  server:
+    image: ${SERVER_IMAGE:-minecraft-hosting-server:latest}
+    container_name: mc_server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_started
+    environment:
+      PORT: "8080"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgrespassword
+      DB_NAME: minecraft_hosting
+      DB_SSLMODE: disable
+      PORT_RANGE_MIN: "25565"
+      PORT_RANGE_MAX: "25600"
+      JWT_SECRET: dev-platform-jwt-secret-key-change-in-prod
+      BILLING_PROVIDER: mock
+      STORAGE_TYPE: s3
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_REGION: us-east-1
+      S3_BUCKET: minecraft-backups
+      S3_USE_PATH_STYLE: "true"
+      DEFAULT_WORKER_URL: http://worker:9090
+      DEFAULT_WORKER_KEY: dev-worker-key
+      DEFAULT_WORKER_NAME: compose-worker
+    ports:
+      - "8080:8080"
+
+  worker:
+    image: ${WORKER_IMAGE:-minecraft-hosting-worker:latest}
+    container_name: mc_worker
+    restart: unless-stopped
+    environment:
+      WORKER_PORT: "9090"
+      WORKER_API_KEY: dev-worker-key
+      WORKER_BASE_DIR: /var/lib/mc-platform
+      WORKER_MAX_SERVERS: "20"
+      WORKER_LOOP_DEVICE_ENABLED: "false"
+    ports:
+      - "9090:9090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - worker_data:/var/lib/mc-platform
+
+volumes:
+  pgdata:
+  seaweedfs_data:
+  worker_data:

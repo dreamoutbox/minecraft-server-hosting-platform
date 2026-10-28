@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -173,13 +174,25 @@ func TestSchedulerLeastLoaded(t *testing.T) {
 	}
 
 	scheduler := NewLeastLoadedScheduler(db)
-	picked, err := scheduler.SelectHost(context.Background())
+	candidates, err := scheduler.SelectCandidates(context.Background())
 	if err != nil {
 		t.Fatalf("failed picking host: %v", err)
 	}
 
-	if picked.ID != h2.ID {
-		t.Errorf("expected host 2 (10%% loaded) to be picked, got host %d (%s)", picked.ID, picked.Hostname)
+	var h1Idx, h2Idx = -1, -1
+	for i, c := range candidates {
+		if c.ID == h1.ID {
+			h1Idx = i
+		}
+		if c.ID == h2.ID {
+			h2Idx = i
+		}
+	}
+	if h2Idx == -1 || h1Idx == -1 {
+		t.Fatalf("expected both h1 and h2 in candidates, got h1Idx=%d, h2Idx=%d", h1Idx, h2Idx)
+	}
+	if h2Idx >= h1Idx {
+		t.Errorf("expected h2 (10%% load) to be ranked higher than h1 (50%% load), got h2 at %d, h1 at %d", h2Idx, h1Idx)
 	}
 }
 
@@ -299,3 +312,90 @@ func TestServerLifecycleEndToEnd(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateServerFallbackOnUnreachableHost(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_DSN")
+	if dsn == "" {
+		dsn = "host=localhost user=postgres password=postgrespassword dbname=minecraft_hosting port=5432 sslmode=disable"
+	}
+	db, err := domain.InitDB(dsn)
+	if err != nil {
+		t.Skipf("skipping test: database unreachable: %v", err)
+		return
+	}
+	_ = domain.AutoMigrate(db)
+	_ = domain.SeedPlans(db)
+
+	// Disable pre-existing hosts
+	db.Model(&domain.Host{}).Where("1 = 1").Update("status", domain.HostStatusDisabled)
+
+	// Host 1: 0 servers, will fail (offline)
+	hOffline := domain.Host{
+		Hostname:      fmt.Sprintf("offline-node-%d", time.Now().UnixNano()),
+		WorkerBaseURL: "http://offline-node:9090",
+		APIKey:        "offline-key",
+		APIKeyHash:    "offline-hash",
+		MaxServers:    10,
+		Status:        domain.HostStatusActive,
+	}
+	if err := db.Create(&hOffline).Error; err != nil {
+		t.Fatalf("failed creating offline host: %v", err)
+	}
+
+	// Host 2: 0 servers, will succeed (healthy)
+	hHealthy := domain.Host{
+		Hostname:      fmt.Sprintf("healthy-node-%d", time.Now().UnixNano()),
+		WorkerBaseURL: "http://healthy-node:9090",
+		APIKey:        "healthy-key",
+		APIKeyHash:    "healthy-hash",
+		MaxServers:    10,
+		Status:        domain.HostStatusActive,
+	}
+	if err := db.Create(&hHealthy).Error; err != nil {
+		t.Fatalf("failed creating healthy host: %v", err)
+	}
+
+	healthyClient := newMockWorkerClient()
+
+	workerFactory := func(baseURL, apiKey string) worker.Client {
+		if baseURL == hOffline.WorkerBaseURL {
+			return &failingWorkerClient{}
+		}
+		return healthyClient
+	}
+
+	testPortMin := 25680
+	testPortMax := 25690
+	db.Where("port >= ? AND port <= ?", testPortMin, testPortMax).Delete(&domain.Server{})
+
+	scheduler := NewLeastLoadedScheduler(db)
+	portAllocator := NewPortAllocator(db, testPortMin, testPortMax)
+	service := NewService(db, scheduler, portAllocator, workerFactory)
+
+	var plan domain.Plan
+	_ = db.First(&plan)
+
+	srv, err := service.CreateServer(context.Background(), 1, "FallbackServer", plan.ID)
+	if err != nil {
+		t.Fatalf("expected CreateServer to fallback to healthy host, failed with: %v", err)
+	}
+
+	if srv.HostID != hHealthy.ID {
+		t.Errorf("expected server placed on healthy host %d, got %d", hHealthy.ID, srv.HostID)
+	}
+
+	// Clean up test server and hosts
+	db.Delete(srv)
+	db.Delete(&hOffline)
+	db.Delete(&hHealthy)
+}
+
+// failingWorkerClient simulates an unreachable worker daemon.
+type failingWorkerClient struct {
+	mockWorkerClient
+}
+
+func (f *failingWorkerClient) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*worker.CreateVolumeResponse, error) {
+	return nil, errors.New("dial tcp: connect: connection refused")
+}
+

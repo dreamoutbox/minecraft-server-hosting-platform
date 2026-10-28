@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"gorm.io/gorm"
 
@@ -20,11 +21,17 @@ var (
 // Scheduler defines placement strategies for assigning game servers to hosts.
 type Scheduler interface {
 	SelectHost(ctx context.Context) (*domain.Host, error)
+	SelectCandidates(ctx context.Context) ([]domain.Host, error)
 }
 
 // LeastLoadedScheduler selects the host with the lowest ratio of active servers to max capacity.
 type LeastLoadedScheduler struct {
 	db *gorm.DB
+}
+
+type hostCandidate struct {
+	host      domain.Host
+	loadRatio float64
 }
 
 // NewLeastLoadedScheduler initializes a cluster scheduler backed by the database.
@@ -38,17 +45,14 @@ func NewLeastLoadedScheduler(db *gorm.DB) *LeastLoadedScheduler {
 	return &LeastLoadedScheduler{db: db}
 }
 
-// SelectHost evaluates active hosts and returns the host with greatest proportional free capacity.
+// SelectCandidates evaluates active hosts and returns them ordered by lowest load ratio.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
-//   host, err := scheduler.SelectHost(ctx)
-//   if err != nil {
-//       return nil, err
-//   }
-func (s *LeastLoadedScheduler) SelectHost(ctx context.Context) (*domain.Host, error) {
+//   candidates, err := scheduler.SelectCandidates(ctx)
+func (s *LeastLoadedScheduler) SelectCandidates(ctx context.Context) ([]domain.Host, error) {
 	var hosts []domain.Host
 	if err := s.db.WithContext(ctx).Where("status = ?", domain.HostStatusActive).Find(&hosts).Error; err != nil {
 		return nil, fmt.Errorf("failed querying active hosts: %w", err)
@@ -58,9 +62,7 @@ func (s *LeastLoadedScheduler) SelectHost(ctx context.Context) (*domain.Host, er
 		return nil, ErrNoActiveHosts
 	}
 
-	var bestHost *domain.Host
-	bestLoadRatio := 1.1 // Ratios range from 0.0 to 1.0; 1.1 guarantees a lower eligible ratio wins
-
+	var candidates []hostCandidate
 	for i := range hosts {
 		h := &hosts[i]
 		if h.MaxServers <= 0 {
@@ -80,15 +82,41 @@ func (s *LeastLoadedScheduler) SelectHost(ctx context.Context) (*domain.Host, er
 		}
 
 		loadRatio := float64(count) / float64(h.MaxServers)
-		if bestHost == nil || loadRatio < bestLoadRatio {
-			bestHost = h
-			bestLoadRatio = loadRatio
-		}
+		candidates = append(candidates, hostCandidate{
+			host:      *h,
+			loadRatio: loadRatio,
+		})
 	}
 
-	if bestHost == nil {
+	if len(candidates) == 0 {
 		return nil, ErrNoCapacityAvailable
 	}
 
-	return bestHost, nil
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].loadRatio < candidates[j].loadRatio
+	})
+
+	result := make([]domain.Host, len(candidates))
+	for i, c := range candidates {
+		result[i] = c.host
+	}
+	return result, nil
+}
+
+// SelectHost evaluates active hosts and returns the host with greatest proportional free capacity.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//
+// Example usage:
+//   host, err := scheduler.SelectHost(ctx)
+//   if err != nil {
+//       return nil, err
+//   }
+func (s *LeastLoadedScheduler) SelectHost(ctx context.Context) (*domain.Host, error) {
+	candidates, err := s.SelectCandidates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &candidates[0], nil
 }

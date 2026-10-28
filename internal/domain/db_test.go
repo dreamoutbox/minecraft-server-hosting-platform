@@ -121,3 +121,36 @@ func TestServerPortUniqueConstraint(t *testing.T) {
 		t.Fatal("expected unique constraint error for duplicate port, got nil")
 	}
 }
+
+func TestSeedDefaultHost(t *testing.T) {
+	dsn := getTestDSN()
+	db, err := InitDB(dsn)
+	if err != nil {
+		t.Skipf("skipping postgres test (database unreachable: %v)", err)
+		return
+	}
+
+	testURL := "http://test-worker-node:9090"
+	if err := SeedDefaultHost(db, "test-worker", testURL, "test-key-123", 20); err != nil {
+		t.Fatalf("SeedDefaultHost failed: %v", err)
+	}
+
+	var host Host
+	if err := db.Where("worker_base_url = ?", testURL).First(&host).Error; err != nil {
+		t.Fatalf("failed finding seeded host: %v", err)
+	}
+	if host.Status != HostStatusActive {
+		t.Errorf("expected host active, got: %v", host.Status)
+	}
+
+	// Test idempotency
+	if err := SeedDefaultHost(db, "test-worker", testURL, "new-test-key", 20); err != nil {
+		t.Fatalf("SeedDefaultHost idempotent run failed: %v", err)
+	}
+	_ = db.Where("worker_base_url = ?", testURL).First(&host)
+	if host.APIKey != "new-test-key" {
+		t.Errorf("expected updated api key new-test-key, got: %s", host.APIKey)
+	}
+	// Clean up test host
+	db.Delete(&host)
+}

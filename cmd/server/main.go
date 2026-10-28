@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -17,6 +18,7 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/middleware"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/storage"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
 )
 
 // SetupRouter initializes HTTP routes and middleware for the orchestrator API.
@@ -54,9 +56,21 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authGroup.Use(middleware.RateLimitMiddleware(10, 20))
 	authHandler.RegisterRoutes(authGroup)
 
+	workerFactory := func(baseURL string, apiKey string) worker.Client {
+		// When running inside containers and a default worker URL is configured,
+		// map loopback addresses (127.0.0.1 / localhost) to the reachable compose worker service.
+		if cfg.DefaultWorkerURL != "" && (strings.Contains(baseURL, "127.0.0.1:9090") || strings.Contains(baseURL, "localhost:9090")) {
+			baseURL = cfg.DefaultWorkerURL
+			if apiKey == "" {
+				apiKey = cfg.DefaultWorkerKey
+			}
+		}
+		return worker.NewClient(baseURL, apiKey)
+	}
+
 	scheduler := hosting.NewLeastLoadedScheduler(db)
 	portAllocator := hosting.NewPortAllocator(db, cfg.PortRangeMin, cfg.PortRangeMax)
-	hostingService := hosting.NewService(db, scheduler, portAllocator, nil)
+	hostingService := hosting.NewService(db, scheduler, portAllocator, workerFactory)
 	hostingHandler := hosting.NewHandler(hostingService)
 	hostingHandler.RegisterRoutes(r, cfg.JWTSecret)
 
@@ -66,11 +80,11 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		storageProvider = storage.NewMemoryStorageProvider()
 	}
 
-	backupService := backup.NewService(db, storageProvider, nil)
+	backupService := backup.NewService(db, storageProvider, workerFactory)
 	backupHandler := backup.NewHandler(backupService)
 	backupHandler.RegisterRoutes(r, cfg.JWTSecret)
 
-	migrationService := hosting.NewMigrationService(hostingService, backupService, storageProvider, nil)
+	migrationService := hosting.NewMigrationService(hostingService, backupService, storageProvider, workerFactory)
 	hostingHandler.SetMigrationService(migrationService)
 
 	var paymentProvider billing.PaymentProvider
@@ -114,6 +128,10 @@ func main() {
 
 	if err := domain.SeedPlans(db); err != nil {
 		log.Fatalf("failed seeding plans: %v", err)
+	}
+
+	if err := domain.SeedDefaultHost(db, cfg.DefaultWorkerName, cfg.DefaultWorkerURL, cfg.DefaultWorkerKey, 20); err != nil {
+		log.Printf("[WARN] failed seeding default worker host: %v", err)
 	}
 
 	log.Printf("Server listening on port %s (Port Range: %d-%d)", cfg.ServerPort, cfg.PortRangeMin, cfg.PortRangeMax)

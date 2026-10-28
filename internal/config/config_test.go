@@ -30,6 +30,12 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 	if cfg.PortRangeMax != 25600 {
 		t.Errorf("expected default PortRangeMax 25600, got: %d", cfg.PortRangeMax)
 	}
+	if cfg.DefaultWorkerKey != "dev-worker-key" {
+		t.Errorf("expected default DefaultWorkerKey dev-worker-key, got: %s", cfg.DefaultWorkerKey)
+	}
+	if cfg.DefaultWorkerName != "compose-worker" {
+		t.Errorf("expected default DefaultWorkerName compose-worker, got: %s", cfg.DefaultWorkerName)
+	}
 }
 
 func TestLoadFromEnvInvalidRange(t *testing.T) {

@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -16,10 +18,11 @@ import (
 //   - dsn: PostgreSQL connection string formatted with host, user, dbname, etc.
 //
 // Example usage:
-//   db, err := domain.InitDB("host=localhost user=postgres dbname=minecraft_hosting sslmode=disable")
-//   if err != nil {
-//       log.Fatalf("failed to connect database: %v", err)
-//   }
+//
+//	db, err := domain.InitDB("host=localhost user=postgres dbname=minecraft_hosting sslmode=disable")
+//	if err != nil {
+//	    log.Fatalf("failed to connect database: %v", err)
+//	}
 func InitDB(dsn string) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
@@ -37,9 +40,10 @@ func InitDB(dsn string) (*gorm.DB, error) {
 //   - db: Active GORM database instance.
 //
 // Example usage:
-//   if err := domain.AutoMigrate(db); err != nil {
-//       log.Fatalf("database migration failed: %v", err)
-//   }
+//
+//	if err := domain.AutoMigrate(db); err != nil {
+//	    log.Fatalf("database migration failed: %v", err)
+//	}
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&User{},
@@ -59,9 +63,10 @@ func AutoMigrate(db *gorm.DB) error {
 //   - db: Active GORM database instance.
 //
 // Example usage:
-//   if err := domain.SeedPlans(db); err != nil {
-//       log.Fatalf("failed seeding plans: %v", err)
-//   }
+//
+//	if err := domain.SeedPlans(db); err != nil {
+//	    log.Fatalf("failed seeding plans: %v", err)
+//	}
 func SeedPlans(db *gorm.DB) error {
 	defaultPlans := []Plan{
 		{
@@ -103,3 +108,45 @@ func SeedPlans(db *gorm.DB) error {
 
 	return nil
 }
+
+// SeedDefaultHost ensures the primary worker node is registered and active in the cluster.
+//
+// Arguments:
+//   - db: Active GORM database handle.
+//   - hostname: Display hostname of the node.
+//   - workerBaseURL: HTTP root URL of the worker daemon.
+//   - apiKey: Worker authentication key.
+//   - maxServers: Capacity limit for the host.
+//
+// Example usage:
+//   err := domain.SeedDefaultHost(db, "compose-worker", "http://worker:9090", "dev-worker-key", 20)
+func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, apiKey string, maxServers int) error {
+	if workerBaseURL == "" {
+		return nil
+	}
+	hashBytes := sha256.Sum256([]byte(apiKey))
+	hashHex := hex.EncodeToString(hashBytes[:])
+
+	var host Host
+	err := db.Where("worker_base_url = ?", workerBaseURL).First(&host).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			host = Host{
+				Hostname:      hostname,
+				WorkerBaseURL: workerBaseURL,
+				APIKey:        apiKey,
+				APIKeyHash:    hashHex,
+				MaxServers:    maxServers,
+				Status:        HostStatusActive,
+			}
+			return db.Create(&host).Error
+		}
+		return err
+	}
+
+	host.Status = HostStatusActive
+	host.APIKey = apiKey
+	host.APIKeyHash = hashHex
+	return db.Save(&host).Error
+}
+
