@@ -112,7 +112,10 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service) {
 
 	jwtSecret := "dashboard-test-jwt-secret"
 	scheduler := hosting.NewLeastLoadedScheduler(db)
-	portAllocator := hosting.NewPortAllocator(db, 25585, 25600)
+	portMin := 25700
+	portMax := 25750
+	db.Where("port >= ? AND port <= ?", portMin, portMax).Delete(&domain.Server{})
+	portAllocator := hosting.NewPortAllocator(db, portMin, portMax)
 	hostingSvc := hosting.NewService(db, scheduler, portAllocator, workerFactory)
 
 	memStorage := storage.NewMemoryStorageProvider()
@@ -127,6 +130,7 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service) {
 	h2 := domain.Host{Hostname: "dash-node-2", WorkerBaseURL: "http://dash-node-2:9090", APIKey: "k2", APIKeyHash: "h2", MaxServers: 10, Status: domain.HostStatusActive}
 	_ = db.Where("hostname = ?", h1.Hostname).FirstOrCreate(&h1)
 	_ = db.Where("hostname = ?", h2.Hostname).FirstOrCreate(&h2)
+	db.Model(&domain.Host{}).Where("hostname IN (?)", []string{h1.Hostname, h2.Hostname}).Update("status", domain.HostStatusActive)
 
 	dashService := NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, memStorage, jwtSecret)
 
@@ -218,7 +222,7 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	r.ServeHTTP(wCreateSrv, reqCreateSrv)
 
 	if wCreateSrv.Code != http.StatusFound {
-		t.Fatalf("create server post failed: %d", wCreateSrv.Code)
+		t.Fatalf("create server post failed: %d, body: %s", wCreateSrv.Code, wCreateSrv.Body.String())
 	}
 
 	// Find the created server

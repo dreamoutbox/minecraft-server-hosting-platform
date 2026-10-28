@@ -33,10 +33,11 @@ type DockerContainerManager struct {
 //   - None (negotiates API version directly against local docker.sock).
 //
 // Example usage:
-//   cm, err := worker.NewDockerContainerManager()
-//   if err != nil {
-//       log.Fatalf("failed connecting to Docker: %v", err)
-//   }
+//
+//	cm, err := worker.NewDockerContainerManager()
+//	if err != nil {
+//	    log.Fatalf("failed connecting to Docker: %v", err)
+//	}
 func NewDockerContainerManager() (*DockerContainerManager, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -52,7 +53,8 @@ func NewDockerContainerManager() (*DockerContainerManager, error) {
 //   - req: Configuration specifying server ID, limits, port, and volume mount path.
 //
 // Example usage:
-//   resp, err := cm.CreateAndStart(ctx, req)
+//
+//	resp, err := cm.CreateAndStart(ctx, req)
 func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateContainerRequest) (*CreateContainerResponse, error) {
 	img := req.Image
 	if img == "" {
@@ -118,7 +120,13 @@ func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateC
 
 	resp, err := d.cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)
 	if err != nil {
-		return nil, fmt.Errorf("failed creating container: %w", err)
+		if strings.Contains(err.Error(), "Conflict") || strings.Contains(err.Error(), "already in use") {
+			_ = d.cli.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true})
+			resp, err = d.cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed creating container: %w", err)
+		}
 	}
 
 	if err := d.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
@@ -139,7 +147,8 @@ func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateC
 //   - containerID: ID or name of the Docker container.
 //
 // Example usage:
-//   err := cm.Stop(ctx, "abc123container")
+//
+//	err := cm.Stop(ctx, "abc123container")
 func (d *DockerContainerManager) Stop(ctx context.Context, containerID string) error {
 	stopTimeout := 15
 	stopOpts := container.StopOptions{Timeout: &stopTimeout}
@@ -156,7 +165,8 @@ func (d *DockerContainerManager) Stop(ctx context.Context, containerID string) e
 //   - containerID: Target Docker container ID.
 //
 // Example usage:
-//   err := cm.Delete(ctx, "abc123container")
+//
+//	err := cm.Delete(ctx, "abc123container")
 func (d *DockerContainerManager) Delete(ctx context.Context, containerID string) error {
 	removeOpts := container.RemoveOptions{
 		Force:         true,
@@ -175,7 +185,8 @@ func (d *DockerContainerManager) Delete(ctx context.Context, containerID string)
 //   - containerID: Target container ID.
 //
 // Example usage:
-//   status, err := cm.GetStatus(ctx, "abc123container")
+//
+//	status, err := cm.GetStatus(ctx, "abc123container")
 func (d *DockerContainerManager) GetStatus(ctx context.Context, containerID string) (*ContainerStatusResponse, error) {
 	inspect, err := d.cli.ContainerInspect(ctx, containerID)
 	if err != nil {
@@ -210,7 +221,8 @@ func (d *DockerContainerManager) GetStatus(ctx context.Context, containerID stri
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
-//   count, err := cm.CountActive(ctx)
+//
+//	count, err := cm.CountActive(ctx)
 func (d *DockerContainerManager) CountActive(ctx context.Context) (int, error) {
 	containers, err := d.cli.ContainerList(ctx, container.ListOptions{
 		All: false,
