@@ -150,7 +150,7 @@ func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateC
 	}, nil
 }
 
-// Stop sends a graceful stop signal to a container.
+// Stop sends a graceful stop signal to a container, succeeding if already absent.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
@@ -163,6 +163,9 @@ func (d *DockerContainerManager) Stop(ctx context.Context, containerID string) e
 	stopTimeout := 15
 	stopOpts := container.StopOptions{Timeout: &stopTimeout}
 	if err := d.cli.ContainerStop(ctx, containerID, stopOpts); err != nil {
+		if client.IsErrNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("failed stopping container %s: %w", containerID, err)
 	}
 	return nil

@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
 )
 
@@ -399,5 +400,40 @@ func TestIsMountPoint(t *testing.T) {
 	}
 	if mountedTemp {
 		t.Errorf("expected %s not to be a mountpoint", tempDir)
+	}
+}
+
+func TestDockerStopAndDeleteIgnoreNotFound(t *testing.T) {
+	statusCode := http.StatusNotFound
+	fakeDocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(statusCode)
+		_, _ = w.Write([]byte(`{"message":"No such container: missing-ctr"}`))
+	}))
+	defer fakeDocker.Close()
+
+	cli, err := client.NewClientWithOpts(
+		client.WithHost(fakeDocker.URL),
+		client.WithHTTPClient(fakeDocker.Client()),
+		client.WithVersion("1.45"),
+	)
+	if err != nil {
+		t.Fatalf("failed creating docker client: %v", err)
+	}
+	cm := &DockerContainerManager{cli: cli}
+
+	if err := cm.Stop(context.Background(), "missing-ctr"); err != nil {
+		t.Fatalf("expected Stop to ignore 404 NotFound, got: %v", err)
+	}
+	if err := cm.Delete(context.Background(), "missing-ctr"); err != nil {
+		t.Fatalf("expected Delete to ignore 404 NotFound, got: %v", err)
+	}
+
+	statusCode = http.StatusInternalServerError
+	if err := cm.Stop(context.Background(), "err-ctr"); err == nil {
+		t.Fatal("expected Stop to return error on 500 response")
+	}
+	if err := cm.Delete(context.Background(), "err-ctr"); err == nil {
+		t.Fatal("expected Delete to return error on 500 response")
 	}
 }

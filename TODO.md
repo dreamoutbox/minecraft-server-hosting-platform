@@ -4,6 +4,12 @@
 
 - [x] make sure user delete server. also delete ext4 image file. and make sure /var/lib/mc-platform/mounts/<server-id> is empty.
 
+- [x] can't stop mc server if worker stop and start. worker stop all mc server containers before worker stop -> worker start -> user request stop mc server from web -> stop command can't find container.
+web error:
+```
+worker stop container failed: stop container failed with code 500: {"error":"failed stopping container 891874f554ad122544ca5f412f6b2e2c176450f2da788cd8613c20f1c0aa81b4: Error response from daemon: No such container: 891874f554ad122544ca5f412f6b2e2c176450f2da788cd8613c20f1c0aa81b4"}
+```
+
 ---
 
 - [x] add script to reset db data.
@@ -28,7 +34,7 @@
 
 ---
 
-- [ ] File Manager is showing server files.
+- [ ] File Manager is not showing any files. should show list of files in /var/lib/mc-platform/mounts/<server-id>.
 
 ---
 

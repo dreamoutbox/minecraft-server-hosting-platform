@@ -362,6 +362,12 @@ func (s *Service) GetServer(ctx context.Context, userID uint, serverID uint) (*d
 	if server.ContainerID != "" {
 		wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
 		statusResp, _ = wClient.GetContainerStatus(ctx, server.ContainerID)
+		// Reconcile stale running status if the container was removed (e.g. worker restart).
+		if statusResp != nil && server.Status == domain.ServerStatusRunning &&
+			(statusResp.Status == worker.ContainerStatusStopped || statusResp.Status == worker.ContainerStatusUnknown) {
+			server.Status = domain.ServerStatusStopped
+			_ = s.db.WithContext(ctx).Model(server).Update("status", domain.ServerStatusStopped).Error
+		}
 	}
 
 	return server, statusResp, nil
