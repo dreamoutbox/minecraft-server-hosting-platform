@@ -24,8 +24,8 @@
                     <span class="badge bg-secondary">Stopped</span>
                     {{else if eq .Status "migrating"}}
                     <span class="badge bg-warning text-dark">Migrating</span>
-                    {{else if eq .Status "suspended"}}
-                    <span class="badge bg-danger">Suspended</span>
+                    {{else if or (eq .Status "suspended") (eq .Status "error")}}
+                    <span class="badge bg-danger">{{.Status}}</span>
                     {{else}}
                     <span class="badge bg-info text-dark">{{.Status}}</span>
                     {{end}}
@@ -33,12 +33,14 @@
                 <p class="card-text text-muted small mb-3">
                     <strong>Port:</strong> {{.Port}}<br>
                     <strong>Plan:</strong> {{.Plan.Name}} ({{.Plan.CPULimit}} CPU, {{.Plan.MemLimitMB}}MB RAM, {{.Plan.DiskLimitGB}}GB Disk)<br>
-                    <strong>Host:</strong> {{.Host.Hostname}}
+                    <strong>Host:</strong> {{.Host.Hostname}}<br>
+                    <strong>Software:</strong> {{.ServerType}} {{.ServerVersion}}
                 </p>
                 <div class="d-flex flex-wrap gap-2">
                     <a href="/dashboard/servers/{{.ID}}" class="btn btn-sm btn-outline-primary">Manage</a>
-                    <a href="/dashboard/servers/{{.ID}}/files" class="btn btn-sm btn-outline-secondary">Files</a>
+                    <a href="/dashboard/servers/{{.ID}}/files/open" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">Files</a>
                     <a href="/dashboard/servers/{{.ID}}/backups" class="btn btn-sm btn-outline-info">Backups</a>
+                    <a href="/dashboard/servers/{{.ID}}/settings" class="btn btn-sm btn-outline-dark">Settings</a>
                 </div>
             </div>
             <div class="card-footer bg-transparent border-0 d-flex justify-content-between align-items-center pt-0">

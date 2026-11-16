@@ -54,25 +54,29 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] remove rename input text. rename button should open popup to rename.
 
----
+- [ ] BUG: can't open .yaml, .env file
 
-- [ ] move World Backups panel to new page.
-
-- [ ] add settings page. 
-
-- [ ] move Danger Zone panel to settings.
-
-- [ ] create and reuse sub-navbar for server details. make navigation links visible based on user role.
-
-- [ ] move "Host Worker Status panel" & "Host Migration panel" to new page. only allow/visible to staff and admin.
-
-- [ ] user can choose vanilla/paper/fabric/forge server jar, and server version in server settings page.
+- [ ] determine if file is text file. and allow open to edit. disallow edit binary file or large file.
 
 ---
 
-- [ ] make create_server/delete_server/backup/restore become queue. don't make user wait when create server. queue also add retry ability.
+- [x] move World Backups panel to new page.
 
-- [ ] log server create/stop/delete/backup/restore with success or error in postgresql db.
+- [x] add settings page. 
+
+- [x] move Danger Zone panel to settings.
+
+- [x] create and reuse sub-navbar for server details. make navigation links visible based on user role.
+
+- [x] move "Host Worker Status panel" & "Host Migration panel" to new page. only allow/visible to staff and admin.
+
+- [x] user can choose vanilla/paper/fabric/forge server jar, and server version in server settings page.
+
+---
+
+- [x] make create_server/delete_server/backup/restore become queue. don't make user wait when create server. queue also add retry ability.
+
+- [x] log server create/stop/delete/backup/restore with success or error in postgresql db.
 
 ---
 
@@ -86,8 +90,12 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [ ] add debug script to list mount status of each /var/lib/mc-platform/mounts/<server-id>.
 
+---
+
 # BACKLOG
 
 - [ ] connect to cloudflare API for minecraft server custom subdomain.
 
 - [ ] add AI chat to manage server.
+
+- [ ] add ability for user to install mods/modpacks from modrinth/curseforge.

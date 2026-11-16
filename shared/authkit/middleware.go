@@ -151,3 +151,30 @@ func GetUserIDFromContext(c *gin.Context) (uint, error) {
 	}
 	return id, nil
 }
+
+// GetUserRoleFromContext retrieves the authenticated user role from Gin context.
+// Defaults to UserRoleUser when missing or unrecognized.
+//
+// Arguments:
+//   - c: Active Gin request context.
+//
+// Example usage:
+//
+//	role := authkit.GetUserRoleFromContext(c)
+func GetUserRoleFromContext(c *gin.Context) UserRole {
+	val, exists := c.Get(ContextRoleKey)
+	if !exists {
+		return UserRoleUser
+	}
+	switch r := val.(type) {
+	case UserRole:
+		if r != "" {
+			return r
+		}
+	case string:
+		if r != "" {
+			return UserRole(r)
+		}
+	}
+	return UserRoleUser
+}

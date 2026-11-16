@@ -55,6 +55,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&Subscription{},
 		&PaymentRecord{},
 		&BackupRecord{},
+		&ServerOperationLog{},
+		&ServerJob{},
 	)
 }
 

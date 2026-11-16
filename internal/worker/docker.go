@@ -99,12 +99,20 @@ func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateC
 		binds = append(binds, fmt.Sprintf("%s:/data:rw", req.MountPath))
 	}
 
+	envVars := []string{
+		"EULA=TRUE",
+		"ONLINE_MODE=FALSE",
+	}
+	if req.ServerType != "" {
+		envVars = append(envVars, "TYPE="+strings.ToUpper(req.ServerType))
+	}
+	if req.ServerVersion != "" {
+		envVars = append(envVars, "VERSION="+req.ServerVersion)
+	}
+
 	containerConfig := &container.Config{
 		Image: img,
-		Env: []string{
-			"EULA=TRUE",
-			"ONLINE_MODE=FALSE",
-		},
+		Env:   envVars,
 		ExposedPorts: nat.PortSet{
 			containerPort: struct{}{},
 		},

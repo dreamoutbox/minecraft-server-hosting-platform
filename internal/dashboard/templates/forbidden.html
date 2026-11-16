@@ -1,0 +1,10 @@
+{{define "title"}}Access Denied{{end}}
+{{define "content"}}
+<div class="card shadow-sm border-0 my-4">
+    <div class="card-body p-5 text-center">
+        <h3 class="fw-bold text-danger mb-2">403 - Access Denied</h3>
+        <p class="text-muted mb-4">{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}You do not have permission to view or perform this operation.{{end}}</p>
+        <a href="/dashboard" class="btn btn-primary">Back to Dashboard</a>
+    </div>
+</div>
+{{end}}

@@ -1,0 +1,48 @@
+{{define "title"}}Host &amp; Migration: {{.Server.Name}}{{end}}
+{{define "content"}}
+{{template "server_subnav" .}}
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body p-4">
+                <h5 class="fw-bold mb-3">Host Worker Status</h5>
+                <p class="text-muted small">
+                    <strong>Worker URL:</strong> {{.Server.Host.WorkerBaseURL}}<br>
+                    <strong>Container ID:</strong> <code>{{.Server.ContainerID}}</code><br>
+                    <strong>Mount Path:</strong> <code>{{.Server.MountPath}}</code>
+                </p>
+                {{if .LiveStatus}}
+                <div class="alert alert-info py-2 mb-0 small">
+                    Live Status: <strong>{{.LiveStatus.Status}}</strong>
+                </div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body p-4">
+                <h5 class="fw-bold mb-2">Host Migration</h5>
+                <p class="text-muted small">Transfer this server to another cluster host with blue/green verification while preserving port <code>{{.Server.Port}}</code>.</p>
+                <form method="POST" action="/dashboard/servers/{{.Server.ID}}/migrate"
+                    onsubmit="return confirm('Begin live host migration?');">
+                    <div class="mb-3">
+                        <label for="destination_host_id" class="form-label small fw-semibold">Destination Host</label>
+                        <select class="form-select form-select-sm" id="destination_host_id" name="destination_host_id">
+                            <option value="0">(Recommended) Let cluster scheduler choose</option>
+                            {{range .AvailableHosts}}
+                            {{if ne .ID $.Server.HostID}}
+                            <option value="{{.ID}}">{{.Hostname}} (Max: {{.MaxServers}})</option>
+                            {{end}}
+                            {{end}}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-outline-warning w-100">Initiate Migration</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

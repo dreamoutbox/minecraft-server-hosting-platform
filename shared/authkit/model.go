@@ -9,8 +9,21 @@ type UserRole string
 
 const (
 	UserRoleUser  UserRole = "user"
+	UserRoleStaff UserRole = "staff"
 	UserRoleAdmin UserRole = "admin"
 )
+
+// IsStaffOrAdmin reports whether the role grants staff-level or administrator privileges.
+//
+// Arguments:
+//   - None (method receiver is the UserRole value).
+//
+// Example usage:
+//
+//	if role.IsStaffOrAdmin() { ... }
+func (r UserRole) IsStaffOrAdmin() bool {
+	return r == UserRoleStaff || r == UserRoleAdmin
+}
 
 // User represents an authenticated account stored in a GORM-managed database.
 type User struct {

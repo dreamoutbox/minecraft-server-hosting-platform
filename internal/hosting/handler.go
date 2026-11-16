@@ -1,17 +1,27 @@
 package hosting
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
 	"github.com/dreamoutbox/authkit"
 	"github.com/gin-gonic/gin"
+
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 )
+
+// ServerJobQueue enqueues asynchronous server create and delete operations.
+type ServerJobQueue interface {
+	EnqueueCreateServer(ctx context.Context, userID uint, name string, planID uint, serverType domain.ServerType, serverVersion string) (*domain.Server, *domain.ServerJob, error)
+	EnqueueDeleteServer(ctx context.Context, userID uint, serverID uint) (*domain.ServerJob, error)
+}
 
 // Handler serves HTTP endpoints for server lifecycle and host management.
 type Handler struct {
 	service      *Service
 	migrationSvc *MigrationService
+	jobQueue     ServerJobQueue
 }
 
 // NewHandler instantiates a hosting HTTP controller.
@@ -30,6 +40,18 @@ func (h *Handler) SetMigrationService(m *MigrationService) {
 	h.migrationSvc = m
 }
 
+// SetJobQueue attaches an async queue used for create and delete operations.
+//
+// Arguments:
+//   - q: Implementation of ServerJobQueue.
+//
+// Example usage:
+//
+//	hostingHandler.SetJobQueue(jobSvc)
+func (h *Handler) SetJobQueue(q ServerJobQueue) {
+	h.jobQueue = q
+}
+
 // MigrateServerRequest specifies optional destination host parameter.
 type MigrateServerRequest struct {
 	DestinationHostID uint `json:"destination_host_id"`
@@ -44,8 +66,16 @@ type RegisterHostRequest struct {
 
 // CreateServerRequest holds payload fields for creating a new Minecraft server.
 type CreateServerRequest struct {
-	Name   string `json:"name" binding:"required,min=3,max=64"`
-	PlanID uint   `json:"plan_id" binding:"required"`
+	Name          string            `json:"name" binding:"required,min=3,max=64"`
+	PlanID        uint              `json:"plan_id" binding:"required"`
+	ServerType    domain.ServerType `json:"server_type,omitempty"`
+	ServerVersion string            `json:"server_version,omitempty"`
+}
+
+// UpdateServerSettingsRequest holds jar type and version updates for an existing server.
+type UpdateServerSettingsRequest struct {
+	ServerType    string `json:"server_type" binding:"required"`
+	ServerVersion string `json:"server_version" binding:"required"`
 }
 
 // RegisterHost enrolls a host node and yields its generated API key.
@@ -135,6 +165,20 @@ func (h *Handler) CreateServer(c *gin.Context) {
 	var req CreateServerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid server request: " + err.Error()})
+		return
+	}
+
+	if h.jobQueue != nil {
+		srv, job, err := h.jobQueue.EnqueueCreateServer(c.Request.Context(), userID, req.Name, req.PlanID, req.ServerType, req.ServerVersion)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{
+			"server":  srv,
+			"job":     job,
+			"message": "server creation queued",
+		})
 		return
 	}
 
@@ -280,6 +324,19 @@ func (h *Handler) DeleteServer(c *gin.Context) {
 		return
 	}
 
+	if h.jobQueue != nil {
+		job, err := h.jobQueue.EnqueueDeleteServer(c.Request.Context(), userID, serverID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{
+			"job":     job,
+			"message": "server deletion queued",
+		})
+		return
+	}
+
 	if err := h.service.DeleteServer(c.Request.Context(), userID, serverID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -288,7 +345,44 @@ func (h *Handler) DeleteServer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "server deleted successfully"})
 }
 
+// UpdateSettings updates jar distribution type and Minecraft version for a server.
+//
+// Arguments:
+//   - c: Active Gin request context with URL param 'id' and UpdateServerSettingsRequest JSON.
+//
+// Example usage:
+//
+//	PUT /api/v1/servers/:id/settings
+func (h *Handler) UpdateSettings(c *gin.Context) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	serverID, err := parseIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var req UpdateServerSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid settings request: " + err.Error()})
+		return
+	}
+
+	srv, err := h.service.UpdateServerSettings(c.Request.Context(), userID, serverID, req.ServerType, req.ServerVersion)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, srv)
+}
+
 // MigrateServer moves the server to a different host node preserving its assigned port.
+// Restricted to staff and admin roles.
 //
 // Arguments:
 //   - c: Active Gin request context with URL param 'id' and optional destination JSON.
@@ -307,6 +401,12 @@ func (h *Handler) MigrateServer(c *gin.Context) {
 		return
 	}
 
+	role := authkit.GetUserRoleFromContext(c)
+	if !role.IsStaffOrAdmin() {
+		c.JSON(http.StatusForbidden, gin.H{"error": "host migration requires staff or admin role"})
+		return
+	}
+
 	serverID, err := parseIDParam(c, "id")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -316,11 +416,12 @@ func (h *Handler) MigrateServer(c *gin.Context) {
 	var req MigrateServerRequest
 	_ = c.ShouldBindJSON(&req)
 
-	if err := h.migrationSvc.MigrateServer(c.Request.Context(), userID, serverID, req.DestinationHostID); err != nil {
+	if err := h.migrationSvc.MigrateServer(c.Request.Context(), 0, serverID, req.DestinationHostID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	_ = userID
 	c.JSON(http.StatusOK, gin.H{"message": "server migrated successfully"})
 }
 
@@ -362,6 +463,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 		servers.GET("/:id", h.GetServer)
 		servers.POST("/:id/start", h.StartServer)
 		servers.POST("/:id/stop", h.StopServer)
+		servers.PUT("/:id/settings", h.UpdateSettings)
 		servers.DELETE("/:id", h.DeleteServer)
 		servers.POST("/:id/migrate", h.MigrateServer)
 	}

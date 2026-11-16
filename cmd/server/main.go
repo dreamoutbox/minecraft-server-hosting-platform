@@ -4,7 +4,9 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/dreamoutbox/authkit"
 	fsclient "github.com/dreamoutbox/fileserver/client"
@@ -17,12 +19,13 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/jobs"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/middleware"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/storage"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
 )
 
-// SetupRouter initializes HTTP routes and middleware for the orchestrator API.
+// SetupRouter initializes HTTP routes and middleware for the orchestrator API and dashboard.
 //
 // Arguments:
 //   - db: Active database handle for data layer interactions.
@@ -33,6 +36,11 @@ import (
 //	router := SetupRouter(db, cfg)
 //	router.Run(":8080")
 func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
+	r, _ := buildRouter(db, cfg)
+	return r
+}
+
+func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 	r := gin.Default()
 	r.Use(middleware.RequestIDMiddleware())
 
@@ -95,6 +103,12 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	backupHandler := backup.NewHandler(backupService)
 	backupHandler.RegisterRoutes(r, cfg.JWTSecret)
 
+	jobService := jobs.NewService(db, hostingService, backupService)
+	hostingHandler.SetJobQueue(jobService)
+	backupHandler.SetJobQueue(jobService)
+	jobHandler := jobs.NewHandler(jobService)
+	jobHandler.RegisterRoutes(r, cfg.JWTSecret)
+
 	migrationService := hosting.NewMigrationService(hostingService, backupService, storageProvider, workerFactory)
 	hostingHandler.SetMigrationService(migrationService)
 
@@ -114,11 +128,12 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		backupService,
 		billingService,
 		migrationService,
+		jobService,
 		cfg.JWTSecret,
 	)
 	dashboardService.RegisterRoutes(r)
 
-	return r
+	return r, jobService
 }
 
 func main() {
@@ -144,8 +159,14 @@ func main() {
 		log.Printf("[WARN] failed seeding default worker host: %v", err)
 	}
 
+	r, jobService := buildRouter(db, cfg)
+
+	sigCtx, stopSig := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSig()
+	stopQueue := jobService.Start(sigCtx)
+	defer stopQueue()
+
 	log.Printf("Server listening on port %s (Port Range: %d-%d)", cfg.ServerPort, cfg.PortRangeMin, cfg.PortRangeMax)
-	r := SetupRouter(db, cfg)
 	if err := r.Run(":" + cfg.ServerPort); err != nil {
 		log.Fatalf("server exited with error: %v", err)
 	}

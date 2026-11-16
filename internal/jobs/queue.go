@@ -1,0 +1,514 @@
+package jobs
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"sync"
+	"time"
+
+	"gorm.io/gorm"
+
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
+)
+
+const (
+	// DefaultMaxAttempts defines how many times a queued job is tried before marking it failed.
+	DefaultMaxAttempts = 3
+	// DefaultPollInterval controls background polling frequency for delayed retries.
+	DefaultPollInterval = 1 * time.Second
+	// DefaultRetryBackoff sets the base delay multiplied by attempt count before automatic retry.
+	DefaultRetryBackoff = 5 * time.Second
+)
+
+// Service manages PostgreSQL-backed asynchronous jobs with automatic and manual retry support.
+type Service struct {
+	db           *gorm.DB
+	hostingSvc   *hosting.Service
+	backupSvc    *backup.Service
+	pollInterval time.Duration
+	retryBackoff time.Duration
+	wakeCh       chan struct{}
+}
+
+// NewService constructs a job queue processor bound to hosting and backup services.
+//
+// Arguments:
+//   - db: Active PostgreSQL database handle.
+//   - hostingSvc: Hosting service used for provisioning and deletion jobs.
+//   - backupSvc: Backup service used for backup and restore jobs.
+//
+// Example usage:
+//
+//	jobSvc := jobs.NewService(db, hostingSvc, backupSvc)
+func NewService(db *gorm.DB, hostingSvc *hosting.Service, backupSvc *backup.Service) *Service {
+	return &Service{
+		db:           db,
+		hostingSvc:   hostingSvc,
+		backupSvc:    backupSvc,
+		pollInterval: DefaultPollInterval,
+		retryBackoff: DefaultRetryBackoff,
+		wakeCh:       make(chan struct{}, 1),
+	}
+}
+
+// SetTimings overrides polling interval and retry backoff (primarily for deterministic tests).
+//
+// Arguments:
+//   - pollInterval: Ticker interval for checking delayed retries.
+//   - retryBackoff: Base wait duration between automatic retry attempts.
+//
+// Example usage:
+//
+//	jobSvc.SetTimings(50*time.Millisecond, 10*time.Millisecond)
+func (s *Service) SetTimings(pollInterval, retryBackoff time.Duration) {
+	if pollInterval > 0 {
+		s.pollInterval = pollInterval
+	}
+	if retryBackoff >= 0 {
+		s.retryBackoff = retryBackoff
+	}
+}
+
+// EnqueueCreateServer creates a pending server record and queues async provisioning so callers do not block.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Server owner ID.
+//   - name: Desired server display name.
+//   - planID: Hardware plan tier ID.
+//   - serverType: Minecraft server jar type (defaults to VANILLA).
+//   - serverVersion: Minecraft version tag (defaults to LATEST).
+//
+// Example usage:
+//
+//	srv, job, err := jobSvc.EnqueueCreateServer(ctx, user.ID, "MyWorld", plan.ID, domain.ServerTypeVanilla, "LATEST")
+func (s *Service) EnqueueCreateServer(ctx context.Context, userID uint, name string, planID uint, serverType domain.ServerType, serverVersion string) (*domain.Server, *domain.ServerJob, error) {
+	server, err := s.hostingSvc.PreparePendingServer(ctx, userID, name, planID, serverType, serverVersion)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	job, err := s.createJob(ctx, domain.ServerJob{
+		Type:        domain.JobTypeCreateServer,
+		Status:      domain.JobStatusPending,
+		UserID:      userID,
+		ServerID:    server.ID,
+		MaxAttempts: DefaultMaxAttempts,
+		NextRunAt:   time.Now(),
+	})
+	if err != nil {
+		_ = s.db.WithContext(ctx).Delete(server).Error
+		return nil, nil, err
+	}
+
+	return server, job, nil
+}
+
+// EnqueueDeleteServer queues asynchronous container/volume teardown and server deletion.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Account ID requesting deletion.
+//   - serverID: Target game server ID.
+//
+// Example usage:
+//
+//	job, err := jobSvc.EnqueueDeleteServer(ctx, user.ID, 42)
+func (s *Service) EnqueueDeleteServer(ctx context.Context, userID uint, serverID uint) (*domain.ServerJob, error) {
+	server, _, err := s.hostingSvc.GetServerForOwner(ctx, userID, serverID)
+	if err != nil {
+		return nil, err
+	}
+	if server.Status == domain.ServerStatusMigrating {
+		return nil, hosting.ErrServerMigrating
+	}
+
+	var existingCount int64
+	if err := s.db.WithContext(ctx).Model(&domain.ServerJob{}).
+		Where("server_id = ? AND type = ? AND status IN (?)", server.ID, domain.JobTypeDeleteServer, []domain.JobStatus{domain.JobStatusPending, domain.JobStatusRunning}).
+		Count(&existingCount).Error; err == nil && existingCount > 0 {
+		return nil, errors.New("server deletion is already queued")
+	}
+
+	return s.createJob(ctx, domain.ServerJob{
+		Type:        domain.JobTypeDeleteServer,
+		Status:      domain.JobStatusPending,
+		UserID:      userID,
+		ServerID:    server.ID,
+		MaxAttempts: DefaultMaxAttempts,
+		NextRunAt:   time.Now(),
+	})
+}
+
+// EnqueueBackup creates a pending BackupRecord and queues an asynchronous volume export/upload job.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Account ID requesting backup (0 allowed for internal callers).
+//   - serverID: Target game server ID.
+//
+// Example usage:
+//
+//	rec, job, err := jobSvc.EnqueueBackup(ctx, user.ID, 42)
+func (s *Service) EnqueueBackup(ctx context.Context, userID uint, serverID uint) (*domain.BackupRecord, *domain.ServerJob, error) {
+	server, _, err := s.hostingSvc.GetServerForOwner(ctx, userID, serverID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if server.Status == domain.ServerStatusPending || server.Status == domain.ServerStatusProvisioning {
+		return nil, nil, errors.New("cannot backup a server while it is still provisioning")
+	}
+	if server.Status == domain.ServerStatusMigrating {
+		return nil, nil, hosting.ErrServerMigrating
+	}
+
+	record, err := s.backupSvc.CreatePendingBackup(ctx, server.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	backupID := record.ID
+	actorID := userID
+	if actorID == 0 {
+		actorID = server.UserID
+	}
+
+	job, err := s.createJob(ctx, domain.ServerJob{
+		Type:        domain.JobTypeBackup,
+		Status:      domain.JobStatusPending,
+		UserID:      actorID,
+		ServerID:    server.ID,
+		BackupID:    &backupID,
+		MaxAttempts: DefaultMaxAttempts,
+		NextRunAt:   time.Now(),
+	})
+	if err != nil {
+		_ = s.db.WithContext(ctx).Delete(record).Error
+		return nil, nil, err
+	}
+
+	return record, job, nil
+}
+
+// EnqueueRestore validates the target backup snapshot and queues an asynchronous restore job.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Account ID requesting restore (0 allowed for internal callers).
+//   - serverID: Target game server ID.
+//   - backupID: BackupRecord primary key to restore.
+//
+// Example usage:
+//
+//	job, err := jobSvc.EnqueueRestore(ctx, user.ID, 42, 105)
+func (s *Service) EnqueueRestore(ctx context.Context, userID uint, serverID uint, backupID uint) (*domain.ServerJob, error) {
+	server, _, err := s.hostingSvc.GetServerForOwner(ctx, userID, serverID)
+	if err != nil {
+		return nil, err
+	}
+	if server.Status == domain.ServerStatusMigrating {
+		return nil, hosting.ErrServerMigrating
+	}
+	if err := s.backupSvc.ValidateRestoreTarget(ctx, server.ID, backupID); err != nil {
+		return nil, err
+	}
+
+	var rec domain.BackupRecord
+	if err := s.db.WithContext(ctx).First(&rec, backupID).Error; err != nil {
+		return nil, fmt.Errorf("backup record not found: %w", err)
+	}
+	if rec.Status != domain.BackupStatusCompleted {
+		return nil, errors.New("only completed backups can be restored")
+	}
+
+	actorID := userID
+	if actorID == 0 {
+		actorID = server.UserID
+	}
+	bid := backupID
+
+	return s.createJob(ctx, domain.ServerJob{
+		Type:        domain.JobTypeRestore,
+		Status:      domain.JobStatusPending,
+		UserID:      actorID,
+		ServerID:    server.ID,
+		BackupID:    &bid,
+		MaxAttempts: DefaultMaxAttempts,
+		NextRunAt:   time.Now(),
+	})
+}
+
+// RetryJob resets a failed job back to pending so the queue worker re-executes it immediately.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Authenticated caller user ID.
+//   - isStaffOrAdmin: Whether caller can retry jobs owned by other users.
+//   - jobID: Primary key of the failed ServerJob.
+//
+// Example usage:
+//
+//	job, err := jobSvc.RetryJob(ctx, user.ID, false, 12)
+func (s *Service) RetryJob(ctx context.Context, userID uint, isStaffOrAdmin bool, jobID uint) (*domain.ServerJob, error) {
+	var job domain.ServerJob
+	if err := s.db.WithContext(ctx).First(&job, jobID).Error; err != nil {
+		return nil, fmt.Errorf("job not found: %w", err)
+	}
+	if !isStaffOrAdmin && job.UserID != userID {
+		return nil, errors.New("unauthorized access to job")
+	}
+	if job.Status != domain.JobStatusFailed {
+		return nil, errors.New("only failed jobs can be retried")
+	}
+
+	now := time.Now()
+	if err := s.db.WithContext(ctx).Model(&job).Updates(map[string]interface{}{
+		"status":      domain.JobStatusPending,
+		"attempts":    0,
+		"last_error":  "",
+		"next_run_at": now,
+		"started_at":  nil,
+		"finished_at": nil,
+	}).Error; err != nil {
+		return nil, fmt.Errorf("failed resetting job state: %w", err)
+	}
+
+	if job.Type == domain.JobTypeCreateServer {
+		_ = s.db.WithContext(ctx).Model(&domain.Server{}).
+			Where("id = ? AND status = ?", job.ServerID, domain.ServerStatusError).
+			Update("status", domain.ServerStatusPending).Error
+	}
+	if job.Type == domain.JobTypeBackup && job.BackupID != nil {
+		_ = s.db.WithContext(ctx).Model(&domain.BackupRecord{}).
+			Where("id = ?", *job.BackupID).
+			Update("status", domain.BackupStatusPending).Error
+	}
+
+	if err := s.db.WithContext(ctx).First(&job, jobID).Error; err != nil {
+		return nil, err
+	}
+	s.notifyWorker()
+	return &job, nil
+}
+
+// GetJob retrieves a job record after checking caller permissions.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Authenticated caller user ID.
+//   - isStaffOrAdmin: Whether caller may inspect any user's job.
+//   - jobID: Job primary key.
+//
+// Example usage:
+//
+//	job, err := jobSvc.GetJob(ctx, user.ID, false, 12)
+func (s *Service) GetJob(ctx context.Context, userID uint, isStaffOrAdmin bool, jobID uint) (*domain.ServerJob, error) {
+	var job domain.ServerJob
+	if err := s.db.WithContext(ctx).First(&job, jobID).Error; err != nil {
+		return nil, fmt.Errorf("job not found: %w", err)
+	}
+	if !isStaffOrAdmin && job.UserID != userID {
+		return nil, errors.New("unauthorized access to job")
+	}
+	return &job, nil
+}
+
+// ListServerJobs returns recent queued and completed jobs targeting a given server.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - serverID: Target game server ID.
+//   - limit: Maximum number of records to return (defaults to 20).
+//
+// Example usage:
+//
+//	jobsList, err := jobSvc.ListServerJobs(ctx, 42, 20)
+func (s *Service) ListServerJobs(ctx context.Context, serverID uint, limit int) ([]domain.ServerJob, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var list []domain.ServerJob
+	err := s.db.WithContext(ctx).
+		Where("server_id = ?", serverID).
+		Order("created_at desc, id desc").
+		Limit(limit).
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// ProcessNext claims and runs the next due pending job from PostgreSQL.
+// Returns (true, nil) if a job was claimed and processed, or (false, nil) if none were ready.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//
+// Example usage:
+//
+//	processed, err := jobSvc.ProcessNext(ctx)
+func (s *Service) ProcessNext(ctx context.Context) (bool, error) {
+	var candidate domain.ServerJob
+	now := time.Now()
+	err := s.db.WithContext(ctx).
+		Where("status = ? AND next_run_at <= ?", domain.JobStatusPending, now).
+		Order("next_run_at asc, id asc").
+		First(&candidate).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	claimRes := s.db.WithContext(ctx).Model(&domain.ServerJob{}).
+		Where("id = ? AND status = ?", candidate.ID, domain.JobStatusPending).
+		Updates(map[string]interface{}{
+			"status":     domain.JobStatusRunning,
+			"attempts":   gorm.Expr("attempts + 1"),
+			"started_at": now,
+		})
+	if claimRes.Error != nil {
+		return false, claimRes.Error
+	}
+	if claimRes.RowsAffected == 0 {
+		return false, nil
+	}
+
+	if err := s.db.WithContext(ctx).First(&candidate, candidate.ID).Error; err != nil {
+		return false, err
+	}
+
+	execErr := s.executeJob(ctx, &candidate)
+	if execErr != nil {
+		s.handleJobFailure(ctx, &candidate, execErr)
+		return true, execErr
+	}
+
+	finished := time.Now()
+	_ = s.db.WithContext(ctx).Model(&candidate).Updates(map[string]interface{}{
+		"status":      domain.JobStatusCompleted,
+		"last_error":  "",
+		"finished_at": &finished,
+	}).Error
+	return true, nil
+}
+
+// Start launches the background job worker loop and returns a stop function that waits for clean exit.
+//
+// Arguments:
+//   - ctx: Root context controlling worker shutdown.
+//
+// Example usage:
+//
+//	waitStop := jobSvc.Start(ctx)
+//	defer waitStop()
+func (s *Service) Start(ctx context.Context) func() {
+	runCtx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(s.pollInterval)
+		defer ticker.Stop()
+
+		for {
+			s.drainReadyJobs(runCtx)
+			select {
+			case <-runCtx.Done():
+				return
+			case <-s.wakeCh:
+			case <-ticker.C:
+			}
+		}
+	}()
+
+	return func() {
+		cancel()
+		wg.Wait()
+	}
+}
+
+func (s *Service) drainReadyJobs(ctx context.Context) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		processed, err := s.ProcessNext(ctx)
+		if err != nil {
+			log.Printf("[WARN] job queue processing error: %v", err)
+		}
+		if !processed {
+			return
+		}
+	}
+}
+
+func (s *Service) createJob(ctx context.Context, job domain.ServerJob) (*domain.ServerJob, error) {
+	if err := s.db.WithContext(ctx).Create(&job).Error; err != nil {
+		return nil, fmt.Errorf("failed persisting queued job: %w", err)
+	}
+	s.notifyWorker()
+	return &job, nil
+}
+
+func (s *Service) notifyWorker() {
+	select {
+	case s.wakeCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) executeJob(ctx context.Context, job *domain.ServerJob) error {
+	switch job.Type {
+	case domain.JobTypeCreateServer:
+		_, err := s.hostingSvc.ProvisionServer(ctx, job.ServerID)
+		return err
+	case domain.JobTypeDeleteServer:
+		return s.hostingSvc.DeleteServer(ctx, job.UserID, job.ServerID)
+	case domain.JobTypeBackup:
+		if job.BackupID == nil {
+			return errors.New("backup job missing backup_id")
+		}
+		_, err := s.backupSvc.ExecuteBackupRecord(ctx, job.UserID, job.ServerID, *job.BackupID)
+		return err
+	case domain.JobTypeRestore:
+		if job.BackupID == nil {
+			return errors.New("restore job missing backup_id")
+		}
+		return s.backupSvc.RestoreServer(ctx, job.ServerID, *job.BackupID)
+	default:
+		return fmt.Errorf("unsupported job type: %s", job.Type)
+	}
+}
+
+func (s *Service) handleJobFailure(ctx context.Context, job *domain.ServerJob, execErr error) {
+	now := time.Now()
+	if job.Attempts < job.MaxAttempts {
+		delay := s.retryBackoff * time.Duration(job.Attempts)
+		_ = s.db.WithContext(ctx).Model(job).Updates(map[string]interface{}{
+			"status":      domain.JobStatusPending,
+			"last_error":  execErr.Error(),
+			"next_run_at": now.Add(delay),
+		}).Error
+		return
+	}
+
+	_ = s.db.WithContext(ctx).Model(job).Updates(map[string]interface{}{
+		"status":      domain.JobStatusFailed,
+		"last_error":  execErr.Error(),
+		"finished_at": &now,
+	}).Error
+
+	if job.Type == domain.JobTypeCreateServer {
+		_ = s.db.WithContext(ctx).Model(&domain.Server{}).
+			Where("id = ?", job.ServerID).
+			Update("status", domain.ServerStatusError).Error
+	}
+}

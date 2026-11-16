@@ -1,16 +1,26 @@
 package backup
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
 	"github.com/dreamoutbox/authkit"
 	"github.com/gin-gonic/gin"
+
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 )
+
+// BackupJobQueue enqueues asynchronous server backup and restore jobs.
+type BackupJobQueue interface {
+	EnqueueBackup(ctx context.Context, userID uint, serverID uint) (*domain.BackupRecord, *domain.ServerJob, error)
+	EnqueueRestore(ctx context.Context, userID uint, serverID uint, backupID uint) (*domain.ServerJob, error)
+}
 
 // Handler serves HTTP endpoints for backup generation, listing, and restoration.
 type Handler struct {
-	service *Service
+	service  *Service
+	jobQueue BackupJobQueue
 }
 
 // NewHandler instantiates a backup HTTP controller.
@@ -24,6 +34,18 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// SetJobQueue attaches an async queue used for backup and restore requests.
+//
+// Arguments:
+//   - q: Implementation of BackupJobQueue.
+//
+// Example usage:
+//
+//	backupHandler.SetJobQueue(jobSvc)
+func (h *Handler) SetJobQueue(q BackupJobQueue) {
+	h.jobQueue = q
+}
+
 // CreateBackup triggers an on-demand snapshot of the server's world storage.
 //
 // Arguments:
@@ -35,6 +57,21 @@ func (h *Handler) CreateBackup(c *gin.Context) {
 	serverID, err := parseIDParam(c, "id")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid server id"})
+		return
+	}
+
+	if h.jobQueue != nil {
+		userID, _ := authkit.GetUserIDFromContext(c)
+		record, job, err := h.jobQueue.EnqueueBackup(c.Request.Context(), userID, serverID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{
+			"backup":  record,
+			"job":     job,
+			"message": "backup queued",
+		})
 		return
 	}
 
@@ -87,6 +124,20 @@ func (h *Handler) RestoreBackup(c *gin.Context) {
 	backupID, err := parseIDParam(c, "backup_id")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid backup id"})
+		return
+	}
+
+	if h.jobQueue != nil {
+		userID, _ := authkit.GetUserIDFromContext(c)
+		job, err := h.jobQueue.EnqueueRestore(c.Request.Context(), userID, serverID, backupID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{
+			"job":     job,
+			"message": "restore queued",
+		})
 		return
 	}
 

@@ -1,7 +1,10 @@
 package domain
 
 import (
+	"errors"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/dreamoutbox/authkit"
 )
@@ -62,7 +65,131 @@ type UserRole = authkit.UserRole
 
 const (
 	UserRoleUser  = authkit.UserRoleUser
+	UserRoleStaff = authkit.UserRoleStaff
 	UserRoleAdmin = authkit.UserRoleAdmin
+)
+
+// ServerType represents supported Minecraft server jar distributions.
+type ServerType string
+
+const (
+	ServerTypeVanilla ServerType = "VANILLA"
+	ServerTypePaper   ServerType = "PAPER"
+	ServerTypeFabric  ServerType = "FABRIC"
+	ServerTypeForge   ServerType = "FORGE"
+)
+
+// DefaultServerVersion selects the latest upstream release when no specific version is pinned.
+const DefaultServerVersion = "LATEST"
+
+var validServerTypes = map[ServerType]bool{
+	ServerTypeVanilla: true,
+	ServerTypePaper:   true,
+	ServerTypeFabric:  true,
+	ServerTypeForge:   true,
+}
+
+// AllServerTypes returns the supported Minecraft server jar options in display order.
+//
+// Arguments:
+//   - None.
+//
+// Example usage:
+//
+//	types := domain.AllServerTypes()
+func AllServerTypes() []ServerType {
+	return []ServerType{
+		ServerTypeVanilla,
+		ServerTypePaper,
+		ServerTypeFabric,
+		ServerTypeForge,
+	}
+}
+
+// ParseServerType normalizes and validates a Minecraft server jar distribution value.
+//
+// Arguments:
+//   - raw: Unvalidated distribution string (defaults to VANILLA when empty).
+//
+// Example usage:
+//
+//	st, err := domain.ParseServerType("paper")
+func ParseServerType(raw string) (ServerType, error) {
+	cleaned := strings.TrimSpace(raw)
+	if cleaned == "" {
+		return ServerTypeVanilla, nil
+	}
+	candidate := ServerType(strings.ToUpper(cleaned))
+	if !validServerTypes[candidate] {
+		return "", errors.New("unsupported server type; allowed: VANILLA, PAPER, FABRIC, FORGE")
+	}
+	return candidate, nil
+}
+
+// ValidateServerVersion normalizes and validates a Minecraft version string.
+//
+// Arguments:
+//   - raw: Unvalidated version string (defaults to LATEST when empty).
+//
+// Example usage:
+//
+//	ver, err := domain.ValidateServerVersion("1.21.4")
+func ValidateServerVersion(raw string) (string, error) {
+	cleaned := strings.TrimSpace(raw)
+	if cleaned == "" {
+		return DefaultServerVersion, nil
+	}
+	if strings.EqualFold(cleaned, DefaultServerVersion) {
+		return DefaultServerVersion, nil
+	}
+	if len(cleaned) > 32 {
+		return "", errors.New("server version must be 32 characters or fewer")
+	}
+	for _, r := range cleaned {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '.' && r != '-' && r != '_' {
+			return "", errors.New("server version may only contain letters, digits, '.', '-', or '_'")
+		}
+	}
+	return cleaned, nil
+}
+
+// ServerOperationType enumerates server actions recorded in server_operation_logs.
+type ServerOperationType string
+
+const (
+	ServerOpCreate  ServerOperationType = "create"
+	ServerOpStop    ServerOperationType = "stop"
+	ServerOpDelete  ServerOperationType = "delete"
+	ServerOpBackup  ServerOperationType = "backup"
+	ServerOpRestore ServerOperationType = "restore"
+)
+
+// ServerLogStatus represents the final outcome of an audited server operation.
+type ServerLogStatus string
+
+const (
+	ServerLogStatusSuccess ServerLogStatus = "success"
+	ServerLogStatusError   ServerLogStatus = "error"
+)
+
+// JobType identifies background queue tasks processed asynchronously by cmd/server.
+type JobType string
+
+const (
+	JobTypeCreateServer JobType = "create_server"
+	JobTypeDeleteServer JobType = "delete_server"
+	JobTypeBackup       JobType = "backup"
+	JobTypeRestore      JobType = "restore"
+)
+
+// JobStatus tracks execution state for queued jobs in PostgreSQL.
+type JobStatus string
+
+const (
+	JobStatusPending   JobStatus = "pending"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusCompleted JobStatus = "completed"
+	JobStatusFailed    JobStatus = "failed"
 )
 
 // User represents an authenticated account on the hosting platform.
@@ -102,12 +229,14 @@ type Server struct {
 	UserID      uint         `gorm:"index;not null" json:"user_id"`
 	PlanID      uint         `gorm:"not null" json:"plan_id"`
 	HostID      uint         `gorm:"index;not null" json:"host_id"`
-	Name        string       `gorm:"not null" json:"name"`
-	Status      ServerStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
-	Port        int          `gorm:"uniqueIndex;not null" json:"port"`
-	ContainerID string       `gorm:"type:varchar(128)" json:"container_id"`
-	MountPath   string       `gorm:"type:varchar(255)" json:"mount_path"`
-	CreatedAt   time.Time    `json:"created_at"`
+	Name          string       `gorm:"not null" json:"name"`
+	Status        ServerStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
+	Port          int          `gorm:"uniqueIndex;not null" json:"port"`
+	ContainerID   string       `gorm:"type:varchar(128)" json:"container_id"`
+	MountPath     string       `gorm:"type:varchar(255)" json:"mount_path"`
+	ServerType    ServerType   `gorm:"type:varchar(32);not null;default:'VANILLA'" json:"server_type"`
+	ServerVersion string       `gorm:"type:varchar(32);not null;default:'LATEST'" json:"server_version"`
+	CreatedAt     time.Time    `json:"created_at"`
 	UpdatedAt   time.Time    `json:"updated_at"`
 
 	Plan Plan `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
@@ -150,4 +279,33 @@ type BackupRecord struct {
 	Status     BackupStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
 	CreatedAt  time.Time    `json:"created_at"`
 	UpdatedAt  time.Time    `json:"updated_at"`
+}
+
+// ServerOperationLog persists audited create/stop/delete/backup/restore outcomes in PostgreSQL.
+type ServerOperationLog struct {
+	ID        uint                `gorm:"primaryKey" json:"id"`
+	ServerID  uint                `gorm:"index;not null" json:"server_id"`
+	UserID    uint                `gorm:"index;not null" json:"user_id"`
+	Operation ServerOperationType `gorm:"type:varchar(32);not null;index" json:"operation"`
+	Status    ServerLogStatus     `gorm:"type:varchar(16);not null;index" json:"status"`
+	Message   string              `gorm:"type:text;not null" json:"message"`
+	CreatedAt time.Time           `gorm:"index" json:"created_at"`
+}
+
+// ServerJob represents a queued asynchronous server lifecycle or backup task with retry support.
+type ServerJob struct {
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	Type        JobType    `gorm:"type:varchar(32);not null;index" json:"type"`
+	Status      JobStatus  `gorm:"type:varchar(32);not null;default:'pending';index" json:"status"`
+	UserID      uint       `gorm:"index;not null" json:"user_id"`
+	ServerID    uint       `gorm:"index;not null" json:"server_id"`
+	BackupID    *uint      `gorm:"index" json:"backup_id,omitempty"`
+	Attempts    int        `gorm:"not null;default:0" json:"attempts"`
+	MaxAttempts int        `gorm:"not null;default:3" json:"max_attempts"`
+	LastError   string     `gorm:"type:text" json:"last_error,omitempty"`
+	NextRunAt   time.Time  `gorm:"index;not null" json:"next_run_at"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }

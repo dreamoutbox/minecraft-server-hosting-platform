@@ -17,6 +17,7 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/jobs"
 )
 
 //go:embed templates/*
@@ -29,6 +30,7 @@ type Service struct {
 	backupSvc    *backup.Service
 	billingSvc   *billing.Service
 	migrationSvc *hosting.MigrationService
+	jobSvc       *jobs.Service
 	jwtSecret    string
 	tmpl         map[string]*template.Template
 }
@@ -41,16 +43,18 @@ type Service struct {
 //   - backupSvc: Backup and restore service.
 //   - billingSvc: Subscription and billing service.
 //   - migrationSvc: Host migration coordinator.
+//   - jobSvc: Async job queue coordinator.
 //   - jwtSecret: Secret key to verify and issue session tokens.
 //
 // Example usage:
-//   dash := dashboard.NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, "jwt-secret")
+//   dash := dashboard.NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, "jwt-secret")
 func NewService(
 	db *gorm.DB,
 	hostingSvc *hosting.Service,
 	backupSvc *backup.Service,
 	billingSvc *billing.Service,
 	migrationSvc *hosting.MigrationService,
+	jobSvc *jobs.Service,
 	jwtSecret string,
 ) *Service {
 	s := &Service{
@@ -59,6 +63,7 @@ func NewService(
 		backupSvc:    backupSvc,
 		billingSvc:   billingSvc,
 		migrationSvc: migrationSvc,
+		jobSvc:       jobSvc,
 		jwtSecret:    jwtSecret,
 		tmpl:         make(map[string]*template.Template),
 	}
@@ -83,17 +88,30 @@ func (s *Service) loadTemplates() {
 		"servers_list.html",
 		"server_create.html",
 		"server_detail.html",
+		"server_backups.html",
+		"server_settings.html",
+		"server_host.html",
 		"billing.html",
+		"forbidden.html",
 	}
 
 	for _, page := range pages {
-		tmpl := template.Must(template.New("layout").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/"+page))
+		tmpl := template.Must(template.New("layout").Funcs(funcMap).ParseFS(
+			templateFS,
+			"templates/layout.html",
+			"templates/server_subnav.html",
+			"templates/"+page,
+		))
 		s.tmpl[page] = tmpl
 	}
 }
 
-// renderView renders an HTML template page with flash message support.
+// renderView renders an HTML template page with HTTP 200 and flash message support.
 func (s *Service) renderView(c *gin.Context, page string, data map[string]interface{}) {
+	s.renderViewWithStatus(c, http.StatusOK, page, data)
+}
+
+func (s *Service) renderViewWithStatus(c *gin.Context, status int, page string, data map[string]interface{}) {
 	tmpl, exists := s.tmpl[page]
 	if !exists {
 		c.String(http.StatusInternalServerError, "template %s not found", page)
@@ -104,10 +122,13 @@ func (s *Service) renderView(c *gin.Context, page string, data map[string]interf
 		data = make(map[string]interface{})
 	}
 
-	// Attach user email and query flash messages if present
 	if userVal, exists := c.Get(authkit.ContextEmailKey); exists {
 		data["UserEmail"] = userVal
 	}
+	role := authkit.GetUserRoleFromContext(c)
+	data["UserRole"] = role
+	data["IsStaffOrAdmin"] = role.IsStaffOrAdmin()
+
 	if msg := c.Query("success"); msg != "" {
 		data["FlashSuccess"] = msg
 	}
@@ -115,6 +136,7 @@ func (s *Service) renderView(c *gin.Context, page string, data map[string]interf
 		data["FlashError"] = msg
 	}
 
+	c.Status(status)
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	_ = tmpl.ExecuteTemplate(c.Writer, "layout", data)
 }
@@ -223,44 +245,193 @@ func (s *Service) ShowCreateServer(c *gin.Context) {
 	})
 }
 
-// ProcessCreateServer provisions a new Minecraft game server via hosting service.
+// ProcessCreateServer queues a new Minecraft game server so the user does not wait for container provisioning.
 func (s *Service) ProcessCreateServer(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
 	name := strings.TrimSpace(c.PostForm("name"))
 	planIDVal, _ := strconv.ParseUint(c.PostForm("plan_id"), 10, 64)
 
-	server, err := s.hostingSvc.CreateServer(c.Request.Context(), userID, name, uint(planIDVal))
+	server, _, err := s.jobSvc.EnqueueCreateServer(
+		c.Request.Context(),
+		userID,
+		name,
+		uint(planIDVal),
+		domain.ServerTypeVanilla,
+		domain.DefaultServerVersion,
+	)
 	if err != nil {
 		var plans []domain.Plan
 		_ = s.db.Find(&plans)
 		s.renderView(c, "server_create.html", map[string]interface{}{
 			"Plans":      plans,
-			"FlashError": "Failed deploying server: " + err.Error(),
+			"FlashError": "Failed queueing server creation: " + err.Error(),
 		})
 		return
 	}
 
-	c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?success=Server+deployed+successfully!", server.ID))
+	c.Redirect(http.StatusFound, serverRedirectURL(server.ID, "", "success", "Server creation queued!"))
 }
 
-// ShowServerDetail renders server diagnostics, backups, and migration tools.
+// ShowServerDetail renders server overview, background jobs queue, and PostgreSQL operation logs.
 func (s *Service) ShowServerDetail(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
 
-	server, liveStatus, err := s.hostingSvc.GetServer(c.Request.Context(), userID, uint(serverIDVal))
+	server, liveStatus, err := s.hostingSvc.GetServer(c.Request.Context(), userID, serverIDVal)
+	if err != nil {
+		c.Redirect(http.StatusFound, "/dashboard?error=Server+not+found")
+		return
+	}
+
+	var jobList []domain.ServerJob
+	if s.jobSvc != nil {
+		jobList, _ = s.jobSvc.ListServerJobs(c.Request.Context(), server.ID, 15)
+	}
+	logs, _ := domain.ListServerLogs(c.Request.Context(), s.db, server.ID, 20)
+
+	s.renderView(c, "server_detail.html", map[string]interface{}{
+		"ActiveTab":  "overview",
+		"Server":     server,
+		"LiveStatus": liveStatus,
+		"Jobs":       jobList,
+		"Logs":       logs,
+	})
+}
+
+// ShowServerBackups renders the dedicated World Backups page for a server.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id'.
+//
+// Example usage:
+//
+//	GET /dashboard/servers/:id/backups
+func (s *Service) ShowServerBackups(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+
+	server, _, err := s.hostingSvc.GetServerForOwner(c.Request.Context(), userID, serverIDVal)
 	if err != nil {
 		c.Redirect(http.StatusFound, "/dashboard?error=Server+not+found")
 		return
 	}
 
 	backups, _ := s.backupSvc.ListBackups(c.Request.Context(), server.ID)
-	hosts, _ := s.hostingSvc.ListHosts(c.Request.Context())
+	var backupJobs []domain.ServerJob
+	if s.jobSvc != nil {
+		allJobs, _ := s.jobSvc.ListServerJobs(c.Request.Context(), server.ID, 20)
+		for _, j := range allJobs {
+			if j.Type == domain.JobTypeBackup || j.Type == domain.JobTypeRestore {
+				backupJobs = append(backupJobs, j)
+			}
+		}
+	}
 
-	s.renderView(c, "server_detail.html", map[string]interface{}{
+	s.renderView(c, "server_backups.html", map[string]interface{}{
+		"ActiveTab": "backups",
+		"Server":    server,
+		"Backups":   backups,
+		"Jobs":      backupJobs,
+	})
+}
+
+// ShowServerSettings renders the server settings page (server jar/version selector and Danger Zone).
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id'.
+//
+// Example usage:
+//
+//	GET /dashboard/servers/:id/settings
+func (s *Service) ShowServerSettings(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+
+	server, _, err := s.hostingSvc.GetServerForOwner(c.Request.Context(), userID, serverIDVal)
+	if err != nil {
+		c.Redirect(http.StatusFound, "/dashboard?error=Server+not+found")
+		return
+	}
+
+	s.renderView(c, "server_settings.html", map[string]interface{}{
+		"ActiveTab":   "settings",
+		"Server":      server,
+		"ServerTypes": domain.AllServerTypes(),
+	})
+}
+
+// UpdateServerSettings persists user-chosen server jar type and version from the settings page.
+//
+// Arguments:
+//   - c: Active Gin request context with form fields 'server_type' and 'server_version'.
+//
+// Example usage:
+//
+//	POST /dashboard/servers/:id/settings
+func (s *Service) UpdateServerSettings(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+
+	serverType := c.PostForm("server_type")
+	serverVersion := c.PostForm("server_version")
+
+	if _, err := s.hostingSvc.UpdateServerSettings(c.Request.Context(), userID, serverIDVal, serverType, serverVersion); err != nil {
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/settings", "error", err.Error()))
+		return
+	}
+
+	c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/settings", "success", "Settings saved! Start or restart the server to apply."))
+}
+
+// ShowServerHost renders Host Worker Status and Host Migration panels exclusively to staff and admin users.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id'.
+//
+// Example usage:
+//
+//	GET /dashboard/servers/:id/host
+func (s *Service) ShowServerHost(c *gin.Context) {
+	if !authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
+			"ErrorMessage": "Host worker status and migration are only available to staff and admin users.",
+		})
+		return
+	}
+
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+
+	server, liveStatus, err := s.hostingSvc.GetServer(c.Request.Context(), 0, serverIDVal)
+	if err != nil {
+		c.Redirect(http.StatusFound, "/dashboard?error=Server+not+found")
+		return
+	}
+
+	hosts, _ := s.hostingSvc.ListHosts(c.Request.Context())
+	s.renderView(c, "server_host.html", map[string]interface{}{
+		"ActiveTab":      "host",
 		"Server":         server,
 		"LiveStatus":     liveStatus,
-		"Backups":        backups,
 		"AvailableHosts": hosts,
 	})
 }
@@ -268,79 +439,155 @@ func (s *Service) ShowServerDetail(c *gin.Context) {
 // StartServer resumes a stopped server.
 func (s *Service) StartServer(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	serverIDVal, _ := parseIDParam(c, "id")
 
-	_, err := s.hostingSvc.StartServer(c.Request.Context(), userID, uint(serverIDVal))
+	_, err := s.hostingSvc.StartServer(c.Request.Context(), userID, serverIDVal)
 	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?error=%s", serverIDVal, err.Error()))
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "", "error", err.Error()))
 		return
 	}
-	c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?success=Server+started", serverIDVal))
+	c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "", "success", "Server started"))
 }
 
 // StopServer halts a running server container.
 func (s *Service) StopServer(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	serverIDVal, _ := parseIDParam(c, "id")
 
-	_, err := s.hostingSvc.StopServer(c.Request.Context(), userID, uint(serverIDVal))
+	_, err := s.hostingSvc.StopServer(c.Request.Context(), userID, serverIDVal)
 	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?error=%s", serverIDVal, err.Error()))
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "", "error", err.Error()))
 		return
 	}
-	c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?success=Server+stopped", serverIDVal))
+	c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "", "success", "Server stopped"))
 }
 
-// DeleteServer destroys a server instance.
+// DeleteServer enqueues asynchronous teardown and deletion of a server instance.
 func (s *Service) DeleteServer(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-
-	err := s.hostingSvc.DeleteServer(c.Request.Context(), userID, uint(serverIDVal))
-	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?error=%s", serverIDVal, err.Error()))
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
 		return
 	}
-	c.Redirect(http.StatusFound, "/dashboard?success=Server+deleted+successfully")
+
+	if _, err := s.jobSvc.EnqueueDeleteServer(c.Request.Context(), userID, serverIDVal); err != nil {
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/settings", "error", err.Error()))
+		return
+	}
+	c.Redirect(http.StatusFound, "/dashboard?success=Server+deletion+queued")
 }
 
-// TriggerBackup creates an on-demand snapshot for the server.
+// TriggerBackup queues an on-demand snapshot backup job for the server.
 func (s *Service) TriggerBackup(c *gin.Context) {
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-
-	_, err := s.backupSvc.BackupServer(c.Request.Context(), uint(serverIDVal))
-	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?error=%s", serverIDVal, err.Error()))
-		return
-	}
-	c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?success=Backup+created+successfully", serverIDVal))
-}
-
-// RestoreBackup reverts server storage to the chosen snapshot.
-func (s *Service) RestoreBackup(c *gin.Context) {
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	backupIDVal, _ := strconv.ParseUint(c.Param("backup_id"), 10, 64)
-
-	err := s.backupSvc.RestoreServer(c.Request.Context(), uint(serverIDVal), uint(backupIDVal))
-	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?error=%s", serverIDVal, err.Error()))
-		return
-	}
-	c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?success=Server+restored+from+backup", serverIDVal))
-}
-
-// TriggerMigration moves the server to a different host.
-func (s *Service) TriggerMigration(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+
+	if _, _, err := s.jobSvc.EnqueueBackup(c.Request.Context(), userID, serverIDVal); err != nil {
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/backups", "error", err.Error()))
+		return
+	}
+	c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/backups", "success", "Backup queued"))
+}
+
+// RestoreBackup queues a job reverting server storage to the chosen snapshot.
+func (s *Service) RestoreBackup(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+	backupIDVal, ok := parseIDParam(c, "backup_id")
+	if !ok {
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/backups", "error", "Invalid backup ID"))
+		return
+	}
+
+	if _, err := s.jobSvc.EnqueueRestore(c.Request.Context(), userID, serverIDVal, backupIDVal); err != nil {
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/backups", "error", err.Error()))
+		return
+	}
+	c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/backups", "success", "Restore queued"))
+}
+
+// RetryJob re-queues a failed background job from the dashboard UI.
+//
+// Arguments:
+//   - c: Active Gin request context with URL params 'id' and 'job_id'.
+//
+// Example usage:
+//
+//	POST /dashboard/servers/:id/jobs/:job_id/retry
+func (s *Service) RetryJob(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	role := authkit.GetUserRoleFromContext(c)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+	jobIDVal, ok := parseIDParam(c, "job_id")
+	if !ok {
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "", "error", "Invalid job ID"))
+		return
+	}
+
+	subpath := ""
+	if strings.HasPrefix(c.PostForm("return_to"), fmt.Sprintf("/dashboard/servers/%d/backups", serverIDVal)) {
+		subpath = "/backups"
+	}
+
+	if _, err := s.jobSvc.RetryJob(c.Request.Context(), userID, role.IsStaffOrAdmin(), jobIDVal); err != nil {
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, subpath, "error", err.Error()))
+		return
+	}
+
+	c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, subpath, "success", "Job re-queued"))
+}
+
+// TriggerMigration moves the server to a different host. Restricted to staff and admin roles.
+func (s *Service) TriggerMigration(c *gin.Context) {
+	if !authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
+			"ErrorMessage": "Host migration is restricted to staff and admin accounts.",
+		})
+		return
+	}
+
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
 	destHostID, _ := strconv.ParseUint(c.PostForm("destination_host_id"), 10, 64)
 
-	err := s.migrationSvc.MigrateServer(c.Request.Context(), userID, uint(serverIDVal), uint(destHostID))
+	err := s.migrationSvc.MigrateServer(c.Request.Context(), 0, serverIDVal, uint(destHostID))
 	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?error=%s", serverIDVal, err.Error()))
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/host", "error", err.Error()))
 		return
 	}
-	c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?success=Server+migrated+successfully", serverIDVal))
+	c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/host", "success", "Server migrated successfully"))
+}
+
+func parseIDParam(c *gin.Context, name string) (uint, bool) {
+	val, err := strconv.ParseUint(c.Param(name), 10, 64)
+	if err != nil || val == 0 {
+		return 0, false
+	}
+	return uint(val), true
+}
+
+func serverRedirectURL(serverID uint, subpath, flashKey, message string) string {
+	base := fmt.Sprintf("/dashboard/servers/%d%s", serverID, subpath)
+	if flashKey == "" || message == "" {
+		return base
+	}
+	return fmt.Sprintf("%s?%s=%s", base, flashKey, url.QueryEscape(message))
 }
 
 // OpenFileManager provisions fileserver access for the server and redirects to the node's file manager.
@@ -419,12 +666,17 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 		dash.GET("/servers/new", s.ShowCreateServer)
 		dash.POST("/servers/new", s.ProcessCreateServer)
 		dash.GET("/servers/:id", s.ShowServerDetail)
+		dash.GET("/servers/:id/backups", s.ShowServerBackups)
+		dash.GET("/servers/:id/settings", s.ShowServerSettings)
+		dash.POST("/servers/:id/settings", s.UpdateServerSettings)
+		dash.GET("/servers/:id/host", s.ShowServerHost)
 		dash.POST("/servers/:id/start", s.StartServer)
 		dash.POST("/servers/:id/stop", s.StopServer)
 		dash.POST("/servers/:id/delete", s.DeleteServer)
 
 		dash.POST("/servers/:id/backups/now", s.TriggerBackup)
 		dash.POST("/servers/:id/backups/:backup_id/restore", s.RestoreBackup)
+		dash.POST("/servers/:id/jobs/:job_id/retry", s.RetryJob)
 		dash.POST("/servers/:id/migrate", s.TriggerMigration)
 
 		dash.GET("/servers/:id/files/open", s.OpenFileManager)

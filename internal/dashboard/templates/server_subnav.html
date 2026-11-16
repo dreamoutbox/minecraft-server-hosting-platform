@@ -1,0 +1,29 @@
+{{define "server_subnav"}}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h3 class="fw-bold mb-0">{{.Server.Name}}</h3>
+        <span class="text-muted small">ID: {{.Server.ID}} &bull; Port {{.Server.Port}} &bull; Created: {{.Server.CreatedAt.Format "2006-01-02 15:04"}}</span>
+    </div>
+    <a href="/dashboard" class="btn btn-outline-secondary btn-sm">All Servers</a>
+</div>
+
+<ul class="nav nav-tabs mb-4">
+    <li class="nav-item">
+        <a class="nav-link {{if eq .ActiveTab "overview"}}active fw-semibold{{end}}" href="/dashboard/servers/{{.Server.ID}}">Overview</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{if eq .ActiveTab "backups"}}active fw-semibold{{end}}" href="/dashboard/servers/{{.Server.ID}}/backups">Backups</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{if eq .ActiveTab "settings"}}active fw-semibold{{end}}" href="/dashboard/servers/{{.Server.ID}}/settings">Settings</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="/dashboard/servers/{{.Server.ID}}/files/open" target="_blank" rel="noopener">Manage Files</a>
+    </li>
+    {{if .IsStaffOrAdmin}}
+    <li class="nav-item">
+        <a class="nav-link {{if eq .ActiveTab "host"}}active fw-semibold{{end}}" href="/dashboard/servers/{{.Server.ID}}/host">Host &amp; Migration</a>
+    </li>
+    {{end}}
+</ul>
+{{end}}

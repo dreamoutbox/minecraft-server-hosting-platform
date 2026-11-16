@@ -11,13 +11,15 @@ const (
 
 // CreateContainerRequest specifies container parameters sent to the worker daemon.
 type CreateContainerRequest struct {
-	ServerID    uint   `json:"server_id"`
-	Port        int    `json:"port"`
-	CPULimit    int    `json:"cpu_limit"`
-	MemLimitMB  int    `json:"mem_limit_mb"`
-	DiskLimitGB int    `json:"disk_limit_gb"`
-	MountPath   string `json:"mount_path"`
-	Image       string `json:"image"`
+	ServerID      uint   `json:"server_id"`
+	Port          int    `json:"port"`
+	CPULimit      int    `json:"cpu_limit"`
+	MemLimitMB    int    `json:"mem_limit_mb"`
+	DiskLimitGB   int    `json:"disk_limit_gb"`
+	MountPath     string `json:"mount_path"`
+	Image         string `json:"image"`
+	ServerType    string `json:"server_type,omitempty"`
+	ServerVersion string `json:"server_version,omitempty"`
 }
 
 // CreateContainerResponse provides provisioned container information.

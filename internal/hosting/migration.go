@@ -123,14 +123,7 @@ func (m *MigrationService) MigrateServer(ctx context.Context, userID uint, serve
 	}
 
 	// Step 6: Create container on destination preserving exact existing port
-	ctrReq := worker.CreateContainerRequest{
-		ServerID:    server.ID,
-		Port:        server.Port, // Port preservation constraint
-		CPULimit:    server.Plan.CPULimit,
-		MemLimitMB:  server.Plan.MemLimitMB,
-		DiskLimitGB: server.Plan.DiskLimitGB,
-		MountPath:   volResp.MountPath,
-	}
+	ctrReq := buildContainerRequest(server, &server.Plan, volResp.MountPath)
 
 	ctrResp, err := destWorker.CreateContainer(ctx, ctrReq)
 	if err != nil {

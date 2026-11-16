@@ -182,14 +182,16 @@ func (s *Service) CreateServer(ctx context.Context, userID uint, name string, pl
 	var lastErr error
 	for _, host := range candidates {
 		var server domain.Server
-		allocatedPort, err := s.portAllocator.AllocateWithRetry(ctx, 5, func(port int) error {
+		_, err := s.portAllocator.AllocateWithRetry(ctx, 5, func(port int) error {
 			server = domain.Server{
-				UserID: userID,
-				PlanID: plan.ID,
-				HostID: host.ID,
-				Name:   name,
-				Port:   port,
-				Status: domain.ServerStatusProvisioning,
+				UserID:        userID,
+				PlanID:        plan.ID,
+				HostID:        host.ID,
+				Name:          name,
+				Port:          port,
+				Status:        domain.ServerStatusProvisioning,
+				ServerType:    domain.ServerTypeVanilla,
+				ServerVersion: domain.DefaultServerVersion,
 			}
 			return s.db.WithContext(ctx).Create(&server).Error
 		})
@@ -203,23 +205,18 @@ func (s *Service) CreateServer(ctx context.Context, userID uint, name string, pl
 		// Step 1: Provision volume
 		volResp, err := wClient.CreateVolume(ctx, server.ID, plan.DiskLimitGB)
 		if err != nil {
+			domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpCreate, domain.ServerLogStatusError, err.Error())
 			s.cleanupFailedServer(ctx, &server, wClient)
 			lastErr = fmt.Errorf("worker on host %s (%s) failed creating volume: %w", host.Hostname, host.WorkerBaseURL, err)
 			continue
 		}
 
 		// Step 2: Create and start container
-		ctrReq := worker.CreateContainerRequest{
-			ServerID:    server.ID,
-			Port:        allocatedPort,
-			CPULimit:    plan.CPULimit,
-			MemLimitMB:  plan.MemLimitMB,
-			DiskLimitGB: plan.DiskLimitGB,
-			MountPath:   volResp.MountPath,
-		}
+		ctrReq := buildContainerRequest(&server, &plan, volResp.MountPath)
 
 		ctrResp, err := wClient.CreateContainer(ctx, ctrReq)
 		if err != nil {
+			domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpCreate, domain.ServerLogStatusError, err.Error())
 			_ = wClient.DeleteVolume(ctx, strconv.FormatUint(uint64(server.ID), 10))
 			s.cleanupFailedServer(ctx, &server, wClient)
 			lastErr = fmt.Errorf("worker on host %s (%s) failed creating container: %w", host.Hostname, host.WorkerBaseURL, err)
@@ -232,13 +229,131 @@ func (s *Service) CreateServer(ctx context.Context, userID uint, name string, pl
 		server.MountPath = volResp.MountPath
 
 		if err := s.db.WithContext(ctx).Save(&server).Error; err != nil {
+			domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpCreate, domain.ServerLogStatusError, err.Error())
 			return nil, fmt.Errorf("failed updating server state: %w", err)
 		}
 
+		domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpCreate, domain.ServerLogStatusSuccess, fmt.Sprintf("server %s created on host %s", server.Name, host.Hostname))
 		return &server, nil
 	}
 
+	domain.RecordServerLog(ctx, s.db, 0, userID, domain.ServerOpCreate, domain.ServerLogStatusError, fmt.Sprintf("create %q failed: %v", name, lastErr))
 	return nil, fmt.Errorf("all candidate hosts failed deployment: %w", lastErr)
+}
+
+// PreparePendingServer reserves a host and port and creates a pending server record for async provisioning.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Account ID of the server owner.
+//   - name: Descriptive name for the game server.
+//   - planID: Hardware plan tier ID.
+//   - serverType: Minecraft server jar type (defaults to VANILLA).
+//   - serverVersion: Minecraft version tag (defaults to LATEST).
+//
+// Example usage:
+//
+//	srv, err := svc.PreparePendingServer(ctx, user.ID, "MyWorld", plan.ID, domain.ServerTypePaper, "1.21.4")
+func (s *Service) PreparePendingServer(ctx context.Context, userID uint, name string, planID uint, serverType domain.ServerType, serverVersion string) (*domain.Server, error) {
+	cleanName := strings.TrimSpace(name)
+	if len(cleanName) < 3 || len(cleanName) > 64 {
+		return nil, errors.New("server name must be between 3 and 64 characters")
+	}
+
+	resolvedType, err := domain.ParseServerType(string(serverType))
+	if err != nil {
+		return nil, err
+	}
+	resolvedVersion, err := domain.ValidateServerVersion(serverVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	var plan domain.Plan
+	if err := s.db.WithContext(ctx).First(&plan, planID).Error; err != nil {
+		return nil, fmt.Errorf("invalid plan ID %d: %w", planID, err)
+	}
+
+	candidates, err := s.scheduler.SelectCandidates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scheduling failed: %w", err)
+	}
+
+	var server domain.Server
+	var allocErr error
+	for _, host := range candidates {
+		_, err := s.portAllocator.AllocateWithRetry(ctx, 5, func(port int) error {
+			server = domain.Server{
+				UserID:        userID,
+				PlanID:        plan.ID,
+				HostID:        host.ID,
+				Name:          cleanName,
+				Port:          port,
+				Status:        domain.ServerStatusPending,
+				ServerType:    resolvedType,
+				ServerVersion: resolvedVersion,
+			}
+			return s.db.WithContext(ctx).Create(&server).Error
+		})
+		if err == nil {
+			server.Plan = plan
+			server.Host = host
+			return &server, nil
+		}
+		allocErr = err
+	}
+
+	return nil, fmt.Errorf("failed reserving port on candidate hosts: %w", allocErr)
+}
+
+// ProvisionServer provisions disk volume and container on the server's assigned host for an existing pending/error server.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - serverID: Target game server ID.
+//
+// Example usage:
+//
+//	srv, err := svc.ProvisionServer(ctx, 42)
+func (s *Service) ProvisionServer(ctx context.Context, serverID uint) (*domain.Server, error) {
+	server, host, err := s.getServerAndHost(ctx, 0, serverID)
+	if err != nil {
+		domain.RecordServerLog(ctx, s.db, serverID, 0, domain.ServerOpCreate, domain.ServerLogStatusError, err.Error())
+		return nil, err
+	}
+
+	server.Status = domain.ServerStatusProvisioning
+	if err := s.db.WithContext(ctx).Model(server).Update("status", domain.ServerStatusProvisioning).Error; err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpCreate, domain.ServerLogStatusError, err.Error())
+		return nil, err
+	}
+
+	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
+
+	volResp, err := wClient.CreateVolume(ctx, server.ID, server.Plan.DiskLimitGB)
+	if err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpCreate, domain.ServerLogStatusError, err.Error())
+		return nil, fmt.Errorf("worker on host %s failed creating volume: %w", host.Hostname, err)
+	}
+
+	ctrReq := buildContainerRequest(server, &server.Plan, volResp.MountPath)
+	ctrResp, err := wClient.CreateContainer(ctx, ctrReq)
+	if err != nil {
+		_ = wClient.DeleteVolume(ctx, strconv.FormatUint(uint64(server.ID), 10))
+		domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpCreate, domain.ServerLogStatusError, err.Error())
+		return nil, fmt.Errorf("worker on host %s failed creating container: %w", host.Hostname, err)
+	}
+
+	server.Status = domain.ServerStatusRunning
+	server.ContainerID = ctrResp.ContainerID
+	server.MountPath = volResp.MountPath
+	if err := s.db.WithContext(ctx).Save(server).Error; err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpCreate, domain.ServerLogStatusError, err.Error())
+		return nil, fmt.Errorf("failed saving provisioned server state: %w", err)
+	}
+
+	domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpCreate, domain.ServerLogStatusSuccess, fmt.Sprintf("server %s provisioned on host %s", server.Name, host.Hostname))
+	return server, nil
 }
 
 // cleanupFailedServer purges database state for failed provisioning to free ports.
@@ -263,21 +378,25 @@ func (s *Service) StopServer(ctx context.Context, userID uint, serverID uint) (*
 	}
 
 	if server.Status == domain.ServerStatusMigrating {
+		domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpStop, domain.ServerLogStatusError, ErrServerMigrating.Error())
 		return nil, ErrServerMigrating
 	}
 
 	if server.ContainerID != "" {
 		wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
 		if err := wClient.StopContainer(ctx, server.ContainerID); err != nil {
+			domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpStop, domain.ServerLogStatusError, err.Error())
 			return nil, fmt.Errorf("worker stop container failed: %w", err)
 		}
 	}
 
 	server.Status = domain.ServerStatusStopped
 	if err := s.db.WithContext(ctx).Save(server).Error; err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpStop, domain.ServerLogStatusError, err.Error())
 		return nil, err
 	}
 
+	domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpStop, domain.ServerLogStatusSuccess, "server stopped")
 	return server, nil
 }
 
@@ -302,14 +421,7 @@ func (s *Service) StartServer(ctx context.Context, userID uint, serverID uint) (
 	}
 
 	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
-	ctrReq := worker.CreateContainerRequest{
-		ServerID:    server.ID,
-		Port:        server.Port,
-		CPULimit:    server.Plan.CPULimit,
-		MemLimitMB:  server.Plan.MemLimitMB,
-		DiskLimitGB: server.Plan.DiskLimitGB,
-		MountPath:   server.MountPath,
-	}
+	ctrReq := buildContainerRequest(server, &server.Plan, server.MountPath)
 
 	ctrResp, err := wClient.CreateContainer(ctx, ctrReq)
 	if err != nil {
@@ -338,10 +450,16 @@ func (s *Service) StartServer(ctx context.Context, userID uint, serverID uint) (
 func (s *Service) DeleteServer(ctx context.Context, userID uint, serverID uint) error {
 	server, host, err := s.getServerAndHost(ctx, userID, serverID)
 	if err != nil {
+		domain.RecordServerLog(ctx, s.db, serverID, userID, domain.ServerOpDelete, domain.ServerLogStatusError, err.Error())
 		return err
+	}
+	actorID := userID
+	if actorID == 0 {
+		actorID = server.UserID
 	}
 
 	if server.Status == domain.ServerStatusMigrating {
+		domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpDelete, domain.ServerLogStatusError, ErrServerMigrating.Error())
 		return ErrServerMigrating
 	}
 
@@ -352,11 +470,13 @@ func (s *Service) DeleteServer(ctx context.Context, userID uint, serverID uint) 
 		containerRef = fmt.Sprintf("mc-server-%d", server.ID)
 	}
 	if err := wClient.DeleteContainer(ctx, containerRef); err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpDelete, domain.ServerLogStatusError, err.Error())
 		return fmt.Errorf("worker delete container failed: %w", err)
 	}
 
 	volumeID := strconv.FormatUint(uint64(server.ID), 10)
 	if err := wClient.DeleteVolume(ctx, volumeID); err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpDelete, domain.ServerLogStatusError, err.Error())
 		return fmt.Errorf("worker delete volume failed: %w", err)
 	}
 
@@ -368,10 +488,77 @@ func (s *Service) DeleteServer(ctx context.Context, userID uint, serverID uint) 
 	}
 
 	if err := s.db.WithContext(ctx).Delete(server).Error; err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpDelete, domain.ServerLogStatusError, err.Error())
 		return fmt.Errorf("failed deleting server from database: %w", err)
 	}
 
+	domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpDelete, domain.ServerLogStatusSuccess, fmt.Sprintf("server %s deleted", server.Name))
 	return nil
+}
+
+// UpdateServerSettings validates and persists jar distribution type and version for a server.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Account ID requesting the change (0 bypasses ownership check for staff/admin).
+//   - serverID: Target game server ID.
+//   - serverType: Raw server jar type (VANILLA, PAPER, FABRIC, FORGE).
+//   - serverVersion: Raw Minecraft version string (e.g. LATEST or 1.21.4).
+//
+// Example usage:
+//
+//	srv, err := svc.UpdateServerSettings(ctx, user.ID, 42, "PAPER", "1.21.4")
+func (s *Service) UpdateServerSettings(ctx context.Context, userID uint, serverID uint, serverType string, serverVersion string) (*domain.Server, error) {
+	server, _, err := s.getServerAndHost(ctx, userID, serverID)
+	if err != nil {
+		return nil, err
+	}
+
+	parsedType, err := domain.ParseServerType(serverType)
+	if err != nil {
+		return nil, err
+	}
+	validVersion, err := domain.ValidateServerVersion(serverVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	server.ServerType = parsedType
+	server.ServerVersion = validVersion
+	if err := s.db.WithContext(ctx).Model(server).Updates(map[string]interface{}{
+		"server_type":    parsedType,
+		"server_version": validVersion,
+	}).Error; err != nil {
+		return nil, fmt.Errorf("failed saving server settings: %w", err)
+	}
+	return server, nil
+}
+
+// GetServerForOwner loads server and host after checking user ownership (userID == 0 bypasses ownership check).
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Requesting user ID, or 0 for privileged/internal callers.
+//   - serverID: Target game server ID.
+//
+// Example usage:
+//
+//	srv, host, err := svc.GetServerForOwner(ctx, user.ID, 42)
+func (s *Service) GetServerForOwner(ctx context.Context, userID uint, serverID uint) (*domain.Server, *domain.Host, error) {
+	return s.getServerAndHost(ctx, userID, serverID)
+}
+
+func buildContainerRequest(server *domain.Server, plan *domain.Plan, mountPath string) worker.CreateContainerRequest {
+	return worker.CreateContainerRequest{
+		ServerID:      server.ID,
+		Port:          server.Port,
+		CPULimit:      plan.CPULimit,
+		MemLimitMB:    plan.MemLimitMB,
+		DiskLimitGB:   plan.DiskLimitGB,
+		MountPath:     mountPath,
+		ServerType:    string(server.ServerType),
+		ServerVersion: server.ServerVersion,
+	}
 }
 
 // OpenFileManagerURL provisions the user and directory permission on the target node's

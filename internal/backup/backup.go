@@ -61,51 +61,136 @@ func NewService(db *gorm.DB, storage storage.StorageProvider, factory WorkerClie
 //   - serverID: Primary key of the target game server.
 //
 // Example usage:
-//   rec, err := svc.BackupServer(ctx, 42)
+//
+//	rec, err := svc.BackupServer(ctx, 42)
 func (s *Service) BackupServer(ctx context.Context, serverID uint) (*domain.BackupRecord, error) {
+	record, err := s.CreatePendingBackup(ctx, serverID)
+	if err != nil {
+		domain.RecordServerLog(ctx, s.db, serverID, 0, domain.ServerOpBackup, domain.ServerLogStatusError, err.Error())
+		return nil, err
+	}
+	return s.ExecuteBackupRecord(ctx, 0, serverID, record.ID)
+}
+
+// CreatePendingBackup inserts a pending BackupRecord before async queue execution.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - serverID: Target game server ID.
+//
+// Example usage:
+//
+//	rec, err := svc.CreatePendingBackup(ctx, 42)
+func (s *Service) CreatePendingBackup(ctx context.Context, serverID uint) (*domain.BackupRecord, error) {
+	var server domain.Server
+	if err := s.db.WithContext(ctx).First(&server, serverID).Error; err != nil {
+		return nil, fmt.Errorf("failed fetching server %d: %w", serverID, err)
+	}
+
+	storageKey := fmt.Sprintf("backups/server-%d/%d.tar", server.ID, time.Now().UnixNano())
+	record := domain.BackupRecord{
+		ServerID:   server.ID,
+		StorageKey: storageKey,
+		SizeBytes:  0,
+		Status:     domain.BackupStatusPending,
+	}
+	if err := s.db.WithContext(ctx).Create(&record).Error; err != nil {
+		return nil, fmt.Errorf("failed creating pending backup record: %w", err)
+	}
+	return &record, nil
+}
+
+// ExecuteBackupRecord exports the volume for serverID, uploads it to storage, and updates record status.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Initiating user ID (defaults to server owner if 0).
+//   - serverID: Target game server ID.
+//   - backupRecordID: Pending or failed BackupRecord primary key.
+//
+// Example usage:
+//
+//	rec, err := svc.ExecuteBackupRecord(ctx, user.ID, 42, rec.ID)
+func (s *Service) ExecuteBackupRecord(ctx context.Context, userID uint, serverID uint, backupRecordID uint) (*domain.BackupRecord, error) {
 	var server domain.Server
 	err := s.db.WithContext(ctx).
 		Preload("Host").
 		Preload("Plan").
 		First(&server, serverID).Error
 	if err != nil {
+		domain.RecordServerLog(ctx, s.db, serverID, userID, domain.ServerOpBackup, domain.ServerLogStatusError, err.Error())
 		return nil, fmt.Errorf("failed fetching server %d: %w", serverID, err)
+	}
+	actorID := userID
+	if actorID == 0 {
+		actorID = server.UserID
+	}
+
+	var record domain.BackupRecord
+	if err := s.db.WithContext(ctx).First(&record, backupRecordID).Error; err != nil {
+		domain.RecordServerLog(ctx, s.db, serverID, actorID, domain.ServerOpBackup, domain.ServerLogStatusError, err.Error())
+		return nil, fmt.Errorf("backup record %d not found: %w", backupRecordID, err)
+	}
+	if record.ServerID != server.ID {
+		err := errors.New("backup record does not belong to specified server")
+		domain.RecordServerLog(ctx, s.db, serverID, actorID, domain.ServerOpBackup, domain.ServerLogStatusError, err.Error())
+		return nil, err
+	}
+
+	markFailed := func(cause error) (*domain.BackupRecord, error) {
+		record.Status = domain.BackupStatusFailed
+		_ = s.db.WithContext(ctx).Model(&record).Update("status", domain.BackupStatusFailed).Error
+		domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpBackup, domain.ServerLogStatusError, cause.Error())
+		return nil, cause
 	}
 
 	volID := strconv.FormatUint(uint64(server.ID), 10)
 	wClient := s.workerClientFactory(server.Host.WorkerBaseURL, server.Host.APIKey)
 
-	// Stream tar archive from host worker volume
 	tarStream, err := wClient.ExportVolume(ctx, volID)
 	if err != nil {
-		return nil, fmt.Errorf("failed exporting volume on worker: %w", err)
+		return markFailed(fmt.Errorf("failed exporting volume on worker: %w", err))
 	}
 	defer func() { _ = tarStream.Close() }()
 
 	tarBytes, err := io.ReadAll(tarStream)
 	if err != nil {
-		return nil, fmt.Errorf("failed reading exported tar bytes: %w", err)
+		return markFailed(fmt.Errorf("failed reading exported tar bytes: %w", err))
 	}
 
-	timestamp := time.Now().UnixNano()
-	storageKey := fmt.Sprintf("backups/server-%d/%d.tar", server.ID, timestamp)
-
-	if err := s.storage.Put(ctx, storageKey, tarBytes); err != nil {
-		return nil, fmt.Errorf("failed storing backup archive: %w", err)
+	if err := s.storage.Put(ctx, record.StorageKey, tarBytes); err != nil {
+		return markFailed(fmt.Errorf("failed storing backup archive: %w", err))
 	}
 
-	record := domain.BackupRecord{
-		ServerID:   server.ID,
-		StorageKey: storageKey,
-		SizeBytes:  int64(len(tarBytes)),
-		Status:     domain.BackupStatusCompleted,
+	record.SizeBytes = int64(len(tarBytes))
+	record.Status = domain.BackupStatusCompleted
+	if err := s.db.WithContext(ctx).Save(&record).Error; err != nil {
+		return markFailed(fmt.Errorf("failed saving backup record: %w", err))
 	}
 
-	if err := s.db.WithContext(ctx).Create(&record).Error; err != nil {
-		return nil, fmt.Errorf("failed saving backup record: %w", err)
-	}
-
+	domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpBackup, domain.ServerLogStatusSuccess, fmt.Sprintf("backup #%d completed (%d bytes)", record.ID, record.SizeBytes))
 	return &record, nil
+}
+
+// ValidateRestoreTarget verifies that backupRecordID exists and belongs to serverID.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - serverID: Target game server ID.
+//   - backupRecordID: Candidate backup record ID.
+//
+// Example usage:
+//
+//	err := svc.ValidateRestoreTarget(ctx, 42, 105)
+func (s *Service) ValidateRestoreTarget(ctx context.Context, serverID uint, backupRecordID uint) error {
+	var record domain.BackupRecord
+	if err := s.db.WithContext(ctx).First(&record, backupRecordID).Error; err != nil {
+		return fmt.Errorf("backup record not found: %w", err)
+	}
+	if record.ServerID != serverID {
+		return errors.New("backup record does not belong to the specified server")
+	}
+	return nil
 }
 
 // RestoreServer unpacks a stored snapshot archive into the server's volume and restarts the server container.
@@ -116,15 +201,19 @@ func (s *Service) BackupServer(ctx context.Context, serverID uint) (*domain.Back
 //   - backupRecordID: Primary key of the BackupRecord to restore.
 //
 // Example usage:
-//   err := svc.RestoreServer(ctx, 42, 105)
+//
+//	err := svc.RestoreServer(ctx, 42, 105)
 func (s *Service) RestoreServer(ctx context.Context, serverID uint, backupRecordID uint) error {
 	var record domain.BackupRecord
 	if err := s.db.WithContext(ctx).First(&record, backupRecordID).Error; err != nil {
+		domain.RecordServerLog(ctx, s.db, serverID, 0, domain.ServerOpRestore, domain.ServerLogStatusError, err.Error())
 		return fmt.Errorf("backup record not found: %w", err)
 	}
 
 	if record.ServerID != serverID {
-		return errors.New("backup record does not belong to the specified server")
+		err := errors.New("backup record does not belong to the specified server")
+		domain.RecordServerLog(ctx, s.db, serverID, 0, domain.ServerOpRestore, domain.ServerLogStatusError, err.Error())
+		return err
 	}
 
 	var server domain.Server
@@ -133,12 +222,14 @@ func (s *Service) RestoreServer(ctx context.Context, serverID uint, backupRecord
 		Preload("Plan").
 		First(&server, serverID).Error
 	if err != nil {
+		domain.RecordServerLog(ctx, s.db, serverID, 0, domain.ServerOpRestore, domain.ServerLogStatusError, err.Error())
 		return fmt.Errorf("server not found: %w", err)
 	}
 
 	// Pull archive payload from object storage
 	archiveBytes, err := s.storage.Get(ctx, record.StorageKey)
 	if err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpRestore, domain.ServerLogStatusError, err.Error())
 		return fmt.Errorf("failed fetching archive from storage: %w", err)
 	}
 
@@ -152,30 +243,36 @@ func (s *Service) RestoreServer(ctx context.Context, serverID uint, backupRecord
 	// Step 2: Unpack tar into volume
 	volID := strconv.FormatUint(uint64(server.ID), 10)
 	if err := wClient.ImportVolume(ctx, volID, bytes.NewReader(archiveBytes)); err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpRestore, domain.ServerLogStatusError, err.Error())
 		return fmt.Errorf("failed importing volume contents on worker: %w", err)
 	}
 
 	// Step 3: Restart container
 	ctrReq := worker.CreateContainerRequest{
-		ServerID:    server.ID,
-		Port:        server.Port,
-		CPULimit:    server.Plan.CPULimit,
-		MemLimitMB:  server.Plan.MemLimitMB,
-		DiskLimitGB: server.Plan.DiskLimitGB,
-		MountPath:   server.MountPath,
+		ServerID:      server.ID,
+		Port:          server.Port,
+		CPULimit:      server.Plan.CPULimit,
+		MemLimitMB:    server.Plan.MemLimitMB,
+		DiskLimitGB:   server.Plan.DiskLimitGB,
+		MountPath:     server.MountPath,
+		ServerType:    string(server.ServerType),
+		ServerVersion: server.ServerVersion,
 	}
 
 	ctrResp, err := wClient.CreateContainer(ctx, ctrReq)
 	if err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpRestore, domain.ServerLogStatusError, err.Error())
 		return fmt.Errorf("failed restarting container after restore: %w", err)
 	}
 
 	server.ContainerID = ctrResp.ContainerID
 	server.Status = domain.ServerStatusRunning
 	if err := s.db.WithContext(ctx).Save(&server).Error; err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpRestore, domain.ServerLogStatusError, err.Error())
 		return fmt.Errorf("failed updating server state after restore: %w", err)
 	}
 
+	domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpRestore, domain.ServerLogStatusSuccess, fmt.Sprintf("restored from backup #%d", record.ID))
 	return nil
 }
 
