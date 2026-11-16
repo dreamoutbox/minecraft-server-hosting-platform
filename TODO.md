@@ -28,23 +28,25 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
-- [ ] add server console logs view.
+- [ ] add new page server console logs.
 
 - [ ] add send command from web console to minecraft server.
 
 ---
 
-- [ ] File Manager is not showing any files. should show list of files in /var/lib/mc-platform/mounts/<server-id>.
+- [ ] File Manager is not showing any files. should show list files in /var/lib/mc-platform/mounts/<server-id>.
 
 ---
 
 - [ ] move World Backups panel to new page.
 
-- [ ] add settings page. move Danger Zone panel to settings.
+- [ ] add settings page. 
 
-- [ ] create and reuse navbar for server details. make navigation links visible based on user role.
+- [ ] move Danger Zone panel to settings.
 
-- [ ] move Host Worker Status panel, Host Migration panel to new page. only allow/visible to staff and admin.
+- [ ] create and reuse sub-navbar for server details. make navigation links visible based on user role.
+
+- [ ] move "Host Worker Status panel" & "Host Migration panel" to new page. only allow/visible to staff and admin.
 
 ---
 
