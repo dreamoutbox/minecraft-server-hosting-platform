@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -19,7 +21,10 @@ import (
 // SessionCookieName is the HTTP cookie carrying the fileserver session JWT.
 const SessionCookieName = "fs_session"
 
-const sessionCookieMaxAgeSeconds = 3600 * 24
+const (
+	sessionCookieMaxAgeSeconds = 3600 * 24
+	maxEditableFileBytes       = 2 * 1024 * 1024
+)
 
 //go:embed templates/*
 var templateFS embed.FS
@@ -265,6 +270,46 @@ func (h *Handler) Download(c *gin.Context) {
 	http.ServeContent(c.Writer, c.Request, fileName, info.ModTime(), f)
 }
 
+// DownloadZip streams a permitted directory and its subdirectories as a zip archive.
+//
+// Arguments:
+//   - c: Active Gin request context with query parameter 'path'.
+//
+// Example usage:
+//
+//	GET /download-zip?path=/var/lib/mc-platform/mounts/1/world
+func (h *Handler) DownloadZip(c *gin.Context) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		c.String(http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	requestedPath := strings.TrimSpace(c.Query("path"))
+	perm, rel, err := h.authorizePath(c, userID, requestedPath)
+	if err != nil {
+		return
+	}
+
+	zipName, writeZip, cleanup, err := OpenDirForZip(perm.DirPath, rel)
+	if err != nil {
+		status := http.StatusNotFound
+		if errors.Is(err, ErrNotDirectory) {
+			status = http.StatusBadRequest
+		}
+		c.String(status, err.Error())
+		return
+	}
+	defer cleanup()
+
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", zipName))
+	c.Status(http.StatusOK)
+	if err := writeZip(c.Writer); err != nil {
+		log.Printf("[WARN] failed streaming zip for %s: %v", requestedPath, err)
+	}
+}
+
 // Upload stores an uploaded multipart file inside the authorized target directory.
 //
 // Arguments:
@@ -337,6 +382,120 @@ func (h *Handler) MakeDir(c *gin.Context) {
 	}
 
 	redirectWithMessage(c, dirPath, "Folder created", "")
+}
+
+// CreateFile creates a new empty file inside the authorized target directory.
+//
+// Arguments:
+//   - c: Active Gin request context with form fields 'path' and 'name'.
+//
+// Example usage:
+//
+//	POST /create-file
+func (h *Handler) CreateFile(c *gin.Context) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		c.String(http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	dirPath := strings.TrimSpace(c.PostForm("path"))
+	perm, rel, err := h.authorizePath(c, userID, dirPath)
+	if err != nil {
+		return
+	}
+
+	fileName := c.PostForm("name")
+	if err := CreateFile(perm.DirPath, rel, fileName); err != nil {
+		redirectWithMessage(c, dirPath, "", err.Error())
+		return
+	}
+
+	redirectWithMessage(c, dirPath, "File created", "")
+}
+
+// GetFileContent returns JSON text content for a supported editable file in an authorized directory.
+//
+// Arguments:
+//   - c: Active Gin request context with query parameter 'path'.
+//
+// Example usage:
+//
+//	GET /file-content?path=/var/lib/mc-platform/mounts/1/server.properties
+func (h *Handler) GetFileContent(c *gin.Context) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	requestedPath := strings.TrimSpace(c.Query("path"))
+	perm, rel, err := h.store.FindPermissionForPath(c.Request.Context(), userID, requestedPath)
+	if err != nil {
+		if errors.Is(err, store.ErrPermissionDenied) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	content, err := ReadEditableFile(perm.DirPath, rel, maxEditableFileBytes)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, ErrCannotModifyRoot), errors.Is(err, ErrIsDirectory), errors.Is(err, ErrNotEditable), errors.Is(err, ErrBinaryFile):
+			status = http.StatusBadRequest
+		case errors.Is(err, ErrFileTooLarge):
+			status = http.StatusRequestEntityTooLarge
+		case errors.Is(err, os.ErrNotExist):
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"name":    filepath.Base(rel),
+		"path":    requestedPath,
+		"content": content,
+	})
+}
+
+// EditFile saves updated text content to an existing supported config or text file.
+//
+// Arguments:
+//   - c: Active Gin request context with form fields 'path', 'current_dir', and 'content'.
+//
+// Example usage:
+//
+//	POST /edit
+func (h *Handler) EditFile(c *gin.Context) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		c.String(http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	targetPath := strings.TrimSpace(c.PostForm("path"))
+	currentDir := strings.TrimSpace(c.PostForm("current_dir"))
+	content := c.PostForm("content")
+
+	perm, rel, err := h.authorizePath(c, userID, targetPath)
+	if err != nil {
+		return
+	}
+
+	if currentDir == "" {
+		currentDir = filepath.Dir(targetPath)
+	}
+
+	if err := SaveEditableFile(perm.DirPath, rel, content, maxEditableFileBytes); err != nil {
+		redirectWithMessage(c, currentDir, "", err.Error())
+		return
+	}
+
+	redirectWithMessage(c, currentDir, "File saved", "")
 }
 
 // Rename changes the name of an authorized file or directory within its current folder.
@@ -430,8 +589,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		})
 		protected.GET("/files", h.Browse)
 		protected.GET("/download", h.Download)
+		protected.GET("/download-zip", h.DownloadZip)
+		protected.GET("/file-content", h.GetFileContent)
 		protected.POST("/upload", h.Upload)
+		protected.POST("/create-file", h.CreateFile)
 		protected.POST("/mkdir", h.MakeDir)
+		protected.POST("/edit", h.EditFile)
 		protected.POST("/rename", h.Rename)
 		protected.POST("/delete", h.Delete)
 	}

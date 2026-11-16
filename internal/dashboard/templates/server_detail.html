@@ -7,7 +7,8 @@
                 <div class="d-flex justify-content-between align-items-start mb-3">
                     <div>
                         <h3 class="fw-bold mb-1">{{.Server.Name}}</h3>
-                        <p class="text-muted small mb-0">ID: {{.Server.ID}} | Created: {{.Server.CreatedAt.Format "2006-01-02 15:04"}}</p>
+                        <p class="text-muted small mb-0">ID: {{.Server.ID}} | Created: {{.Server.CreatedAt.Format
+                            "2006-01-02 15:04"}}</p>
                     </div>
                     {{if eq .Server.Status "running"}}
                     <span class="badge bg-success fs-6">Running</span>
@@ -38,13 +39,14 @@
                     <div class="col-sm-6">
                         <div class="p-3 bg-light rounded">
                             <span class="text-muted small">Hardware Plan</span>
-                            <div class="fw-bold fs-5">{{.Server.Plan.Name}} ({{.Server.Plan.CPULimit}} Core / {{.Server.Plan.MemLimitMB}}MB)</div>
+                            <div class="fw-bold fs-5">{{.Server.Plan.Name}} ({{.Server.Plan.CPULimit}} Core /
+                                {{.Server.Plan.MemLimitMB}}MB)</div>
                         </div>
                     </div>
                     <div class="col-sm-6">
                         <div class="p-3 bg-light rounded">
                             <span class="text-muted small">Disk Allocation</span>
-                            <div class="fw-bold fs-5">{{.Server.Plan.DiskLimitGB}} GB Loop Mount</div>
+                            <div class="fw-bold fs-5">{{.Server.Plan.DiskLimitGB}} GB</div>
                         </div>
                     </div>
                 </div>
@@ -59,7 +61,8 @@
                         <button type="submit" class="btn btn-success">Start Server</button>
                     </form>
                     {{end}}
-                    <a href="/dashboard/servers/{{.Server.ID}}/files/open" target="_blank" rel="noopener" class="btn btn-outline-primary">Manage Files</a>
+                    <a href="/dashboard/servers/{{.Server.ID}}/files/open" target="_blank" rel="noopener"
+                        class="btn btn-outline-primary">Manage Files</a>
                     <a href="/dashboard/servers/{{.Server.ID}}/backups" class="btn btn-outline-info">Manage Backups</a>
                 </div>
             </div>
@@ -94,7 +97,10 @@
                                 <td>{{div .SizeBytes 1048576}} MB</td>
                                 <td><span class="badge bg-success">{{.Status}}</span></td>
                                 <td class="text-end">
-                                    <form method="POST" action="/dashboard/servers/{{$.Server.ID}}/backups/{{.ID}}/restore" class="d-inline" onsubmit="return confirm('Restore this snapshot? Active changes will be replaced.');">
+                                    <form method="POST"
+                                        action="/dashboard/servers/{{$.Server.ID}}/backups/{{.ID}}/restore"
+                                        class="d-inline"
+                                        onsubmit="return confirm('Restore this snapshot? Active changes will be replaced.');">
                                         <button type="submit" class="btn btn-sm btn-outline-warning">Restore</button>
                                     </form>
                                 </td>
@@ -104,7 +110,8 @@
                     </table>
                 </div>
                 {{else}}
-                <p class="text-muted small mb-0">No backups found. Trigger a manual backup or wait for scheduled daily sweeps.</p>
+                <p class="text-muted small mb-0">No backups found. Trigger a manual backup or wait for scheduled daily
+                    sweeps.</p>
                 {{end}}
             </div>
         </div>
@@ -132,7 +139,8 @@
         <div class="card shadow-sm border-0 mb-4">
             <div class="card-body p-4">
                 <h5 class="fw-bold mb-2">Host Migration</h5>
-                <p class="text-muted small">Transfer this server to another cluster host with blue/green verification while preserving port <code>{{.Server.Port}}</code>.</p>
+                <p class="text-muted small">Transfer this server to another cluster host with blue/green verification
+                    while preserving port <code>{{.Server.Port}}</code>.</p>
                 <form method="POST" action="/dashboard/servers/{{.Server.ID}}/migrate">
                     <div class="mb-3">
                         <label for="destination_host_id" class="form-label small fw-semibold">Destination Host</label>
@@ -145,7 +153,8 @@
                             {{end}}
                         </select>
                     </div>
-                    <button type="submit" class="btn btn-sm btn-outline-warning w-100" onsubmit="return confirm('Begin live host migration?');">
+                    <button type="submit" class="btn btn-sm btn-outline-warning w-100"
+                        onsubmit="return confirm('Begin live host migration?');">
                         Initiate Migration
                     </button>
                 </form>
@@ -156,8 +165,10 @@
         <div class="card shadow-sm border-danger">
             <div class="card-body p-4">
                 <h5 class="fw-bold text-danger mb-2">Danger Zone</h5>
-                <p class="text-muted small mb-3">Permanent deletion will unmount and erase all local storage and container files.</p>
-                <form method="POST" action="/dashboard/servers/{{.Server.ID}}/delete" onsubmit="return confirm('Are you sure you want to delete this server? This action cannot be undone.');">
+                <p class="text-muted small mb-3">Permanent deletion will unmount and erase all local storage and
+                    container files.</p>
+                <form method="POST" action="/dashboard/servers/{{.Server.ID}}/delete"
+                    onsubmit="return confirm('Are you sure you want to delete this server? This action cannot be undone.');">
                     <button type="submit" class="btn btn-outline-danger btn-sm w-100">Delete Server</button>
                 </form>
             </div>

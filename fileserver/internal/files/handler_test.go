@@ -1,9 +1,12 @@
 package files
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -230,5 +233,168 @@ func TestLoginTokenFlowAndBrowserFileOperations(t *testing.T) {
 	}
 	if cleared := extractSessionCookie(wLogout.Result()); cleared == nil || cleared.MaxAge >= 0 {
 		t.Fatalf("expected session cookie cleared, got %+v", cleared)
+	}
+}
+
+func TestToolbarModalsWebEditAndZipDownload(t *testing.T) {
+	r, _, secret, serverDir, otherDir := setupFilesTestRouter(t)
+
+	loginTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
+	if err != nil {
+		t.Fatalf("GenerateLoginToken: %v", err)
+	}
+	wLogin := httptest.NewRecorder()
+	reqLogin, _ := http.NewRequest(http.MethodGet, "/login?token="+url.QueryEscape(loginTok), nil)
+	r.ServeHTTP(wLogin, reqLogin)
+	cookie := extractSessionCookie(wLogin.Result())
+	if cookie == nil {
+		t.Fatal("expected session cookie")
+	}
+
+	// Create folder + editable file + non-editable file
+	if err := os.MkdirAll(filepath.Join(serverDir, "config"), 0755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serverDir, "config", "paper.yml"), []byte("verbose: false\n"), 0644); err != nil {
+		t.Fatalf("write paper.yml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serverDir, "server.jar"), []byte("jar-bytes"), 0644); err != nil {
+		t.Fatalf("write server.jar: %v", err)
+	}
+
+	// 1. POST /create-file creates eula.txt
+	cfForm := url.Values{}
+	cfForm.Set("path", serverDir)
+	cfForm.Set("name", "eula.txt")
+	wCF := httptest.NewRecorder()
+	reqCF, _ := http.NewRequest(http.MethodPost, "/create-file", strings.NewReader(cfForm.Encode()))
+	reqCF.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqCF.AddCookie(cookie)
+	r.ServeHTTP(wCF, reqCF)
+	if wCF.Code != http.StatusFound {
+		t.Fatalf("expected 302 from /create-file, got %d", wCF.Code)
+	}
+	if _, err := os.Stat(filepath.Join(serverDir, "eula.txt")); err != nil {
+		t.Fatalf("expected eula.txt to exist on disk: %v", err)
+	}
+
+	// 2. Browse UI checks (no [DIR], blue dir link, toolbar modals, no panels/inline rename input, Edit + Download Zip buttons)
+	wBrowse := httptest.NewRecorder()
+	reqBrowse, _ := http.NewRequest(http.MethodGet, "/files?path="+url.QueryEscape(serverDir), nil)
+	reqBrowse.AddCookie(cookie)
+	r.ServeHTTP(wBrowse, reqBrowse)
+	if wBrowse.Code != http.StatusOK {
+		t.Fatalf("expected 200 on browse, got %d", wBrowse.Code)
+	}
+	html := wBrowse.Body.String()
+	if strings.Contains(html, "[DIR]") {
+		t.Errorf("UI must not contain [DIR] prefix")
+	}
+	if !strings.Contains(html, `class="link-primary fw-semibold text-decoration-none">config</a>`) {
+		t.Errorf("expected directory to render as blue link without [DIR]")
+	}
+	if !strings.Contains(html, `<span class="text-body">eula.txt</span>`) {
+		t.Errorf("expected file to render as normal text")
+	}
+	if !strings.Contains(html, `data-bs-target="#uploadFileModal"`) || !strings.Contains(html, `data-bs-target="#newFileModal"`) || !strings.Contains(html, `data-bs-target="#newFolderModal"`) {
+		t.Errorf("expected sub-navbar toolbar buttons for upload file, new file, new folder")
+	}
+	if strings.Contains(html, `<div class="col-lg-4">`) {
+		t.Errorf("right-hand upload/new-folder panels should be removed")
+	}
+	if !strings.Contains(html, `href="/download-zip?path=`) {
+		t.Errorf("expected Download Zip button for directory")
+	}
+	if !strings.Contains(html, `data-bs-target="#renameModal"`) {
+		t.Errorf("expected Rename button to trigger #renameModal")
+	}
+	if !strings.Contains(html, `data-bs-target="#editFileModal" data-path="`+filepath.Join(serverDir, "eula.txt")) {
+		t.Errorf("expected Edit modal trigger for eula.txt")
+	}
+	if strings.Contains(html, `data-bs-target="#editFileModal" data-path="`+filepath.Join(serverDir, "server.jar")) {
+		t.Errorf("server.jar must not show an Edit button")
+	}
+
+	// 3. GET /file-content & POST /edit on editable file
+	ymlPath := filepath.Join(serverDir, "config", "paper.yml")
+	wGet := httptest.NewRecorder()
+	reqGet, _ := http.NewRequest(http.MethodGet, "/file-content?path="+url.QueryEscape(ymlPath), nil)
+	reqGet.AddCookie(cookie)
+	r.ServeHTTP(wGet, reqGet)
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /file-content, got %d (%s)", wGet.Code, wGet.Body.String())
+	}
+	var fcPayload struct {
+		Name    string `json:"name"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(wGet.Body.Bytes(), &fcPayload); err != nil {
+		t.Fatalf("json unmarshal /file-content: %v", err)
+	}
+	if fcPayload.Name != "paper.yml" || fcPayload.Content != "verbose: false\n" {
+		t.Fatalf("unexpected /file-content payload: %+v", fcPayload)
+	}
+
+	// Non-editable .jar rejected by /file-content
+	wBadExt := httptest.NewRecorder()
+	reqBadExt, _ := http.NewRequest(http.MethodGet, "/file-content?path="+url.QueryEscape(filepath.Join(serverDir, "server.jar")), nil)
+	reqBadExt.AddCookie(cookie)
+	r.ServeHTTP(wBadExt, reqBadExt)
+	if wBadExt.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on /file-content for .jar, got %d", wBadExt.Code)
+	}
+
+	// POST /edit saves content
+	editForm := url.Values{}
+	editForm.Set("path", ymlPath)
+	editForm.Set("current_dir", filepath.Join(serverDir, "config"))
+	editForm.Set("content", "verbose: true\n")
+	wEdit := httptest.NewRecorder()
+	reqEdit, _ := http.NewRequest(http.MethodPost, "/edit", strings.NewReader(editForm.Encode()))
+	reqEdit.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqEdit.AddCookie(cookie)
+	r.ServeHTTP(wEdit, reqEdit)
+	if wEdit.Code != http.StatusFound {
+		t.Fatalf("expected 302 on POST /edit, got %d", wEdit.Code)
+	}
+	savedBytes, err := os.ReadFile(ymlPath)
+	if err != nil || string(savedBytes) != "verbose: true\n" {
+		t.Fatalf("unexpected saved content on disk: %q (err=%v)", string(savedBytes), err)
+	}
+
+	// 4. GET /download-zip streams folder contents & blocks unauthorized path
+	wZipForbidden := httptest.NewRecorder()
+	reqZipForbidden, _ := http.NewRequest(http.MethodGet, "/download-zip?path="+url.QueryEscape(otherDir), nil)
+	reqZipForbidden.AddCookie(cookie)
+	r.ServeHTTP(wZipForbidden, reqZipForbidden)
+	if wZipForbidden.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on unauthorized /download-zip, got %d", wZipForbidden.Code)
+	}
+
+	wZip := httptest.NewRecorder()
+	reqZip, _ := http.NewRequest(http.MethodGet, "/download-zip?path="+url.QueryEscape(filepath.Join(serverDir, "config")), nil)
+	reqZip.AddCookie(cookie)
+	r.ServeHTTP(wZip, reqZip)
+	if wZip.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /download-zip, got %d (%s)", wZip.Code, wZip.Body.String())
+	}
+	if !strings.Contains(wZip.Header().Get("Content-Disposition"), "config.zip") {
+		t.Errorf("expected Content-Disposition with config.zip, got %s", wZip.Header().Get("Content-Disposition"))
+	}
+	zr, err := zip.NewReader(bytes.NewReader(wZip.Body.Bytes()), int64(wZip.Body.Len()))
+	if err != nil {
+		t.Fatalf("zip.NewReader failed: %v", err)
+	}
+	if len(zr.File) != 1 || zr.File[0].Name != "paper.yml" {
+		t.Fatalf("expected [paper.yml] inside config.zip, got %+v", zr.File)
+	}
+	rc, err := zr.File[0].Open()
+	if err != nil {
+		t.Fatalf("open zipped paper.yml: %v", err)
+	}
+	zippedBody, _ := io.ReadAll(rc)
+	_ = rc.Close()
+	if string(zippedBody) != "verbose: true\n" {
+		t.Fatalf("unexpected zipped content: %q", string(zippedBody))
 	}
 }
