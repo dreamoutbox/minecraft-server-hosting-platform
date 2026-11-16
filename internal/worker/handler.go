@@ -51,6 +51,14 @@ func (h *Handler) CreateContainer(c *gin.Context) {
 		return
 	}
 
+	if req.ServerID > 0 {
+		volumeID := strconv.FormatUint(uint64(req.ServerID), 10)
+		if err := h.volumes.EnsureMounted(c.Request.Context(), volumeID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
 	resp, err := h.containers.CreateAndStart(c.Request.Context(), req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -2,7 +2,9 @@ package worker
 
 import (
 	"archive/tar"
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,12 +12,20 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
+)
+
+const (
+	unmountMaxAttempts = 5
+	unmountRetryDelay  = 200 * time.Millisecond
 )
 
 // VolumeManager abstracts loop-mounted block storage lifecycle and tar streaming.
 type VolumeManager interface {
 	CreateVolume(ctx context.Context, volumeID string, diskLimitGB int) (mountPath string, imagePath string, err error)
 	DeleteVolume(ctx context.Context, volumeID string) error
+	EnsureMounted(ctx context.Context, volumeID string) error
+	UnmountAll(ctx context.Context) error
 	ExportVolume(ctx context.Context, volumeID string, w io.Writer) error
 	ImportVolume(ctx context.Context, volumeID string, r io.Reader) error
 	GetVolumePath(volumeID string) (mountPath string, exists bool)
@@ -63,7 +73,7 @@ func (m *LocalVolumeManager) CreateVolume(ctx context.Context, volumeID string, 
 	defer m.mu.Unlock()
 
 	imagesDir := filepath.Join(m.baseDir, "images")
-	mountsDir := filepath.Join(m.baseDir, "mounts", volumeID)
+	mountsDir, imagePath := m.resolvePathsLocked(volumeID)
 
 	if err := os.MkdirAll(imagesDir, 0755); err != nil {
 		return "", "", fmt.Errorf("failed creating images directory: %w", err)
@@ -72,7 +82,12 @@ func (m *LocalVolumeManager) CreateVolume(ctx context.Context, volumeID string, 
 		return "", "", fmt.Errorf("failed creating mount directory: %w", err)
 	}
 
-	imagePath := filepath.Join(imagesDir, fmt.Sprintf("%s.img", volumeID))
+	if m.useLoopMount {
+		if err := unmountDir(ctx, mountsDir); err != nil {
+			return "", "", fmt.Errorf("failed unmounting stale mount at %s: %w", mountsDir, err)
+		}
+	}
+
 	f, err := os.Create(imagePath)
 	if err != nil {
 		return "", "", fmt.Errorf("failed creating sparse file: %w", err)
@@ -80,21 +95,24 @@ func (m *LocalVolumeManager) CreateVolume(ctx context.Context, volumeID string, 
 	sizeBytes := int64(diskLimitGB) * 1024 * 1024 * 1024
 	if err := f.Truncate(sizeBytes); err != nil {
 		_ = f.Close()
+		_ = os.Remove(imagePath)
 		return "", "", fmt.Errorf("failed truncating sparse file: %w", err)
 	}
 	if err := f.Close(); err != nil {
+		_ = os.Remove(imagePath)
 		return "", "", fmt.Errorf("failed closing sparse image: %w", err)
 	}
 
 	if m.useLoopMount {
 		mkfsCmd := exec.CommandContext(ctx, "mkfs.ext4", "-F", imagePath)
 		if output, err := mkfsCmd.CombinedOutput(); err != nil {
+			_ = os.Remove(imagePath)
 			return "", "", fmt.Errorf("mkfs.ext4 failed (%s): %w", string(output), err)
 		}
 
-		mountCmd := exec.CommandContext(ctx, "mount", "-o", "loop", imagePath, mountsDir)
-		if output, err := mountCmd.CombinedOutput(); err != nil {
-			return "", "", fmt.Errorf("mount -o loop failed (%s): %w", string(output), err)
+		if err := mountLoopImage(ctx, imagePath, mountsDir); err != nil {
+			_ = os.Remove(imagePath)
+			return "", "", err
 		}
 	}
 
@@ -104,7 +122,55 @@ func (m *LocalVolumeManager) CreateVolume(ctx context.Context, volumeID string, 
 	return mountsDir, imagePath, nil
 }
 
-// DeleteVolume unmounts active loop mounts and cleans up disk files for the volume.
+// EnsureMounted mounts an existing ext4 volume image onto its mount directory if not already mounted.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - volumeID: Unique volume identifier.
+//
+// Example usage:
+//
+//	err := vm.EnsureMounted(ctx, "42")
+func (m *LocalVolumeManager) EnsureMounted(ctx context.Context, volumeID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.useLoopMount || volumeID == "" {
+		return nil
+	}
+
+	mountDir, imagePath := m.resolvePathsLocked(volumeID)
+	if _, err := os.Stat(imagePath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed inspecting image %s: %w", imagePath, err)
+	}
+
+	mounted, err := isMountPoint(mountDir)
+	if err != nil {
+		return fmt.Errorf("failed checking mount state for %s: %w", mountDir, err)
+	}
+	if mounted {
+		m.volumeMountMap[volumeID] = mountDir
+		m.volumeImageMap[volumeID] = imagePath
+		return nil
+	}
+
+	if err := os.MkdirAll(mountDir, 0755); err != nil {
+		return fmt.Errorf("failed creating mount directory %s: %w", mountDir, err)
+	}
+
+	if err := mountLoopImage(ctx, imagePath, mountDir); err != nil {
+		return err
+	}
+
+	m.volumeMountMap[volumeID] = mountDir
+	m.volumeImageMap[volumeID] = imagePath
+	return nil
+}
+
+// DeleteVolume unmounts active loop mounts and deletes mount directory contents and sparse image file.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
@@ -117,28 +183,84 @@ func (m *LocalVolumeManager) DeleteVolume(ctx context.Context, volumeID string) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	mountDir, mountOk := m.volumeMountMap[volumeID]
-	if !mountOk {
-		mountDir = filepath.Join(m.baseDir, "mounts", volumeID)
-	}
-
-	imagePath, imgOk := m.volumeImageMap[volumeID]
-	if !imgOk {
-		imagePath = filepath.Join(m.baseDir, "images", fmt.Sprintf("%s.img", volumeID))
-	}
+	mountDir, imagePath := m.resolvePathsLocked(volumeID)
 
 	if m.useLoopMount {
-		umountCmd := exec.CommandContext(ctx, "umount", mountDir)
-		_ = umountCmd.Run() // ignore if already unmounted
+		if err := unmountDir(ctx, mountDir); err != nil {
+			return fmt.Errorf("failed unmounting volume %s at %s: %w", volumeID, mountDir, err)
+		}
 	}
 
-	_ = os.RemoveAll(mountDir)
-	_ = os.Remove(imagePath)
+	if err := os.RemoveAll(mountDir); err != nil {
+		return fmt.Errorf("failed removing mount directory %s: %w", mountDir, err)
+	}
+	if err := os.Remove(imagePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed removing volume image %s: %w", imagePath, err)
+	}
 
 	delete(m.volumeMountMap, volumeID)
 	delete(m.volumeImageMap, volumeID)
 
 	return nil
+}
+
+// UnmountAll unmounts all active ext4 loop volumes under the worker's mounts directory while preserving images.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//
+// Example usage:
+//
+//	err := vm.UnmountAll(ctx)
+func (m *LocalVolumeManager) UnmountAll(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.useLoopMount {
+		return nil
+	}
+
+	candidates := make(map[string]struct{})
+	for _, mountDir := range m.volumeMountMap {
+		candidates[filepath.Clean(mountDir)] = struct{}{}
+	}
+
+	mountsRoot := filepath.Clean(filepath.Join(m.baseDir, "mounts"))
+	if entries, err := os.ReadDir(mountsRoot); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				candidates[filepath.Join(mountsRoot, entry.Name())] = struct{}{}
+			}
+		}
+	}
+
+	if activeMounts, err := readMountPoints(); err == nil {
+		prefix := mountsRoot + string(filepath.Separator)
+		for _, mp := range activeMounts {
+			cleanMP := filepath.Clean(mp)
+			if strings.HasPrefix(cleanMP, prefix) {
+				candidates[cleanMP] = struct{}{}
+			}
+		}
+	}
+
+	var errs []error
+	unmountedDirs := make(map[string]bool)
+	for mountDir := range candidates {
+		if err := unmountDir(ctx, mountDir); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		unmountedDirs[mountDir] = true
+	}
+
+	for volID, mountDir := range m.volumeMountMap {
+		if unmountedDirs[filepath.Clean(mountDir)] {
+			delete(m.volumeMountMap, volID)
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // ExportVolume streams a tar archive of all files contained within the volume's mount point.
@@ -152,11 +274,12 @@ func (m *LocalVolumeManager) DeleteVolume(ctx context.Context, volumeID string) 
 //
 //	err := vm.ExportVolume(ctx, "server-42", responseWriter)
 func (m *LocalVolumeManager) ExportVolume(ctx context.Context, volumeID string, w io.Writer) error {
-	m.mu.RLock()
-	mountDir, ok := m.volumeMountMap[volumeID]
-	if !ok {
-		mountDir = filepath.Join(m.baseDir, "mounts", volumeID)
+	if err := m.EnsureMounted(ctx, volumeID); err != nil {
+		return err
 	}
+
+	m.mu.RLock()
+	mountDir, _ := m.resolvePathsLocked(volumeID)
 	m.mu.RUnlock()
 
 	if _, err := os.Stat(mountDir); os.IsNotExist(err) {
@@ -220,11 +343,12 @@ func (m *LocalVolumeManager) ExportVolume(ctx context.Context, volumeID string, 
 //
 //	err := vm.ImportVolume(ctx, "server-42", requestBody)
 func (m *LocalVolumeManager) ImportVolume(ctx context.Context, volumeID string, r io.Reader) error {
-	m.mu.Lock()
-	mountDir, ok := m.volumeMountMap[volumeID]
-	if !ok {
-		mountDir = filepath.Join(m.baseDir, "mounts", volumeID)
+	if err := m.EnsureMounted(ctx, volumeID); err != nil {
+		return err
 	}
+
+	m.mu.Lock()
+	mountDir, _ := m.resolvePathsLocked(volumeID)
 	m.mu.Unlock()
 
 	if err := os.MkdirAll(mountDir, 0755); err != nil {
@@ -309,4 +433,124 @@ func (m *LocalVolumeManager) GetVolumePath(volumeID string) (string, bool) {
 		return "", false
 	}
 	return mountDir, true
+}
+
+func (m *LocalVolumeManager) resolvePathsLocked(volumeID string) (string, string) {
+	mountDir, mountOk := m.volumeMountMap[volumeID]
+	if !mountOk {
+		mountDir = filepath.Join(m.baseDir, "mounts", volumeID)
+	}
+
+	imagePath, imgOk := m.volumeImageMap[volumeID]
+	if !imgOk {
+		imagePath = filepath.Join(m.baseDir, "images", fmt.Sprintf("%s.img", volumeID))
+	}
+
+	return mountDir, imagePath
+}
+
+func mountLoopImage(ctx context.Context, imagePath, mountDir string) error {
+	mountCmd := exec.CommandContext(ctx, "mount", "-o", "loop", imagePath, mountDir)
+	if output, err := mountCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("mount -o loop failed (%s): %w", string(output), err)
+	}
+	return nil
+}
+
+func unmountDir(ctx context.Context, mountDir string) error {
+	mounted, err := isMountPoint(mountDir)
+	if err != nil {
+		return fmt.Errorf("failed checking mount state for %s: %w", mountDir, err)
+	}
+	if !mounted {
+		return nil
+	}
+
+	var lastOut string
+	var lastErr error
+	for attempt := 0; attempt < unmountMaxAttempts; attempt++ {
+		// -d explicitly detaches the associated loop device so loop slots are freed immediately.
+		umountCmd := exec.CommandContext(ctx, "umount", "-d", mountDir)
+		out, err := umountCmd.CombinedOutput()
+		if err == nil {
+			stillMounted, checkErr := isMountPoint(mountDir)
+			if checkErr == nil && !stillMounted {
+				return nil
+			}
+		}
+		lastOut = strings.TrimSpace(string(out))
+		lastErr = err
+
+		stillMounted, checkErr := isMountPoint(mountDir)
+		if checkErr == nil && !stillMounted {
+			return nil
+		}
+
+		if attempt < unmountMaxAttempts-1 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(unmountRetryDelay):
+			}
+		}
+	}
+
+	return fmt.Errorf("umount -d %s failed (%s): %w", mountDir, lastOut, lastErr)
+}
+
+func isMountPoint(target string) (bool, error) {
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		absTarget = filepath.Clean(target)
+	}
+	resolvedTarget := absTarget
+	if eval, err := filepath.EvalSymlinks(absTarget); err == nil {
+		resolvedTarget = eval
+	}
+
+	mounts, err := readMountPoints()
+	if err != nil {
+		return false, err
+	}
+	for _, mp := range mounts {
+		cleanMP := filepath.Clean(mp)
+		if cleanMP == absTarget || cleanMP == resolvedTarget {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func readMountPoints() ([]string, error) {
+	f, err := os.Open("/proc/self/mountinfo")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	var mounts []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 5 {
+			mounts = append(mounts, unescapeMountInfoPath(fields[4]))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return mounts, nil
+}
+
+func unescapeMountInfoPath(p string) string {
+	r := strings.NewReplacer(
+		`\040`, " ",
+		`\011`, "\t",
+		`\012`, "\n",
+		`\134`, `\`,
+	)
+	return r.Replace(p)
 }

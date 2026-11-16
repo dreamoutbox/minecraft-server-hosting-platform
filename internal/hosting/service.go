@@ -35,7 +35,8 @@ type Service struct {
 //   - factory: Factory creating worker clients; if nil, defaults to HTTP worker client.
 //
 // Example usage:
-//   svc := hosting.NewService(db, scheduler, allocator, nil)
+//
+//	svc := hosting.NewService(db, scheduler, allocator, nil)
 func NewService(db *gorm.DB, scheduler Scheduler, portAllocator *PortAllocator, factory WorkerClientFactory) *Service {
 	if factory == nil {
 		factory = func(baseURL string, apiKey string) worker.Client {
@@ -59,7 +60,8 @@ func NewService(db *gorm.DB, scheduler Scheduler, portAllocator *PortAllocator, 
 //   - maxServers: Capacity limit for simultaneous servers on this host.
 //
 // Example usage:
-//   host, apiKey, err := svc.RegisterHost(ctx, "node-1.internal", "http://10.0.0.1:9090", 20)
+//
+//	host, apiKey, err := svc.RegisterHost(ctx, "node-1.internal", "http://10.0.0.1:9090", 20)
 func (s *Service) RegisterHost(ctx context.Context, hostname string, workerBaseURL string, maxServers int) (*domain.Host, string, error) {
 	if hostname == "" || workerBaseURL == "" || maxServers <= 0 {
 		return nil, "", errors.New("invalid host registration parameters")
@@ -92,7 +94,8 @@ func (s *Service) RegisterHost(ctx context.Context, hostname string, workerBaseU
 //   - hostID: Host primary key.
 //
 // Example usage:
-//   newKey, err := svc.RotateHostAPIKey(ctx, 5)
+//
+//	newKey, err := svc.RotateHostAPIKey(ctx, 5)
 func (s *Service) RotateHostAPIKey(ctx context.Context, hostID uint) (string, error) {
 	var host domain.Host
 	if err := s.db.WithContext(ctx).First(&host, hostID).Error; err != nil {
@@ -119,7 +122,8 @@ func (s *Service) RotateHostAPIKey(ctx context.Context, hostID uint) (string, er
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
-//   hosts, err := svc.ListHosts(ctx)
+//
+//	hosts, err := svc.ListHosts(ctx)
 func (s *Service) ListHosts(ctx context.Context) ([]domain.Host, error) {
 	var hosts []domain.Host
 	if err := s.db.WithContext(ctx).Find(&hosts).Error; err != nil {
@@ -137,7 +141,8 @@ func (s *Service) ListHosts(ctx context.Context) ([]domain.Host, error) {
 //   - planID: ID of selected resource tier.
 //
 // Example usage:
-//   srv, err := svc.CreateServer(ctx, user.ID, "SurvivalWorld", plan.ID)
+//
+//	srv, err := svc.CreateServer(ctx, user.ID, "SurvivalWorld", plan.ID)
 func (s *Service) CreateServer(ctx context.Context, userID uint, name string, planID uint) (*domain.Server, error) {
 	var plan domain.Plan
 	if err := s.db.WithContext(ctx).First(&plan, planID).Error; err != nil {
@@ -224,7 +229,8 @@ func (s *Service) cleanupFailedServer(ctx context.Context, server *domain.Server
 //   - serverID: Target game server ID.
 //
 // Example usage:
-//   srv, err := svc.StopServer(ctx, user.ID, 42)
+//
+//	srv, err := svc.StopServer(ctx, user.ID, 42)
 func (s *Service) StopServer(ctx context.Context, userID uint, serverID uint) (*domain.Server, error) {
 	server, host, err := s.getServerAndHost(ctx, userID, serverID)
 	if err != nil {
@@ -258,7 +264,8 @@ func (s *Service) StopServer(ctx context.Context, userID uint, serverID uint) (*
 //   - serverID: Target game server ID.
 //
 // Example usage:
-//   srv, err := svc.StartServer(ctx, user.ID, 42)
+//
+//	srv, err := svc.StartServer(ctx, user.ID, 42)
 func (s *Service) StartServer(ctx context.Context, userID uint, serverID uint) (*domain.Server, error) {
 	server, host, err := s.getServerAndHost(ctx, userID, serverID)
 	if err != nil {
@@ -301,7 +308,8 @@ func (s *Service) StartServer(ctx context.Context, userID uint, serverID uint) (
 //   - serverID: Target game server ID.
 //
 // Example usage:
-//   err := svc.DeleteServer(ctx, user.ID, 42)
+//
+//	err := svc.DeleteServer(ctx, user.ID, 42)
 func (s *Service) DeleteServer(ctx context.Context, userID uint, serverID uint) error {
 	server, host, err := s.getServerAndHost(ctx, userID, serverID)
 	if err != nil {
@@ -314,12 +322,18 @@ func (s *Service) DeleteServer(ctx context.Context, userID uint, serverID uint) 
 
 	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
 
-	if server.ContainerID != "" {
-		_ = wClient.DeleteContainer(ctx, server.ContainerID)
+	containerRef := server.ContainerID
+	if containerRef == "" {
+		containerRef = fmt.Sprintf("mc-server-%d", server.ID)
+	}
+	if err := wClient.DeleteContainer(ctx, containerRef); err != nil {
+		return fmt.Errorf("worker delete container failed: %w", err)
 	}
 
 	volumeID := strconv.FormatUint(uint64(server.ID), 10)
-	_ = wClient.DeleteVolume(ctx, volumeID)
+	if err := wClient.DeleteVolume(ctx, volumeID); err != nil {
+		return fmt.Errorf("worker delete volume failed: %w", err)
+	}
 
 	if err := s.db.WithContext(ctx).Delete(server).Error; err != nil {
 		return fmt.Errorf("failed deleting server from database: %w", err)
@@ -336,7 +350,8 @@ func (s *Service) DeleteServer(ctx context.Context, userID uint, serverID uint) 
 //   - serverID: Target game server ID.
 //
 // Example usage:
-//   srv, status, err := svc.GetServer(ctx, user.ID, 42)
+//
+//	srv, status, err := svc.GetServer(ctx, user.ID, 42)
 func (s *Service) GetServer(ctx context.Context, userID uint, serverID uint) (*domain.Server, *worker.ContainerStatusResponse, error) {
 	server, host, err := s.getServerAndHost(ctx, userID, serverID)
 	if err != nil {
@@ -359,7 +374,8 @@ func (s *Service) GetServer(ctx context.Context, userID uint, serverID uint) (*d
 //   - userID: Account ID.
 //
 // Example usage:
-//   servers, err := svc.ListServers(ctx, user.ID)
+//
+//	servers, err := svc.ListServers(ctx, user.ID)
 func (s *Service) ListServers(ctx context.Context, userID uint) ([]domain.Server, error) {
 	var servers []domain.Server
 	err := s.db.WithContext(ctx).

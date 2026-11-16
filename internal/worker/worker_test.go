@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/docker/docker/api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -69,6 +70,13 @@ func (m *mockContainerManager) CountActive(ctx context.Context) (int, error) {
 		}
 	}
 	return active, nil
+}
+
+func (m *mockContainerManager) CleanupAll(ctx context.Context) error {
+	for id := range m.containers {
+		delete(m.containers, id)
+	}
+	return nil
 }
 
 func setupWorkerTestRouter(t *testing.T, apiKey string) (*gin.Engine, *LocalVolumeManager, *mockContainerManager, string) {
@@ -298,5 +306,98 @@ func TestContainerEndpoints(t *testing.T) {
 
 	if _, exists := cm.containers[resp.ContainerID]; exists {
 		t.Error("expected container to be deleted")
+	}
+}
+
+func TestDeleteVolumeRemovesFilesAndImageAcrossRestart(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "worker-vol-del-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+
+	ctx := context.Background()
+	vm1 := NewLocalVolumeManager(tempDir, false)
+	mountPath, imagePath, err := vm1.CreateVolume(ctx, "77", 1)
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(mountPath, "server.properties"), []byte("motd=test\n"), 0644); err != nil {
+		t.Fatalf("failed writing server file: %v", err)
+	}
+
+	// Simulate worker restart with a fresh LocalVolumeManager that has empty in-memory maps.
+	vm2 := NewLocalVolumeManager(tempDir, false)
+	if err := vm2.DeleteVolume(ctx, "77"); err != nil {
+		t.Fatalf("DeleteVolume failed: %v", err)
+	}
+
+	if _, err := os.Stat(mountPath); !os.IsNotExist(err) {
+		t.Errorf("expected mount dir %s to be removed, got err=%v", mountPath, err)
+	}
+	if _, err := os.Stat(imagePath); !os.IsNotExist(err) {
+		t.Errorf("expected image file %s to be deleted, got err=%v", imagePath, err)
+	}
+}
+
+func TestIsManagedContainer(t *testing.T) {
+	tests := []struct {
+		name string
+		ctr  types.Container
+		want bool
+	}{
+		{
+			name: "platform label",
+			ctr:  types.Container{Labels: map[string]string{"platform": managedPlatformLabel}},
+			want: true,
+		},
+		{
+			name: "mc-server name prefix",
+			ctr:  types.Container{Names: []string{"/mc-server-12"}},
+			want: true,
+		},
+		{
+			name: "empty names and no label",
+			ctr:  types.Container{},
+			want: false,
+		},
+		{
+			name: "unrelated container",
+			ctr:  types.Container{Names: []string{"/mc_postgres"}, Labels: map[string]string{"com.docker.compose.service": "postgres"}},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isManagedContainer(tc.ctr); got != tc.want {
+				t.Errorf("isManagedContainer(%+v) = %v, want %v", tc.ctr, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsMountPoint(t *testing.T) {
+	mountedRoot, err := isMountPoint("/")
+	if err != nil {
+		t.Fatalf("isMountPoint('/') returned error: %v", err)
+	}
+	if !mountedRoot {
+		t.Error("expected '/' to be reported as a mountpoint")
+	}
+
+	tempDir, err := os.MkdirTemp("", "worker-mp-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+
+	mountedTemp, err := isMountPoint(tempDir)
+	if err != nil {
+		t.Fatalf("isMountPoint(tempDir) returned error: %v", err)
+	}
+	if mountedTemp {
+		t.Errorf("expected %s not to be a mountpoint", tempDir)
 	}
 }

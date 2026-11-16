@@ -1,13 +1,24 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
+)
+
+const (
+	httpShutdownTimeout  = 5 * time.Second
+	workerCleanupTimeout = 45 * time.Second
 )
 
 // SetupWorkerRouter registers HTTP endpoints for the host worker daemon.
@@ -17,12 +28,44 @@ import (
 //   - handler: Worker HTTP controller managing containers and volumes.
 //
 // Example usage:
-//   r := SetupWorkerRouter("secret-worker-key", handler)
-//   r.Run(":9090")
+//
+//	r := SetupWorkerRouter("secret-worker-key", handler)
+//	r.Run(":9090")
 func SetupWorkerRouter(apiKey string, handler *worker.Handler) *gin.Engine {
 	r := gin.Default()
 	handler.RegisterRoutes(r, apiKey)
 	return r
+}
+
+// shutdownWorker stops the HTTP server, removes managed containers, and unmounts ext4 volumes.
+//
+// Arguments:
+//   - srv: Active worker HTTP server instance (may be nil in unit tests).
+//   - cm: Container manager used to stop and remove managed server containers.
+//   - vm: Volume manager used to unmount active ext4 loop volumes.
+//
+// Example usage:
+//
+//	shutdownWorker(srv, cm, vm)
+func shutdownWorker(srv *http.Server, cm worker.ContainerManager, vm worker.VolumeManager) {
+	if srv != nil {
+		httpCtx, cancelHTTP := context.WithTimeout(context.Background(), httpShutdownTimeout)
+		if err := srv.Shutdown(httpCtx); err != nil {
+			log.Printf("[WARN] worker HTTP shutdown error: %v", err)
+		}
+		cancelHTTP()
+	}
+
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), workerCleanupTimeout)
+	defer cancelCleanup()
+
+	// Remove containers before unmounting so bind-mounted directories are not busy.
+	if err := cm.CleanupAll(cleanupCtx); err != nil {
+		log.Printf("[WARN] worker container cleanup error: %v", err)
+	}
+	if err := vm.UnmountAll(cleanupCtx); err != nil {
+		log.Printf("[WARN] worker volume unmount error: %v", err)
+	}
 }
 
 func main() {
@@ -60,8 +103,31 @@ func main() {
 	handler := worker.NewHandler(cm, vm, maxServers, baseDir)
 
 	r := SetupWorkerRouter(apiKey, handler)
-	log.Printf("Worker daemon listening on port %s", workerPort)
-	if err := r.Run(":" + workerPort); err != nil {
-		log.Fatalf("worker daemon exited with error: %v", err)
+	srv := &http.Server{
+		Addr:    ":" + workerPort,
+		Handler: r,
+	}
+
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	serveErrCh := make(chan error, 1)
+	go func() {
+		log.Printf("Worker daemon listening on port %s", workerPort)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErrCh <- err
+		}
+		close(serveErrCh)
+	}()
+
+	select {
+	case serveErr := <-serveErrCh:
+		if serveErr != nil {
+			log.Fatalf("worker daemon exited with error: %v", serveErr)
+		}
+	case <-sigCtx.Done():
+		log.Println("Shutdown signal received; stopping managed containers and unmounting volumes...")
+		shutdownWorker(srv, cm, vm)
+		log.Println("Worker shutdown complete.")
 	}
 }

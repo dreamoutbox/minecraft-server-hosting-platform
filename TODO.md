@@ -1,8 +1,8 @@
 # TODO
 
-- [ ] ensure worker stop/compose down. umount ext4 volumes. remove containers.
+- [x] ensure worker stop/compose down. umount ext4 volumes. remove containers.
 
-- [ ] make sure deleted server also delete ext4 image file. and make sure /var/lib/mc-platform/mounts/server-id is empty.
+- [x] make sure user delete server. also delete ext4 image file. and make sure /var/lib/mc-platform/mounts/<server-id> is empty.
 
 ---
 

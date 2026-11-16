@@ -65,6 +65,7 @@ services:
     image: ${WORKER_IMAGE:-dreamoutbox/minecraft-hosting-worker:latest}
     container_name: mc_worker
     restart: unless-stopped
+    stop_grace_period: 60s
     environment:
       WORKER_PORT: "9090"
       WORKER_API_KEY: dev-worker-key

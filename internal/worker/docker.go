@@ -2,15 +2,24 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+)
+
+const (
+	managedPlatformLabel = "minecraft-server-hosting"
+	managedNamePrefix    = "mc-server-"
+	defaultStopTimeout   = 10
 )
 
 // ContainerManager defines lifecycle operations on Docker containers for Minecraft servers.
@@ -20,6 +29,7 @@ type ContainerManager interface {
 	Delete(ctx context.Context, containerID string) error
 	GetStatus(ctx context.Context, containerID string) (*ContainerStatusResponse, error)
 	CountActive(ctx context.Context) (int, error)
+	CleanupAll(ctx context.Context) error
 }
 
 // DockerContainerManager coordinates with the local Docker daemon socket via Docker SDK.
@@ -99,7 +109,7 @@ func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateC
 			containerPort: struct{}{},
 		},
 		Labels: map[string]string{
-			"platform":  "minecraft-server-hosting",
+			"platform":  managedPlatformLabel,
 			"server_id": strconv.FormatUint(uint64(req.ServerID), 10),
 		},
 	}
@@ -116,7 +126,7 @@ func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateC
 		},
 	}
 
-	containerName := fmt.Sprintf("mc-server-%d", req.ServerID)
+	containerName := fmt.Sprintf("%s%d", managedNamePrefix, req.ServerID)
 
 	resp, err := d.cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)
 	if err != nil {
@@ -158,11 +168,11 @@ func (d *DockerContainerManager) Stop(ctx context.Context, containerID string) e
 	return nil
 }
 
-// Delete forces removal of the specified container.
+// Delete forces removal of the specified container, succeeding if already absent.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
-//   - containerID: Target Docker container ID.
+//   - containerID: Target Docker container ID or name.
 //
 // Example usage:
 //
@@ -173,6 +183,9 @@ func (d *DockerContainerManager) Delete(ctx context.Context, containerID string)
 		RemoveVolumes: false,
 	}
 	if err := d.cli.ContainerRemove(ctx, containerID, removeOpts); err != nil {
+		if client.IsErrNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("failed removing container %s: %w", containerID, err)
 	}
 	return nil
@@ -233,9 +246,76 @@ func (d *DockerContainerManager) CountActive(ctx context.Context) (int, error) {
 
 	active := 0
 	for _, c := range containers {
-		if strings.HasPrefix(c.Names[0], "/mc-server-") || c.Labels["platform"] == "minecraft-server-hosting" {
+		if isManagedContainer(c) {
 			active++
 		}
 	}
 	return active, nil
+}
+
+// CleanupAll gracefully stops and removes all containers managed by this platform.
+//
+// Arguments:
+//   - ctx: Operation cancellation context bounding stop and removal duration.
+//
+// Example usage:
+//
+//	err := cm.CleanupAll(ctx)
+func (d *DockerContainerManager) CleanupAll(ctx context.Context) error {
+	containers, err := d.cli.ContainerList(ctx, container.ListOptions{
+		All: true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed listing managed containers: %w", err)
+	}
+
+	var managed []types.Container
+	for _, c := range containers {
+		if isManagedContainer(c) {
+			managed = append(managed, c)
+		}
+	}
+	if len(managed) == 0 {
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(managed))
+	stopTimeout := defaultStopTimeout
+
+	for _, c := range managed {
+		wg.Add(1)
+		go func(ctr types.Container) {
+			defer wg.Done()
+			if ctr.State == "running" {
+				// Best-effort graceful stop so Minecraft flushes world chunks before removal.
+				_ = d.cli.ContainerStop(ctx, ctr.ID, container.StopOptions{Timeout: &stopTimeout})
+			}
+			if rmErr := d.Delete(ctx, ctr.ID); rmErr != nil {
+				errCh <- rmErr
+			}
+		}(c)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	var errs []error
+	for e := range errCh {
+		errs = append(errs, e)
+	}
+	return errors.Join(errs...)
+}
+
+func isManagedContainer(c types.Container) bool {
+	if c.Labels["platform"] == managedPlatformLabel {
+		return true
+	}
+	for _, name := range c.Names {
+		trimmed := strings.TrimPrefix(name, "/")
+		if strings.HasPrefix(trimmed, managedNamePrefix) {
+			return true
+		}
+	}
+	return false
 }
