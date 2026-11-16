@@ -62,6 +62,10 @@ cleanup_orphaned_servers() {
 			fi
 		done
 	fi
+
+	local script_dir
+	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	"$script_dir/dev-cleanup-wsl-mounts.sh"
 }
 
 # main tears down docker compose services.

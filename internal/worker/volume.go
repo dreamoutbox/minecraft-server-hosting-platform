@@ -86,6 +86,13 @@ func (m *LocalVolumeManager) CreateVolume(ctx context.Context, volumeID string, 
 		if err := unmountDir(ctx, mountsDir); err != nil {
 			return "", "", fmt.Errorf("failed unmounting stale mount at %s: %w", mountsDir, err)
 		}
+		detachLoopDevices(ctx, imagePath)
+	}
+
+	// Remove any pre-existing image so we always allocate a fresh inode instead of
+	// truncating a file still held by a stale kernel loop device.
+	if err := os.Remove(imagePath); err != nil && !os.IsNotExist(err) {
+		return "", "", fmt.Errorf("failed removing stale sparse image %s: %w", imagePath, err)
 	}
 
 	f, err := os.Create(imagePath)
@@ -189,6 +196,7 @@ func (m *LocalVolumeManager) DeleteVolume(ctx context.Context, volumeID string) 
 		if err := unmountDir(ctx, mountDir); err != nil {
 			return fmt.Errorf("failed unmounting volume %s at %s: %w", volumeID, mountDir, err)
 		}
+		detachLoopDevices(ctx, imagePath)
 	}
 
 	if err := os.RemoveAll(mountDir); err != nil {
@@ -455,6 +463,23 @@ func mountLoopImage(ctx context.Context, imagePath, mountDir string) error {
 		return fmt.Errorf("mount -o loop failed (%s): %w", string(output), err)
 	}
 	return nil
+}
+
+// detachLoopDevices detaches any active kernel loop devices backed by imagePath.
+func detachLoopDevices(ctx context.Context, imagePath string) {
+	if _, err := os.Stat(imagePath); err != nil {
+		return
+	}
+	out, err := exec.CommandContext(ctx, "losetup", "-j", imagePath, "-O", "NAME", "--noheadings").Output()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		dev := strings.TrimSpace(line)
+		if dev != "" {
+			_ = exec.CommandContext(ctx, "losetup", "-d", dev).Run()
+		}
+	}
 }
 
 func unmountDir(ctx context.Context, mountDir string) error {

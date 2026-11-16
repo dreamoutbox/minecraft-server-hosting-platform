@@ -58,3 +58,7 @@ if ! findmnt -n -o PROPAGATION "$TARGET" 2>/dev/null | grep -q "shared"; then
 fi
 
 refresh_wsl_docker_desktop_bind
+
+if [ -z "$(docker ps -aq --filter 'name=^/mc-server-' 2>/dev/null || true)" ]; then
+	"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dev-cleanup-wsl-mounts.sh"
+fi
