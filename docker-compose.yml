@@ -13,7 +13,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "minecraft_hosting"]
+      test: [ "CMD", "pg_isready", "-U", "postgres", "-d", "minecraft_hosting" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -22,7 +22,7 @@ services:
     image: chrislusf/seaweedfs:latest
     container_name: mc_seaweedfs
     restart: unless-stopped
-    command: ["server", "-dir=/data", "-s3"]
+    command: [ "server", "-dir=/data", "-s3" ]
     ports:
       - "8333:8333"
       - "9333:9333"
@@ -30,7 +30,7 @@ services:
       - seaweedfs_data:/data
 
   server:
-    image: ${SERVER_IMAGE:-minecraft-hosting-server:latest}
+    image: ${SERVER_IMAGE:-dreamoutbox/minecraft-hosting-server:latest}
     container_name: mc_server
     restart: unless-stopped
     depends_on:
@@ -62,22 +62,45 @@ services:
       - "8080:8080"
 
   worker:
-    image: ${WORKER_IMAGE:-minecraft-hosting-worker:latest}
+    image: ${WORKER_IMAGE:-dreamoutbox/minecraft-hosting-worker:latest}
     container_name: mc_worker
     restart: unless-stopped
     environment:
       WORKER_PORT: "9090"
       WORKER_API_KEY: dev-worker-key
       WORKER_BASE_DIR: /var/lib/mc-platform
-      WORKER_MAX_SERVERS: "20"
-      WORKER_LOOP_DEVICE_ENABLED: "false"
+      WORKER_MAX_SERVERS: "8"
+      WORKER_LOOP_DEVICE_ENABLED: "true"
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_ADMIN
+    # Allow allocating and mounting loop devices (block major 7)
+    # without full privileged mode. Docker does not dynamically create
+    # /dev/loopN nodes inside non-privileged containers, so loop0-loop7
+    # must be mapped explicitly for `mount -o loop` to succeed.
+    # Note: >8 concurrent loop mounts will fail unless more /dev/loopN
+    # nodes are pre-created and mapped, or the worker runs on the host / privileged.
+    devices:
+      - /dev/loop-control:/dev/loop-control
+      - /dev/loop0:/dev/loop0
+      - /dev/loop1:/dev/loop1
+      - /dev/loop2:/dev/loop2
+      - /dev/loop3:/dev/loop3
+      - /dev/loop4:/dev/loop4
+      - /dev/loop5:/dev/loop5
+      - /dev/loop6:/dev/loop6
+      - /dev/loop7:/dev/loop7
+    device_cgroup_rules:
+      - "b 7:* rmw"
     ports:
       - "9090:9090"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - worker_data:/var/lib/mc-platform
+      # rshared propagates loop mounts created inside mc_worker 
+      # to the host and spawned Minecraft containers
+      - /var/lib/mc-platform:/var/lib/mc-platform:rshared
 
 volumes:
   pgdata:
   seaweedfs_data:
-  worker_data:

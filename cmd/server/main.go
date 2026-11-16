@@ -28,8 +28,9 @@ import (
 //   - cfg: Loaded runtime configuration containing ports and limits.
 //
 // Example usage:
-//   router := SetupRouter(db, cfg)
-//   router.Run(":8080")
+//
+//	router := SetupRouter(db, cfg)
+//	router.Run(":8080")
 func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	r := gin.Default()
 	r.Use(middleware.RequestIDMiddleware())

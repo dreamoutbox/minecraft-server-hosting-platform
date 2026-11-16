@@ -5,8 +5,8 @@
 # Configurable via environment variables SERVER_IMAGE and WORKER_IMAGE.
 #
 # Environment variables:
-#   SERVER_IMAGE: Tag for the web orchestrator server image (default: minecraft-hosting-server:latest)
-#   WORKER_IMAGE: Tag for the host worker daemon image (default: minecraft-hosting-worker:latest)
+#   SERVER_IMAGE: Tag for the web orchestrator server image (default: dreamoutbox/minecraft-hosting-server:latest)
+#   WORKER_IMAGE: Tag for the host worker daemon image (default: dreamoutbox/minecraft-hosting-worker:latest)
 #
 # Arguments:
 #   $@: Optional flags forwarded directly to docker build (e.g., --no-cache).
@@ -19,8 +19,8 @@
 set -euo pipefail
 
 # Configuration with environment variable overrides
-SERVER_IMAGE="${SERVER_IMAGE:-minecraft-hosting-server:latest}"
-WORKER_IMAGE="${WORKER_IMAGE:-minecraft-hosting-worker:latest}"
+SERVER_IMAGE="${SERVER_IMAGE:-dreamoutbox/minecraft-hosting-server:latest}"
+WORKER_IMAGE="${WORKER_IMAGE:-dreamoutbox/minecraft-hosting-worker:latest}"
 
 # build_server_image compiles and packages the orchestrator binary into an Alpine container image.
 #

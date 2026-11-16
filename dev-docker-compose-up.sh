@@ -40,10 +40,14 @@ resolve_compose_command() {
 # Example usage:
 #   main "$@"
 main() {
+	local script_dir
+	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 	resolve_compose_command
+	"$script_dir/dev-setup-shared-mount.sh"
 
 	echo "Starting platform services with docker compose..."
-	"${DOCKER_COMPOSE[@]}" up -d "$@"
+	"${DOCKER_COMPOSE[@]}" -f docker-compose.yml -f docker-compose.dev.yml up -d "$@"
 	echo "Platform services started successfully."
 }
 

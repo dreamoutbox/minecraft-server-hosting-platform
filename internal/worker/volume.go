@@ -23,11 +23,11 @@ type VolumeManager interface {
 
 // LocalVolumeManager manages sparse image files and directory mounts on the node host.
 type LocalVolumeManager struct {
-	baseDir         string
-	useLoopMount    bool
-	mu              sync.RWMutex
-	volumeMountMap  map[string]string
-	volumeImageMap  map[string]string
+	baseDir        string
+	useLoopMount   bool
+	mu             sync.RWMutex
+	volumeMountMap map[string]string
+	volumeImageMap map[string]string
 }
 
 // NewLocalVolumeManager initializes a volume manager rooted at the specified base directory.
@@ -37,7 +37,8 @@ type LocalVolumeManager struct {
 //   - useLoopMount: Whether to execute raw loop device mount commands (requires SYS_ADMIN).
 //
 // Example usage:
-//   vm := worker.NewLocalVolumeManager("./data/volumes", false)
+//
+//	vm := worker.NewLocalVolumeManager("./data/volumes", false)
 func NewLocalVolumeManager(baseDir string, useLoopMount bool) *LocalVolumeManager {
 	return &LocalVolumeManager{
 		baseDir:        baseDir,
@@ -55,7 +56,8 @@ func NewLocalVolumeManager(baseDir string, useLoopMount bool) *LocalVolumeManage
 //   - diskLimitGB: Disk allocation size bound in gigabytes.
 //
 // Example usage:
-//   mount, img, err := vm.CreateVolume(ctx, "server-42", 10)
+//
+//	mount, img, err := vm.CreateVolume(ctx, "server-42", 10)
 func (m *LocalVolumeManager) CreateVolume(ctx context.Context, volumeID string, diskLimitGB int) (string, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -109,7 +111,8 @@ func (m *LocalVolumeManager) CreateVolume(ctx context.Context, volumeID string, 
 //   - volumeID: Unique volume identifier.
 //
 // Example usage:
-//   err := vm.DeleteVolume(ctx, "server-42")
+//
+//	err := vm.DeleteVolume(ctx, "server-42")
 func (m *LocalVolumeManager) DeleteVolume(ctx context.Context, volumeID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -146,7 +149,8 @@ func (m *LocalVolumeManager) DeleteVolume(ctx context.Context, volumeID string) 
 //   - w: Output writer receiving the streaming tar archive.
 //
 // Example usage:
-//   err := vm.ExportVolume(ctx, "server-42", responseWriter)
+//
+//	err := vm.ExportVolume(ctx, "server-42", responseWriter)
 func (m *LocalVolumeManager) ExportVolume(ctx context.Context, volumeID string, w io.Writer) error {
 	m.mu.RLock()
 	mountDir, ok := m.volumeMountMap[volumeID]
@@ -213,7 +217,8 @@ func (m *LocalVolumeManager) ExportVolume(ctx context.Context, volumeID string, 
 //   - r: Reader providing the tar stream archive.
 //
 // Example usage:
-//   err := vm.ImportVolume(ctx, "server-42", requestBody)
+//
+//	err := vm.ImportVolume(ctx, "server-42", requestBody)
 func (m *LocalVolumeManager) ImportVolume(ctx context.Context, volumeID string, r io.Reader) error {
 	m.mu.Lock()
 	mountDir, ok := m.volumeMountMap[volumeID]
@@ -290,7 +295,8 @@ func (m *LocalVolumeManager) ImportVolume(ctx context.Context, volumeID string, 
 //   - volumeID: Identifier of the volume.
 //
 // Example usage:
-//   path, ok := vm.GetVolumePath("server-42")
+//
+//	path, ok := vm.GetVolumePath("server-42")
 func (m *LocalVolumeManager) GetVolumePath(volumeID string) (string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

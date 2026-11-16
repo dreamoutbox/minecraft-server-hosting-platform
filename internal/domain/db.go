@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -119,7 +121,8 @@ func SeedPlans(db *gorm.DB) error {
 //   - maxServers: Capacity limit for the host.
 //
 // Example usage:
-//   err := domain.SeedDefaultHost(db, "compose-worker", "http://worker:9090", "dev-worker-key", 20)
+//
+//	err := domain.SeedDefaultHost(db, "compose-worker", "http://worker:9090", "dev-worker-key", 20)
 func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, apiKey string, maxServers int) error {
 	if workerBaseURL == "" {
 		return nil
@@ -150,3 +153,50 @@ func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, apiKey string, maxSer
 	return db.Save(&host).Error
 }
 
+// SeedUserSpec defines a user account to seed into the database.
+type SeedUserSpec struct {
+	Email    string
+	Password string
+	Role     UserRole
+}
+
+// SeedUsers inserts users into the database if they do not already exist.
+//
+// Arguments:
+//   - db: Active GORM database instance.
+//   - specs: Slice of user specifications to seed.
+//
+// Example usage:
+//
+//	if err := domain.SeedUsers(db, defaultDevUsers); err != nil {
+//	    log.Fatalf("failed seeding users: %v", err)
+//	}
+func SeedUsers(db *gorm.DB, specs []SeedUserSpec) error {
+	for _, spec := range specs {
+		var existing User
+		err := db.Where("email = ?", spec.Email).First(&existing).Error
+		if err == nil {
+			log.Printf("user %s already exists, skipping", spec.Email)
+			continue
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(spec.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+
+		user := User{
+			Email:        spec.Email,
+			PasswordHash: string(hashedPassword),
+			Role:         spec.Role,
+		}
+		if err := db.Create(&user).Error; err != nil {
+			return err
+		}
+		log.Printf("seeded user %s (role=%s)", spec.Email, spec.Role)
+	}
+	return nil
+}

@@ -29,10 +29,11 @@ type Config struct {
 //   - None (reads directly from process environment).
 //
 // Example usage:
-//   cfg, err := config.LoadFromEnv()
-//   if err != nil {
-//       log.Fatalf("failed loading config: %v", err)
-//   }
+//
+//	cfg, err := config.LoadFromEnv()
+//	if err != nil {
+//	    log.Fatalf("failed loading config: %v", err)
+//	}
 func LoadFromEnv() (*Config, error) {
 	serverPort := getEnv("PORT", "8080")
 	dbHost := getEnv("DB_HOST", "localhost")
@@ -94,7 +95,8 @@ func LoadFromEnv() (*Config, error) {
 //   - fallback: Value to return if key is unset or empty.
 //
 // Example usage:
-//   port := getEnv("PORT", "8080")
+//
+//	port := getEnv("PORT", "8080")
 func getEnv(key string, fallback string) string {
 	if val := os.Getenv(key); val != "" {
 		return val
@@ -109,7 +111,8 @@ func getEnv(key string, fallback string) string {
 //   - fallback: Default integer value to use if key is unset.
 //
 // Example usage:
-//   minPort, err := parseEnvInt("PORT_RANGE_MIN", 25565)
+//
+//	minPort, err := parseEnvInt("PORT_RANGE_MIN", 25565)
 func parseEnvInt(key string, fallback int) (int, error) {
 	val := os.Getenv(key)
 	if val == "" {
