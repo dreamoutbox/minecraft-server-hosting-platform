@@ -58,6 +58,8 @@ services:
       DEFAULT_WORKER_URL: http://worker:9090
       DEFAULT_WORKER_KEY: dev-worker-key
       DEFAULT_WORKER_NAME: compose-worker
+      DEFAULT_FILESERVER_URL: http://localhost:9100
+      DEFAULT_FILESERVER_INTERNAL_URL: http://fileserver:9100
     ports:
       - "8080:8080"
 
@@ -102,6 +104,23 @@ services:
       # to the host and spawned Minecraft containers
       - /var/lib/mc-platform:/var/lib/mc-platform:rshared
 
+  fileserver:
+    image: ${FILESERVER_IMAGE:-dreamoutbox/minecraft-hosting-fileserver:latest}
+    container_name: mc_fileserver
+    restart: unless-stopped
+    environment:
+      FILESERVER_PORT: "9100"
+      FILESERVER_SQLITE_PATH: /data/fileserver.db
+      FILESERVER_MOUNTS_DIR: /var/lib/mc-platform/mounts
+      FILESERVER_API_KEY: dev-worker-key
+      FILESERVER_JWT_SECRET: dev-fileserver-jwt-secret-change-in-prod
+    ports:
+      - "9100:9100"
+    volumes:
+      - /var/lib/mc-platform:/var/lib/mc-platform:rshared
+      - fileserver_data:/data
+
 volumes:
   pgdata:
   seaweedfs_data:
+  fileserver_data:

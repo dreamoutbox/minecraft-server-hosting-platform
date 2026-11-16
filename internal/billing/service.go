@@ -36,7 +36,8 @@ type Service struct {
 //   - webhookSecret: Secret key used to verify incoming webhook signatures.
 //
 // Example usage:
-//   svc := billing.NewService(db, paymentProvider, hostingSvc, "whsec_123")
+//
+//	svc := billing.NewService(db, paymentProvider, hostingSvc, "whsec_123")
 func NewService(db *gorm.DB, provider PaymentProvider, suspender ServerSuspender, webhookSecret string) *Service {
 	return &Service{
 		db:            db,
@@ -55,7 +56,8 @@ func NewService(db *gorm.DB, provider PaymentProvider, suspender ServerSuspender
 //   - paymentMethodID: Token or ID of the payment method (e.g. pm_card_...).
 //
 // Example usage:
-//   err := svc.SavePaymentMethod(ctx, user.ID, "pm_card_visa")
+//
+//	err := svc.SavePaymentMethod(ctx, user.ID, "pm_card_visa")
 func (s *Service) SavePaymentMethod(ctx context.Context, userID uint, paymentMethodID string) error {
 	var user domain.User
 	if err := s.db.WithContext(ctx).First(&user, userID).Error; err != nil {
@@ -87,7 +89,8 @@ func (s *Service) SavePaymentMethod(ctx context.Context, userID uint, paymentMet
 //   - serverID: Associated game server ID (optional).
 //
 // Example usage:
-//   sub, err := svc.CreateSubscription(ctx, user.ID, plan.ID, &server.ID)
+//
+//	sub, err := svc.CreateSubscription(ctx, user.ID, plan.ID, &server.ID)
 func (s *Service) CreateSubscription(ctx context.Context, userID uint, planID uint, serverID *uint) (*domain.Subscription, error) {
 	var user domain.User
 	if err := s.db.WithContext(ctx).First(&user, userID).Error; err != nil {
@@ -154,7 +157,8 @@ func (s *Service) CreateSubscription(ctx context.Context, userID uint, planID ui
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
-//   err := svc.ProcessBillingCycle(ctx)
+//
+//	err := svc.ProcessBillingCycle(ctx)
 func (s *Service) ProcessBillingCycle(ctx context.Context) error {
 	now := time.Now()
 	var subs []domain.Subscription
@@ -234,7 +238,8 @@ func (s *Service) ProcessBillingCycle(ctx context.Context) error {
 //   - signatureHeader: Signature value from Stripe-Signature header.
 //
 // Example usage:
-//   err := svc.HandleWebhook(ctx, rawBody, signatureHeader)
+//
+//	err := svc.HandleWebhook(ctx, rawBody, signatureHeader)
 func (s *Service) HandleWebhook(ctx context.Context, payload []byte, signatureHeader string) error {
 	event, err := s.provider.VerifyWebhookSignature(payload, signatureHeader, s.webhookSecret)
 	if err != nil {
@@ -259,7 +264,8 @@ func (s *Service) HandleWebhook(ctx context.Context, payload []byte, signatureHe
 //   - userID: User primary key.
 //
 // Example usage:
-//   subs, err := svc.ListUserSubscriptions(ctx, user.ID)
+//
+//	subs, err := svc.ListUserSubscriptions(ctx, user.ID)
 func (s *Service) ListUserSubscriptions(ctx context.Context, userID uint) ([]domain.Subscription, error) {
 	var subs []domain.Subscription
 	err := s.db.WithContext(ctx).
@@ -278,7 +284,8 @@ func (s *Service) ListUserSubscriptions(ctx context.Context, userID uint) ([]dom
 //   - cronSpec: Standard cron schedule string (e.g. "@daily" or "@hourly").
 //
 // Example usage:
-//   err := svc.ScheduleBillingCron("@daily")
+//
+//	err := svc.ScheduleBillingCron("@daily")
 func (s *Service) ScheduleBillingCron(cronSpec string) error {
 	_, err := s.cronRunner.AddFunc(cronSpec, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -301,7 +308,8 @@ func (s *Service) ScheduleBillingCron(cronSpec string) error {
 //   - None.
 //
 // Example usage:
-//   svc.StopCron()
+//
+//	svc.StopCron()
 func (s *Service) StopCron() {
 	if s.cronRunner != nil {
 		s.cronRunner.Stop()

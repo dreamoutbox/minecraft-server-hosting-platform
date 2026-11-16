@@ -4,9 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/dreamoutbox/authkit"
 	"github.com/gin-gonic/gin"
-
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 )
 
 // Handler serves HTTP endpoints for backup generation, listing, and restoration.
@@ -119,7 +118,7 @@ func parseIDParam(c *gin.Context, paramName string) (uint, error) {
 //   backupHandler.RegisterRoutes(router, cfg.JWTSecret)
 func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 	backups := r.Group("/api/v1/servers/:id/backups")
-	backups.Use(auth.AuthMiddleware(jwtSecret))
+	backups.Use(authkit.AuthMiddleware(jwtSecret))
 	{
 		backups.POST("", h.CreateBackup)
 		backups.GET("", h.ListBackups)

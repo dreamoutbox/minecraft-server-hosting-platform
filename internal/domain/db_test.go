@@ -131,7 +131,8 @@ func TestSeedDefaultHost(t *testing.T) {
 	}
 
 	testURL := "http://test-worker-node:9090"
-	if err := SeedDefaultHost(db, "test-worker", testURL, "test-key-123", 20); err != nil {
+	testFSURL := "http://test-worker-node:9100"
+	if err := SeedDefaultHost(db, "test-worker", testURL, testFSURL, "test-key-123", 20); err != nil {
 		t.Fatalf("SeedDefaultHost failed: %v", err)
 	}
 
@@ -142,9 +143,12 @@ func TestSeedDefaultHost(t *testing.T) {
 	if host.Status != HostStatusActive {
 		t.Errorf("expected host active, got: %v", host.Status)
 	}
+	if host.FileServerBaseURL != testFSURL {
+		t.Errorf("expected fileserver url %s, got: %s", testFSURL, host.FileServerBaseURL)
+	}
 
 	// Test idempotency
-	if err := SeedDefaultHost(db, "test-worker", testURL, "new-test-key", 20); err != nil {
+	if err := SeedDefaultHost(db, "test-worker", testURL, testFSURL, "new-test-key", 20); err != nil {
 		t.Fatalf("SeedDefaultHost idempotent run failed: %v", err)
 	}
 	_ = db.Where("worker_base_url = ?", testURL).First(&host)

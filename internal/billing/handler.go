@@ -4,9 +4,9 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/dreamoutbox/authkit"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/middleware"
 )
 
@@ -21,7 +21,8 @@ type Handler struct {
 //   - service: Domain billing service.
 //
 // Example usage:
-//   h := billing.NewHandler(svc)
+//
+//	h := billing.NewHandler(svc)
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
@@ -43,9 +44,10 @@ type CreateSubscriptionRequest struct {
 //   - c: Active Gin request context containing SavePaymentMethodRequest JSON.
 //
 // Example usage:
-//   POST /api/v1/billing/payment-methods
+//
+//	POST /api/v1/billing/payment-methods
 func (h *Handler) SavePaymentMethod(c *gin.Context) {
-	userID, err := auth.GetUserIDFromContext(c)
+	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -71,9 +73,10 @@ func (h *Handler) SavePaymentMethod(c *gin.Context) {
 //   - c: Active Gin request context containing CreateSubscriptionRequest JSON.
 //
 // Example usage:
-//   POST /api/v1/billing/subscriptions
+//
+//	POST /api/v1/billing/subscriptions
 func (h *Handler) CreateSubscription(c *gin.Context) {
-	userID, err := auth.GetUserIDFromContext(c)
+	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -100,9 +103,10 @@ func (h *Handler) CreateSubscription(c *gin.Context) {
 //   - c: Active Gin request context.
 //
 // Example usage:
-//   GET /api/v1/billing/subscriptions
+//
+//	GET /api/v1/billing/subscriptions
 func (h *Handler) ListSubscriptions(c *gin.Context) {
-	userID, err := auth.GetUserIDFromContext(c)
+	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -123,7 +127,8 @@ func (h *Handler) ListSubscriptions(c *gin.Context) {
 //   - c: Active Gin request context containing raw payload and Stripe-Signature header.
 //
 // Example usage:
-//   POST /api/v1/billing/webhook
+//
+//	POST /api/v1/billing/webhook
 func (h *Handler) Webhook(c *gin.Context) {
 	sigHeader := c.GetHeader("Stripe-Signature")
 	if sigHeader == "" {
@@ -152,7 +157,8 @@ func (h *Handler) Webhook(c *gin.Context) {
 //   - jwtSecret: Secret key to configure AuthMiddleware.
 //
 // Example usage:
-//   billingHandler.RegisterRoutes(router, cfg.JWTSecret)
+//
+//	billingHandler.RegisterRoutes(router, cfg.JWTSecret)
 func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 	billingGroup := r.Group("/api/v1/billing")
 	billingGroup.Use(middleware.RateLimitMiddleware(10, 20))
@@ -162,7 +168,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 
 	// User-authenticated billing management
 	authenticated := billingGroup.Group("")
-	authenticated.Use(auth.AuthMiddleware(jwtSecret))
+	authenticated.Use(authkit.AuthMiddleware(jwtSecret))
 	{
 		authenticated.POST("/payment-methods", h.SavePaymentMethod)
 		authenticated.POST("/subscriptions", h.CreateSubscription)

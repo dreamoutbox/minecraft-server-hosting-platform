@@ -13,9 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dreamoutbox/authkit"
+	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
 )
@@ -131,7 +132,7 @@ func setupHostingTestEnv(t *testing.T) (*gin.Engine, *Service, *mockWorkerClient
 	}
 	_ = db.Create(&user)
 
-	tokens, _ := auth.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
+	tokens, _ := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
 	return r, service, mockClient, &user, tokens.AccessToken
 }
 
@@ -397,5 +398,131 @@ type failingWorkerClient struct {
 
 func (f *failingWorkerClient) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*worker.CreateVolumeResponse, error) {
 	return nil, errors.New("dial tcp: connect: connection refused")
+}
+
+func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_DSN")
+	if dsn == "" {
+		dsn = "host=localhost user=postgres password=postgrespassword dbname=minecraft_hosting port=5432 sslmode=disable"
+	}
+	db, err := domain.InitDB(dsn)
+	if err != nil {
+		t.Skipf("skipping test: database unreachable: %v", err)
+		return
+	}
+	_ = domain.AutoMigrate(db)
+	_ = domain.SeedPlans(db)
+
+	var callOrder []string
+	var revokedServerID string
+	var failRevoke bool
+
+	fakeFS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer fs-secret-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/users":
+			callOrder = append(callOrder, "ensure_user")
+			_ = json.NewEncoder(w).Encode(fsclient.EnsureUserResponse{ID: 1, Email: "u@example.com", Created: true})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/permissions":
+			callOrder = append(callOrder, "allow")
+			_ = json.NewEncoder(w).Encode(fsclient.PermissionResponse{Allowed: true})
+		case r.Method == http.MethodPost && r.URL.Path[len(r.URL.Path)-len("/login-token"):] == "/login-token":
+			callOrder = append(callOrder, "login_token")
+			_ = json.NewEncoder(w).Encode(fsclient.LoginTokenResponse{Token: "tok-abc", ExpiresAt: time.Now().Add(time.Minute)})
+		case r.Method == http.MethodDelete && r.URL.Path != "":
+			if failRevoke {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			revokedServerID = r.URL.Path
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer fakeFS.Close()
+
+	db.Model(&domain.Host{}).Where("1 = 1").Update("status", domain.HostStatusDisabled)
+	host := domain.Host{
+		Hostname:          fmt.Sprintf("fs-node-%d", time.Now().UnixNano()),
+		WorkerBaseURL:     "http://fs-worker:9090",
+		FileServerBaseURL: fakeFS.URL,
+		APIKey:            "fs-secret-key",
+		APIKeyHash:        "fs-hash",
+		MaxServers:        10,
+		Status:            domain.HostStatusActive,
+	}
+	if err := db.Create(&host).Error; err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+
+	user := domain.User{
+		Email:        fmt.Sprintf("fs-owner-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hashed",
+		Role:         domain.UserRoleUser,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	var plan domain.Plan
+	_ = db.First(&plan)
+
+	portMin, portMax := 25760, 25770
+	db.Where("port >= ? AND port <= ?", portMin, portMax).Delete(&domain.Server{})
+
+	mockWorker := newMockWorkerClient()
+	svc := NewService(db, NewLeastLoadedScheduler(db), NewPortAllocator(db, portMin, portMax), func(baseURL, apiKey string) worker.Client {
+		return mockWorker
+	})
+
+	srv, err := svc.CreateServer(context.Background(), user.ID, "FSWorld", plan.ID)
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+
+	openURL, err := svc.OpenFileManagerURL(context.Background(), user.ID, srv.ID)
+	if err != nil {
+		t.Fatalf("OpenFileManagerURL: %v", err)
+	}
+
+	expectedPrefix := fakeFS.URL + "/login?"
+	if len(openURL) <= len(expectedPrefix) || openURL[:len(expectedPrefix)] != expectedPrefix {
+		t.Fatalf("unexpected openURL: %s", openURL)
+	}
+	expectedCalls := []string{"ensure_user", "allow", "login_token"}
+	if len(callOrder) != len(expectedCalls) {
+		t.Fatalf("expected call order %v, got %v", expectedCalls, callOrder)
+	}
+	for i := range expectedCalls {
+		if callOrder[i] != expectedCalls[i] {
+			t.Errorf("call %d: expected %s, got %s", i, expectedCalls[i], callOrder[i])
+		}
+	}
+
+	// Verify DeleteServer revokes fileserver permissions and tolerates fileserver errors.
+	if err := svc.DeleteServer(context.Background(), user.ID, srv.ID); err != nil {
+		t.Fatalf("DeleteServer: %v", err)
+	}
+	expectedRevokePath := fmt.Sprintf("/api/v1/servers/%d/permissions", srv.ID)
+	if revokedServerID != expectedRevokePath {
+		t.Errorf("expected revoke path %s, got %s", expectedRevokePath, revokedServerID)
+	}
+
+	// Second server: fail revoke must not fail DeleteServer.
+	srv2, err := svc.CreateServer(context.Background(), user.ID, "FSWorld2", plan.ID)
+	if err != nil {
+		t.Fatalf("CreateServer 2: %v", err)
+	}
+	failRevoke = true
+	if err := svc.DeleteServer(context.Background(), user.ID, srv2.ID); err != nil {
+		t.Fatalf("DeleteServer should succeed even when fileserver revoke fails: %v", err)
+	}
+
+	db.Delete(&host)
+	db.Delete(&user)
 }
 

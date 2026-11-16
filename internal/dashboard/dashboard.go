@@ -4,21 +4,19 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
-	"io"
 	"net/http"
-	"path/filepath"
+	"net/url"
 	"strconv"
 	"strings"
 
+	"github.com/dreamoutbox/authkit"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/storage"
 )
 
 //go:embed templates/*
@@ -26,14 +24,13 @@ var templateFS embed.FS
 
 // Service coordinates dashboard views and delegates exclusively to public domain service interfaces.
 type Service struct {
-	db              *gorm.DB
-	hostingSvc      *hosting.Service
-	backupSvc       *backup.Service
-	billingSvc      *billing.Service
-	migrationSvc    *hosting.MigrationService
-	storageProvider storage.StorageProvider
-	jwtSecret       string
-	tmpl            map[string]*template.Template
+	db           *gorm.DB
+	hostingSvc   *hosting.Service
+	backupSvc    *backup.Service
+	billingSvc   *billing.Service
+	migrationSvc *hosting.MigrationService
+	jwtSecret    string
+	tmpl         map[string]*template.Template
 }
 
 // NewService instantiates a decoupled dashboard controller.
@@ -44,29 +41,26 @@ type Service struct {
 //   - backupSvc: Backup and restore service.
 //   - billingSvc: Subscription and billing service.
 //   - migrationSvc: Host migration coordinator.
-//   - storageProvider: Pluggable object storage interface.
 //   - jwtSecret: Secret key to verify and issue session tokens.
 //
 // Example usage:
-//   dash := dashboard.NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, sp, "jwt-secret")
+//   dash := dashboard.NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, "jwt-secret")
 func NewService(
 	db *gorm.DB,
 	hostingSvc *hosting.Service,
 	backupSvc *backup.Service,
 	billingSvc *billing.Service,
 	migrationSvc *hosting.MigrationService,
-	storageProvider storage.StorageProvider,
 	jwtSecret string,
 ) *Service {
 	s := &Service{
-		db:              db,
-		hostingSvc:      hostingSvc,
-		backupSvc:       backupSvc,
-		billingSvc:      billingSvc,
-		migrationSvc:    migrationSvc,
-		storageProvider: storageProvider,
-		jwtSecret:       jwtSecret,
-		tmpl:            make(map[string]*template.Template),
+		db:           db,
+		hostingSvc:   hostingSvc,
+		backupSvc:    backupSvc,
+		billingSvc:   billingSvc,
+		migrationSvc: migrationSvc,
+		jwtSecret:    jwtSecret,
+		tmpl:         make(map[string]*template.Template),
 	}
 	s.loadTemplates()
 	return s
@@ -89,7 +83,6 @@ func (s *Service) loadTemplates() {
 		"servers_list.html",
 		"server_create.html",
 		"server_detail.html",
-		"files.html",
 		"billing.html",
 	}
 
@@ -112,7 +105,7 @@ func (s *Service) renderView(c *gin.Context, page string, data map[string]interf
 	}
 
 	// Attach user email and query flash messages if present
-	if userVal, exists := c.Get(auth.ContextEmailKey); exists {
+	if userVal, exists := c.Get(authkit.ContextEmailKey); exists {
 		data["UserEmail"] = userVal
 	}
 	if msg := c.Query("success"); msg != "" {
@@ -126,31 +119,6 @@ func (s *Service) renderView(c *gin.Context, page string, data map[string]interf
 	_ = tmpl.ExecuteTemplate(c.Writer, "layout", data)
 }
 
-// authenticateSession middleware inspects browser cookies for valid JWT authentication.
-func (s *Service) authenticateSession() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		tokenStr, err := c.Cookie("token")
-		if err != nil || tokenStr == "" {
-			c.Redirect(http.StatusFound, "/login")
-			c.Abort()
-			return
-		}
-
-		claims, err := auth.ParseAndValidateToken(tokenStr, s.jwtSecret, auth.TokenTypeAccess)
-		if err != nil {
-			c.SetCookie("token", "", -1, "/", "", false, true)
-			c.Redirect(http.StatusFound, "/login")
-			c.Abort()
-			return
-		}
-
-		c.Set(auth.ContextUserIDKey, claims.UserID)
-		c.Set(auth.ContextEmailKey, claims.Email)
-		c.Set(auth.ContextRoleKey, claims.Role)
-		c.Next()
-	}
-}
-
 // ShowLogin renders the login page.
 func (s *Service) ShowLogin(c *gin.Context) {
 	s.renderView(c, "login.html", nil)
@@ -158,24 +126,24 @@ func (s *Service) ShowLogin(c *gin.Context) {
 
 // ProcessLogin authenticates credentials and establishes browser session cookie.
 func (s *Service) ProcessLogin(c *gin.Context) {
-	email := strings.ToLower(strings.TrimSpace(c.PostForm("email")))
+	email := c.PostForm("email")
 	password := c.PostForm("password")
 
-	var user domain.User
-	if err := s.db.Where("email = ?", email).First(&user).Error; err != nil || !auth.CheckPassword(user.PasswordHash, password) {
+	user, err := authkit.Authenticate(s.db, email, password)
+	if err != nil {
 		s.renderView(c, "login.html", map[string]interface{}{
 			"FlashError": "Invalid email or password",
 		})
 		return
 	}
 
-	tokens, err := auth.GenerateTokenPair(user.ID, user.Email, user.Role, s.jwtSecret)
+	tokens, err := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, s.jwtSecret)
 	if err != nil {
 		s.renderView(c, "login.html", map[string]interface{}{"FlashError": "Failed generating session"})
 		return
 	}
 
-	c.SetCookie("token", tokens.AccessToken, 3600*24, "/", "", false, true)
+	authkit.SetSessionCookie(c, "token", tokens.AccessToken, 3600*24, false)
 	c.Redirect(http.StatusFound, "/dashboard")
 }
 
@@ -204,7 +172,7 @@ func (s *Service) ProcessRegister(c *gin.Context) {
 		return
 	}
 
-	hashed, err := auth.HashPassword(password)
+	hashed, err := authkit.HashPassword(password)
 	if err != nil {
 		s.renderView(c, "register.html", map[string]interface{}{"FlashError": "Failed encrypting credentials"})
 		return
@@ -220,20 +188,20 @@ func (s *Service) ProcessRegister(c *gin.Context) {
 		return
 	}
 
-	tokens, _ := auth.GenerateTokenPair(newUser.ID, newUser.Email, newUser.Role, s.jwtSecret)
-	c.SetCookie("token", tokens.AccessToken, 3600*24, "/", "", false, true)
+	tokens, _ := authkit.GenerateTokenPair(newUser.ID, newUser.Email, newUser.Role, s.jwtSecret)
+	authkit.SetSessionCookie(c, "token", tokens.AccessToken, 3600*24, false)
 	c.Redirect(http.StatusFound, "/dashboard?success=Welcome+to+your+dashboard!")
 }
 
 // Logout terminates user browser session.
 func (s *Service) Logout(c *gin.Context) {
-	c.SetCookie("token", "", -1, "/", "", false, true)
+	authkit.ClearSessionCookie(c, "token")
 	c.Redirect(http.StatusFound, "/login?success=Logged+out+successfully")
 }
 
 // ListServers displays all game servers owned by the authenticated user.
 func (s *Service) ListServers(c *gin.Context) {
-	userID, _ := auth.GetUserIDFromContext(c)
+	userID, _ := authkit.GetUserIDFromContext(c)
 	servers, err := s.hostingSvc.ListServers(c.Request.Context(), userID)
 	if err != nil {
 		s.renderView(c, "servers_list.html", map[string]interface{}{"FlashError": err.Error()})
@@ -257,7 +225,7 @@ func (s *Service) ShowCreateServer(c *gin.Context) {
 
 // ProcessCreateServer provisions a new Minecraft game server via hosting service.
 func (s *Service) ProcessCreateServer(c *gin.Context) {
-	userID, _ := auth.GetUserIDFromContext(c)
+	userID, _ := authkit.GetUserIDFromContext(c)
 	name := strings.TrimSpace(c.PostForm("name"))
 	planIDVal, _ := strconv.ParseUint(c.PostForm("plan_id"), 10, 64)
 
@@ -277,7 +245,7 @@ func (s *Service) ProcessCreateServer(c *gin.Context) {
 
 // ShowServerDetail renders server diagnostics, backups, and migration tools.
 func (s *Service) ShowServerDetail(c *gin.Context) {
-	userID, _ := auth.GetUserIDFromContext(c)
+	userID, _ := authkit.GetUserIDFromContext(c)
 	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 
 	server, liveStatus, err := s.hostingSvc.GetServer(c.Request.Context(), userID, uint(serverIDVal))
@@ -299,7 +267,7 @@ func (s *Service) ShowServerDetail(c *gin.Context) {
 
 // StartServer resumes a stopped server.
 func (s *Service) StartServer(c *gin.Context) {
-	userID, _ := auth.GetUserIDFromContext(c)
+	userID, _ := authkit.GetUserIDFromContext(c)
 	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 
 	_, err := s.hostingSvc.StartServer(c.Request.Context(), userID, uint(serverIDVal))
@@ -312,7 +280,7 @@ func (s *Service) StartServer(c *gin.Context) {
 
 // StopServer halts a running server container.
 func (s *Service) StopServer(c *gin.Context) {
-	userID, _ := auth.GetUserIDFromContext(c)
+	userID, _ := authkit.GetUserIDFromContext(c)
 	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 
 	_, err := s.hostingSvc.StopServer(c.Request.Context(), userID, uint(serverIDVal))
@@ -325,7 +293,7 @@ func (s *Service) StopServer(c *gin.Context) {
 
 // DeleteServer destroys a server instance.
 func (s *Service) DeleteServer(c *gin.Context) {
-	userID, _ := auth.GetUserIDFromContext(c)
+	userID, _ := authkit.GetUserIDFromContext(c)
 	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 
 	err := s.hostingSvc.DeleteServer(c.Request.Context(), userID, uint(serverIDVal))
@@ -363,7 +331,7 @@ func (s *Service) RestoreBackup(c *gin.Context) {
 
 // TriggerMigration moves the server to a different host.
 func (s *Service) TriggerMigration(c *gin.Context) {
-	userID, _ := auth.GetUserIDFromContext(c)
+	userID, _ := authkit.GetUserIDFromContext(c)
 	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	destHostID, _ := strconv.ParseUint(c.PostForm("destination_host_id"), 10, 64)
 
@@ -375,98 +343,34 @@ func (s *Service) TriggerMigration(c *gin.Context) {
 	c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?success=Server+migrated+successfully", serverIDVal))
 }
 
-// ShowFiles displays world files in storage scoped to the server prefix.
-func (s *Service) ShowFiles(c *gin.Context) {
-	userID, _ := auth.GetUserIDFromContext(c)
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+// OpenFileManager provisions fileserver access for the server and redirects to the node's file manager.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id'.
+//
+// Example usage:
+//
+//	GET /dashboard/servers/:id/files/open
+func (s *Service) OpenFileManager(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	serverIDVal, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || serverIDVal == 0 {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
 
-	server, _, err := s.hostingSvc.GetServer(c.Request.Context(), userID, uint(serverIDVal))
+	targetURL, err := s.hostingSvc.OpenFileManagerURL(c.Request.Context(), userID, uint(serverIDVal))
 	if err != nil {
-		c.Redirect(http.StatusFound, "/dashboard?error=Server+not+found")
+		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?error=%s", serverIDVal, url.QueryEscape(err.Error())))
 		return
 	}
 
-	prefix := fmt.Sprintf("servers/%d/", server.ID)
-	keys, _ := s.storageProvider.List(c.Request.Context(), prefix)
-
-	s.renderView(c, "files.html", map[string]interface{}{
-		"Server": server,
-		"Files":  keys,
-	})
-}
-
-// UploadFile writes an uploaded file to storage scoped to server.
-func (s *Service) UploadFile(c *gin.Context) {
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d/files?error=No+file+selected", serverIDVal))
-		return
-	}
-
-	f, err := fileHeader.Open()
-	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d/files?error=Failed+opening+file", serverIDVal))
-		return
-	}
-	defer func() { _ = f.Close() }()
-
-	data, err := io.ReadAll(f)
-	if err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d/files?error=Failed+reading+file", serverIDVal))
-		return
-	}
-
-	cleanFileName := filepath.Base(fileHeader.Filename)
-	storageKey := fmt.Sprintf("servers/%d/%s", serverIDVal, cleanFileName)
-	if err := s.storageProvider.Put(c.Request.Context(), storageKey, data); err != nil {
-		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d/files?error=Storage+error:+%s", serverIDVal, err.Error()))
-		return
-	}
-
-	c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d/files?success=File+uploaded+successfully", serverIDVal))
-}
-
-// DownloadFile streams a file from storage scoped to server.
-func (s *Service) DownloadFile(c *gin.Context) {
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	key := c.Query("key")
-
-	expectedPrefix := fmt.Sprintf("servers/%d/", serverIDVal)
-	if !strings.HasPrefix(key, expectedPrefix) {
-		c.String(http.StatusForbidden, "unauthorized storage file access")
-		return
-	}
-
-	data, err := s.storageProvider.Get(c.Request.Context(), key)
-	if err != nil {
-		c.String(http.StatusNotFound, "file not found: %v", err)
-		return
-	}
-
-	fileName := filepath.Base(key)
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
-	c.Data(http.StatusOK, "application/octet-stream", data)
-}
-
-// DeleteFile removes a file from storage.
-func (s *Service) DeleteFile(c *gin.Context) {
-	serverIDVal, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	key := c.PostForm("key")
-
-	expectedPrefix := fmt.Sprintf("servers/%d/", serverIDVal)
-	if !strings.HasPrefix(key, expectedPrefix) {
-		c.String(http.StatusForbidden, "unauthorized storage file deletion")
-		return
-	}
-
-	_ = s.storageProvider.Delete(c.Request.Context(), key)
-	c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d/files?success=File+deleted", serverIDVal))
+	c.Redirect(http.StatusFound, targetURL)
 }
 
 // ShowBilling displays customer subscriptions and payment method status.
 func (s *Service) ShowBilling(c *gin.Context) {
-	userID, _ := auth.GetUserIDFromContext(c)
+	userID, _ := authkit.GetUserIDFromContext(c)
 
 	var user domain.User
 	_ = s.db.First(&user, userID)
@@ -481,7 +385,7 @@ func (s *Service) ShowBilling(c *gin.Context) {
 
 // SavePaymentMethod attaches a new payment method via billing service.
 func (s *Service) SavePaymentMethod(c *gin.Context) {
-	userID, _ := auth.GetUserIDFromContext(c)
+	userID, _ := authkit.GetUserIDFromContext(c)
 	pmID := strings.TrimSpace(c.PostForm("payment_method_id"))
 
 	if err := s.billingSvc.SavePaymentMethod(c.Request.Context(), userID, pmID); err != nil {
@@ -509,7 +413,7 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 
 	// Protected dashboard pages
 	dash := r.Group("/dashboard")
-	dash.Use(s.authenticateSession())
+	dash.Use(authkit.CookieAuthMiddleware(s.jwtSecret, "token", "/login"))
 	{
 		dash.GET("", s.ListServers)
 		dash.GET("/servers/new", s.ShowCreateServer)
@@ -523,10 +427,7 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 		dash.POST("/servers/:id/backups/:backup_id/restore", s.RestoreBackup)
 		dash.POST("/servers/:id/migrate", s.TriggerMigration)
 
-		dash.GET("/servers/:id/files", s.ShowFiles)
-		dash.POST("/servers/:id/files/upload", s.UploadFile)
-		dash.GET("/servers/:id/files/download", s.DownloadFile)
-		dash.POST("/servers/:id/files/delete", s.DeleteFile)
+		dash.GET("/servers/:id/files/open", s.OpenFileManager)
 
 		dash.GET("/billing", s.ShowBilling)
 		dash.POST("/billing/payment-methods", s.SavePaymentMethod)

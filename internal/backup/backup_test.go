@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dreamoutbox/authkit"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/storage"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
@@ -163,7 +163,7 @@ func setupBackupTestEnv(t *testing.T) (*Service, *mockWorkerForBackup, storage.S
 	_ = db.Create(&server)
 
 	jwtSecret := "backup-secret-key"
-	tokens, _ := auth.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
+	tokens, _ := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
 
 	return service, mockWorker, sp, &server, &user, tokens.AccessToken
 }

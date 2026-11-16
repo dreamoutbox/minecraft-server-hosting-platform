@@ -9,6 +9,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.6
 	github.com/docker/docker v26.1.5+incompatible
 	github.com/docker/go-connections v0.5.0
+	github.com/dreamoutbox/authkit v0.0.0
+	github.com/dreamoutbox/fileserver v0.0.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0

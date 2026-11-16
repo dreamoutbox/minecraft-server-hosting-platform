@@ -21,6 +21,7 @@ set -euo pipefail
 # Configuration with environment variable overrides
 SERVER_IMAGE="${SERVER_IMAGE:-dreamoutbox/minecraft-hosting-server:latest}"
 WORKER_IMAGE="${WORKER_IMAGE:-dreamoutbox/minecraft-hosting-worker:latest}"
+FILESERVER_IMAGE="${FILESERVER_IMAGE:-dreamoutbox/minecraft-hosting-fileserver:latest}"
 
 # build_server_image compiles and packages the orchestrator binary into an Alpine container image.
 #
@@ -48,6 +49,19 @@ build_worker_image() {
 	echo "Worker image built successfully: ${WORKER_IMAGE}"
 }
 
+# build_fileserver_image compiles and packages the node fileserver binary into an Alpine container image.
+#
+# Arguments:
+#   $@: Extra arguments passed to docker build.
+#
+# Example usage:
+#   build_fileserver_image --no-cache
+build_fileserver_image() {
+	echo "Building fileserver image: ${FILESERVER_IMAGE}..."
+	docker build -t "${FILESERVER_IMAGE}" -f fileserver/Dockerfile . "$@"
+	echo "Fileserver image built successfully: ${FILESERVER_IMAGE}"
+}
+
 # main orchestrates building all platform images.
 #
 # Arguments:
@@ -59,9 +73,11 @@ main() {
 	echo "Starting platform Docker image builds..."
 	echo "  Server tag: ${SERVER_IMAGE}"
 	echo "  Worker tag: ${WORKER_IMAGE}"
+	echo "  Fileserver tag: ${FILESERVER_IMAGE}"
 
 	build_server_image "$@"
 	build_worker_image "$@"
+	build_fileserver_image "$@"
 
 	echo "All platform images built successfully."
 }

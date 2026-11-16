@@ -2,6 +2,8 @@ package domain
 
 import (
 	"time"
+
+	"github.com/dreamoutbox/authkit"
 )
 
 // HostStatus represents host availability states in the cluster.
@@ -56,24 +58,15 @@ const (
 )
 
 // UserRole represents platform permission levels.
-type UserRole string
+type UserRole = authkit.UserRole
 
 const (
-	UserRoleUser  UserRole = "user"
-	UserRoleAdmin UserRole = "admin"
+	UserRoleUser  = authkit.UserRoleUser
+	UserRoleAdmin = authkit.UserRoleAdmin
 )
 
 // User represents an authenticated account on the hosting platform.
-type User struct {
-	ID              uint      `gorm:"primaryKey" json:"id"`
-	Email           string    `gorm:"uniqueIndex;not null" json:"email"`
-	PasswordHash    string    `gorm:"not null" json:"-"`
-	Role            UserRole  `gorm:"type:varchar(32);not null;default:'user'" json:"role"`
-	CustomerID      string    `gorm:"type:varchar(128)" json:"customer_id,omitempty"`
-	PaymentMethodID string    `gorm:"type:varchar(128)" json:"payment_method_id,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-}
+type User = authkit.User
 
 // Plan defines hardware resource limits and monthly cost for a Minecraft server tier.
 // Note: Intentionally decoupled from Stripe plan or price identifiers.
@@ -90,15 +83,16 @@ type Plan struct {
 
 // Host represents a dedicated server node executing the worker daemon.
 type Host struct {
-	ID            uint       `gorm:"primaryKey" json:"id"`
-	Hostname      string     `gorm:"not null" json:"hostname"`
-	WorkerBaseURL string     `gorm:"not null" json:"worker_base_url"`
-	APIKey        string     `gorm:"type:varchar(255);not null;default:''" json:"-"`
-	APIKeyHash    string     `gorm:"not null" json:"-"`
-	MaxServers    int        `gorm:"not null" json:"max_servers"`
-	Status        HostStatus `gorm:"type:varchar(32);not null;default:'active'" json:"status"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID                uint       `gorm:"primaryKey" json:"id"`
+	Hostname          string     `gorm:"not null" json:"hostname"`
+	WorkerBaseURL     string     `gorm:"not null" json:"worker_base_url"`
+	FileServerBaseURL string     `gorm:"type:varchar(255);not null;default:''" json:"fileserver_base_url"`
+	APIKey            string     `gorm:"type:varchar(255);not null;default:''" json:"-"`
+	APIKeyHash        string     `gorm:"not null" json:"-"`
+	MaxServers        int        `gorm:"not null" json:"max_servers"`
+	Status            HostStatus `gorm:"type:varchar(32);not null;default:'active'" json:"status"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // Server represents a provisioned Minecraft game server container.

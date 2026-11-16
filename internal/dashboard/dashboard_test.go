@@ -3,9 +3,9 @@ package dashboard
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
@@ -91,7 +92,7 @@ func (d *dashboardTestWorker) GetContainerStatus(ctx context.Context, containerI
 	return &worker.ContainerStatusResponse{ContainerID: containerID, Status: worker.ContainerStatusRunning}, nil
 }
 
-func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service) {
+func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 	gin.SetMode(gin.TestMode)
 	dsn := os.Getenv("TEST_DATABASE_DSN")
 	if dsn == "" {
@@ -100,7 +101,7 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service) {
 	db, err := domain.InitDB(dsn)
 	if err != nil {
 		t.Skipf("skipping test: database unreachable: %v", err)
-		return nil, nil
+		return nil, nil, ""
 	}
 	_ = domain.AutoMigrate(db)
 	_ = domain.SeedPlans(db)
@@ -125,19 +126,38 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service) {
 	paymentProvider := billing.NewMockPaymentProvider()
 	billingSvc := billing.NewService(db, paymentProvider, hostingSvc, "whsec_test")
 
+	fakeFS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/users":
+			_ = json.NewEncoder(w).Encode(fsclient.EnsureUserResponse{ID: 1, Email: "dash@example.com", Created: true})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/permissions":
+			_ = json.NewEncoder(w).Encode(fsclient.PermissionResponse{Allowed: true})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/login-token"):
+			_ = json.NewEncoder(w).Encode(fsclient.LoginTokenResponse{Token: "dash-login-tok", ExpiresAt: time.Now().Add(time.Minute)})
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(fakeFS.Close)
+
 	// Ensure at least two active hosts for migration
-	h1 := domain.Host{Hostname: "dash-node-1", WorkerBaseURL: "http://dash-node-1:9090", APIKey: "k1", APIKeyHash: "h1", MaxServers: 10, Status: domain.HostStatusActive}
-	h2 := domain.Host{Hostname: "dash-node-2", WorkerBaseURL: "http://dash-node-2:9090", APIKey: "k2", APIKeyHash: "h2", MaxServers: 10, Status: domain.HostStatusActive}
+	h1 := domain.Host{Hostname: "dash-node-1", WorkerBaseURL: "http://dash-node-1:9090", FileServerBaseURL: fakeFS.URL, APIKey: "k1", APIKeyHash: "h1", MaxServers: 10, Status: domain.HostStatusActive}
+	h2 := domain.Host{Hostname: "dash-node-2", WorkerBaseURL: "http://dash-node-2:9090", FileServerBaseURL: fakeFS.URL, APIKey: "k2", APIKeyHash: "h2", MaxServers: 10, Status: domain.HostStatusActive}
 	_ = db.Where("hostname = ?", h1.Hostname).FirstOrCreate(&h1)
 	_ = db.Where("hostname = ?", h2.Hostname).FirstOrCreate(&h2)
-	db.Model(&domain.Host{}).Where("hostname IN (?)", []string{h1.Hostname, h2.Hostname}).Update("status", domain.HostStatusActive)
+	db.Model(&domain.Host{}).Where("hostname IN (?)", []string{h1.Hostname, h2.Hostname}).Updates(map[string]interface{}{
+		"status":               domain.HostStatusActive,
+		"file_server_base_url": fakeFS.URL,
+	})
 
-	dashService := NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, memStorage, jwtSecret)
+	dashService := NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jwtSecret)
 
 	r := gin.New()
 	dashService.RegisterRoutes(r)
 
-	return r, dashService
+	return r, dashService, fakeFS.URL
 }
 
 func extractTokenCookie(resp *http.Response) string {
@@ -150,7 +170,7 @@ func extractTokenCookie(resp *http.Response) string {
 }
 
 func TestDashboardEndToEndBrowserFlow(t *testing.T) {
-	r, dashSvc := setupDashboardTestEnv(t)
+	r, dashSvc, fakeFSURL := setupDashboardTestEnv(t)
 	if r == nil {
 		return
 	}
@@ -240,31 +260,21 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 		t.Fatalf("server detail failed: %d", wDetail.Code)
 	}
 
-	// 7. Manage Files: Upload world file: POST /dashboard/servers/:id/files/upload
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	part, _ := writer.CreateFormFile("file", "server.properties")
-	_, _ = part.Write([]byte("motd=DashboardWorld\n"))
-	_ = writer.Close()
+	// Ensure the assigned host points to fakeFS even if parallel hosting tests created another host.
+	dashSvc.db.Model(&domain.Host{}).Where("id = ?", server.HostID).Update("file_server_base_url", fakeFSURL)
 
-	wUpload := httptest.NewRecorder()
-	reqUpload, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/dashboard/servers/%d/files/upload", server.ID), body)
-	reqUpload.Header.Set("Content-Type", writer.FormDataContentType())
-	reqUpload.AddCookie(authCookie)
-	r.ServeHTTP(wUpload, reqUpload)
+	// 7. Manage Files: GET /dashboard/servers/:id/files/open redirects to node fileserver
+	wOpenFS := httptest.NewRecorder()
+	reqOpenFS, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/files/open", server.ID), nil)
+	reqOpenFS.AddCookie(authCookie)
+	r.ServeHTTP(wOpenFS, reqOpenFS)
 
-	if wUpload.Code != http.StatusFound {
-		t.Fatalf("file upload failed: %d", wUpload.Code)
+	if wOpenFS.Code != http.StatusFound {
+		t.Fatalf("open file manager failed: %d", wOpenFS.Code)
 	}
-
-	// 8. Download file: GET /dashboard/servers/:id/files/download?key=...
-	expectedKey := fmt.Sprintf("servers/%d/server.properties", server.ID)
-	wDownload := httptest.NewRecorder()
-	reqDownload, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/files/download?key=%s", server.ID, expectedKey), nil)
-	reqDownload.AddCookie(authCookie)
-	r.ServeHTTP(wDownload, reqDownload)
-	if wDownload.Code != http.StatusOK || !strings.Contains(wDownload.Body.String(), "motd=DashboardWorld") {
-		t.Fatalf("download file failed: %d: %s", wDownload.Code, wDownload.Body.String())
+	loc := wOpenFS.Header().Get("Location")
+	if !strings.Contains(loc, "/login?") || !strings.Contains(loc, "token=dash-login-tok") || !strings.Contains(loc, "target=") {
+		t.Fatalf("unexpected file manager redirect URL: %s", loc)
 	}
 
 	// 9. Trigger Manual Backup: POST /dashboard/servers/:id/backups/now

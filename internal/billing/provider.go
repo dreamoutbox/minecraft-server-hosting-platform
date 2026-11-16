@@ -65,7 +65,8 @@ type MockPaymentProvider struct {
 //   - None.
 //
 // Example usage:
-//   p := billing.NewMockPaymentProvider()
+//
+//	p := billing.NewMockPaymentProvider()
 func NewMockPaymentProvider() *MockPaymentProvider {
 	return &MockPaymentProvider{
 		payments: make(map[string]*PaymentResult),
@@ -149,16 +150,17 @@ func (m *MockPaymentProvider) ChargeSavedPaymentMethod(ctx context.Context, cust
 //   - secret: Webhook signing secret.
 //
 // Example usage:
-//   payload, sig := mock.GenerateSignedWebhook(event, "whsec_test")
+//
+//	payload, sig := mock.GenerateSignedWebhook(event, "whsec_test")
 func (m *MockPaymentProvider) GenerateSignedWebhook(event WebhookEvent, secret string) ([]byte, string) {
 	payload, _ := json.Marshal(map[string]interface{}{
 		"type": event.Type,
 		"data": map[string]interface{}{
 			"object": map[string]interface{}{
-				"id":          event.PaymentID,
-				"amount":      event.AmountCents,
-				"customer":    event.CustomerID,
-				"status":      string(event.Status),
+				"id":       event.PaymentID,
+				"amount":   event.AmountCents,
+				"customer": event.CustomerID,
+				"status":   string(event.Status),
 			},
 		},
 	})
@@ -246,7 +248,8 @@ type StripePaymentProvider struct {
 //   - apiKey: Stripe secret API key (sk_live_... or sk_test_...).
 //
 // Example usage:
-//   provider := billing.NewStripePaymentProvider(os.Getenv("STRIPE_SECRET_KEY"))
+//
+//	provider := billing.NewStripePaymentProvider(os.Getenv("STRIPE_SECRET_KEY"))
 func NewStripePaymentProvider(apiKey string) *StripePaymentProvider {
 	stripe.Key = apiKey
 	return &StripePaymentProvider{apiKey: apiKey}

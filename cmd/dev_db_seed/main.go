@@ -38,8 +38,12 @@ func main() {
 	if workerKey == "" {
 		workerKey = "dev-worker-key"
 	}
+	fileServerURL := cfg.DefaultFileServerURL
+	if fileServerURL == "" {
+		fileServerURL = "http://localhost:9100"
+	}
 
-	if err := domain.SeedDefaultHost(db, workerName, workerURL, workerKey, 20); err != nil {
+	if err := domain.SeedDefaultHost(db, workerName, workerURL, fileServerURL, workerKey, 20); err != nil {
 		log.Fatalf("failed seeding default host: %v", err)
 	}
 

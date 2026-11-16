@@ -4,9 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/dreamoutbox/authkit"
 	"github.com/gin-gonic/gin"
-
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 )
 
 // Handler serves HTTP endpoints for server lifecycle and host management.
@@ -127,7 +126,7 @@ func (h *Handler) RotateHostKey(c *gin.Context) {
 // Example usage:
 //   POST /api/v1/servers
 func (h *Handler) CreateServer(c *gin.Context) {
-	userID, err := auth.GetUserIDFromContext(c)
+	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -156,7 +155,7 @@ func (h *Handler) CreateServer(c *gin.Context) {
 // Example usage:
 //   GET /api/v1/servers
 func (h *Handler) ListServers(c *gin.Context) {
-	userID, err := auth.GetUserIDFromContext(c)
+	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -179,7 +178,7 @@ func (h *Handler) ListServers(c *gin.Context) {
 // Example usage:
 //   GET /api/v1/servers/:id
 func (h *Handler) GetServer(c *gin.Context) {
-	userID, err := auth.GetUserIDFromContext(c)
+	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -211,7 +210,7 @@ func (h *Handler) GetServer(c *gin.Context) {
 // Example usage:
 //   POST /api/v1/servers/:id/start
 func (h *Handler) StartServer(c *gin.Context) {
-	userID, err := auth.GetUserIDFromContext(c)
+	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -240,7 +239,7 @@ func (h *Handler) StartServer(c *gin.Context) {
 // Example usage:
 //   POST /api/v1/servers/:id/stop
 func (h *Handler) StopServer(c *gin.Context) {
-	userID, err := auth.GetUserIDFromContext(c)
+	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -269,7 +268,7 @@ func (h *Handler) StopServer(c *gin.Context) {
 // Example usage:
 //   DELETE /api/v1/servers/:id
 func (h *Handler) DeleteServer(c *gin.Context) {
-	userID, err := auth.GetUserIDFromContext(c)
+	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -302,7 +301,7 @@ func (h *Handler) MigrateServer(c *gin.Context) {
 		return
 	}
 
-	userID, err := auth.GetUserIDFromContext(c)
+	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -356,7 +355,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 
 	// Server endpoints (authenticated user self-service)
 	servers := api.Group("/servers")
-	servers.Use(auth.AuthMiddleware(jwtSecret))
+	servers.Use(authkit.AuthMiddleware(jwtSecret))
 	{
 		servers.POST("", h.CreateServer)
 		servers.GET("", h.ListServers)

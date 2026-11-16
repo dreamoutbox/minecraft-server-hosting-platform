@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dreamoutbox/authkit"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 )
 
@@ -84,7 +84,7 @@ func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *mockSus
 	_ = db.Create(&server)
 
 	jwtSecret := "billing-jwt-secret"
-	tokens, _ := auth.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
+	tokens, _ := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
 
 	return service, mockProvider, suspender, &user, &server, &plan, tokens.AccessToken
 }

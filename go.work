@@ -1,0 +1,12 @@
+go 1.27.1
+
+use (
+	.
+	./shared/authkit
+	./fileserver
+)
+
+replace (
+	github.com/dreamoutbox/authkit v0.0.0 => ./shared/authkit
+	github.com/dreamoutbox/fileserver v0.0.0 => ./fileserver
+)

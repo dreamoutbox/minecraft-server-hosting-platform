@@ -8,17 +8,19 @@ import (
 
 // Config encapsulates runtime configuration settings for the platform orchestrator.
 type Config struct {
-	ServerPort          string
-	DatabaseDSN         string
-	PortRangeMin        int
-	PortRangeMax        int
-	JWTSecret           string
-	BillingProvider     string
-	StripeSecretKey     string
-	StripeWebhookSecret string
-	DefaultWorkerURL    string
-	DefaultWorkerKey    string
-	DefaultWorkerName   string
+	ServerPort                   string
+	DatabaseDSN                  string
+	PortRangeMin                 int
+	PortRangeMax                 int
+	JWTSecret                    string
+	BillingProvider              string
+	StripeSecretKey              string
+	StripeWebhookSecret          string
+	DefaultWorkerURL             string
+	DefaultWorkerKey             string
+	DefaultWorkerName            string
+	DefaultFileServerURL         string
+	DefaultFileServerInternalURL string
 }
 
 // LoadFromEnv loads environment configuration and validates critical constraints.
@@ -49,6 +51,8 @@ func LoadFromEnv() (*Config, error) {
 	defaultWorkerURL := getEnv("DEFAULT_WORKER_URL", "")
 	defaultWorkerKey := getEnv("DEFAULT_WORKER_KEY", "dev-worker-key")
 	defaultWorkerName := getEnv("DEFAULT_WORKER_NAME", "compose-worker")
+	defaultFileServerURL := getEnv("DEFAULT_FILESERVER_URL", "")
+	defaultFileServerInternalURL := getEnv("DEFAULT_FILESERVER_INTERNAL_URL", "")
 
 	dsn := fmt.Sprintf(
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
@@ -74,17 +78,19 @@ func LoadFromEnv() (*Config, error) {
 	}
 
 	return &Config{
-		ServerPort:          serverPort,
-		DatabaseDSN:         dsn,
-		PortRangeMin:        minPort,
-		PortRangeMax:        maxPort,
-		JWTSecret:           jwtSecret,
-		BillingProvider:     billingProvider,
-		StripeSecretKey:     stripeSecretKey,
-		StripeWebhookSecret: stripeWebhookSecret,
-		DefaultWorkerURL:    defaultWorkerURL,
-		DefaultWorkerKey:    defaultWorkerKey,
-		DefaultWorkerName:   defaultWorkerName,
+		ServerPort:                   serverPort,
+		DatabaseDSN:                  dsn,
+		PortRangeMin:                 minPort,
+		PortRangeMax:                 maxPort,
+		JWTSecret:                    jwtSecret,
+		BillingProvider:              billingProvider,
+		StripeSecretKey:              stripeSecretKey,
+		StripeWebhookSecret:          stripeWebhookSecret,
+		DefaultWorkerURL:             defaultWorkerURL,
+		DefaultWorkerKey:             defaultWorkerKey,
+		DefaultWorkerName:            defaultWorkerName,
+		DefaultFileServerURL:         defaultFileServerURL,
+		DefaultFileServerInternalURL: defaultFileServerInternalURL,
 	}, nil
 }
 

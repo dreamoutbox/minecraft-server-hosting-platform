@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 
-	"golang.org/x/crypto/bcrypt"
+	"github.com/dreamoutbox/authkit"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -117,13 +117,14 @@ func SeedPlans(db *gorm.DB) error {
 //   - db: Active GORM database handle.
 //   - hostname: Display hostname of the node.
 //   - workerBaseURL: HTTP root URL of the worker daemon.
+//   - fileServerBaseURL: Public HTTP root URL of the node fileserver daemon.
 //   - apiKey: Worker authentication key.
 //   - maxServers: Capacity limit for the host.
 //
 // Example usage:
 //
-//	err := domain.SeedDefaultHost(db, "compose-worker", "http://worker:9090", "dev-worker-key", 20)
-func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, apiKey string, maxServers int) error {
+//	err := domain.SeedDefaultHost(db, "compose-worker", "http://worker:9090", "http://localhost:9100", "dev-worker-key", 20)
+func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, fileServerBaseURL, apiKey string, maxServers int) error {
 	if workerBaseURL == "" {
 		return nil
 	}
@@ -135,12 +136,13 @@ func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, apiKey string, maxSer
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			host = Host{
-				Hostname:      hostname,
-				WorkerBaseURL: workerBaseURL,
-				APIKey:        apiKey,
-				APIKeyHash:    hashHex,
-				MaxServers:    maxServers,
-				Status:        HostStatusActive,
+				Hostname:          hostname,
+				WorkerBaseURL:     workerBaseURL,
+				FileServerBaseURL: fileServerBaseURL,
+				APIKey:            apiKey,
+				APIKeyHash:        hashHex,
+				MaxServers:        maxServers,
+				Status:            HostStatusActive,
 			}
 			return db.Create(&host).Error
 		}
@@ -150,6 +152,9 @@ func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, apiKey string, maxSer
 	host.Status = HostStatusActive
 	host.APIKey = apiKey
 	host.APIKeyHash = hashHex
+	if fileServerBaseURL != "" {
+		host.FileServerBaseURL = fileServerBaseURL
+	}
 	return db.Save(&host).Error
 }
 
@@ -183,14 +188,14 @@ func SeedUsers(db *gorm.DB, specs []SeedUserSpec) error {
 			return err
 		}
 
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(spec.Password), bcrypt.DefaultCost)
+		hashedPassword, err := authkit.HashPassword(spec.Password)
 		if err != nil {
 			return err
 		}
 
 		user := User{
 			Email:        spec.Email,
-			PasswordHash: string(hashedPassword),
+			PasswordHash: hashedPassword,
 			Role:         spec.Role,
 		}
 		if err := db.Create(&user).Error; err != nil {

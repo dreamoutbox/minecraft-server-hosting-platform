@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/dreamoutbox/authkit"
+	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/auth"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/config"
@@ -52,7 +53,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		})
 	})
 
-	authHandler := auth.NewHandler(db, cfg.JWTSecret)
+	authHandler := authkit.NewHandler(db, cfg.JWTSecret)
 	authGroup := r.Group("/api/v1/auth")
 	authGroup.Use(middleware.RateLimitMiddleware(10, 20))
 	authHandler.RegisterRoutes(authGroup)
@@ -72,6 +73,15 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	scheduler := hosting.NewLeastLoadedScheduler(db)
 	portAllocator := hosting.NewPortAllocator(db, cfg.PortRangeMin, cfg.PortRangeMax)
 	hostingService := hosting.NewService(db, scheduler, portAllocator, workerFactory)
+	hostingService.SetFileServerClientFactory(func(baseURL string, apiKey string) fsclient.Client {
+		if cfg.DefaultFileServerInternalURL != "" && (strings.Contains(baseURL, "127.0.0.1:9100") || strings.Contains(baseURL, "localhost:9100")) {
+			baseURL = cfg.DefaultFileServerInternalURL
+			if apiKey == "" {
+				apiKey = cfg.DefaultWorkerKey
+			}
+		}
+		return fsclient.New(baseURL, apiKey)
+	})
 	hostingHandler := hosting.NewHandler(hostingService)
 	hostingHandler.RegisterRoutes(r, cfg.JWTSecret)
 
@@ -104,7 +114,6 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		backupService,
 		billingService,
 		migrationService,
-		storageProvider,
 		cfg.JWTSecret,
 	)
 	dashboardService.RegisterRoutes(r)
@@ -131,7 +140,7 @@ func main() {
 		log.Fatalf("failed seeding plans: %v", err)
 	}
 
-	if err := domain.SeedDefaultHost(db, cfg.DefaultWorkerName, cfg.DefaultWorkerURL, cfg.DefaultWorkerKey, 20); err != nil {
+	if err := domain.SeedDefaultHost(db, cfg.DefaultWorkerName, cfg.DefaultWorkerURL, cfg.DefaultFileServerURL, cfg.DefaultWorkerKey, 20); err != nil {
 		log.Printf("[WARN] failed seeding default worker host: %v", err)
 	}
 

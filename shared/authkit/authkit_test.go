@@ -1,54 +1,47 @@
-package auth
+package authkit
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/golang-jwt/jwt/v5"
-
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-func getAuthTestDB(t *testing.T) *domain.User {
-	dsn := os.Getenv("TEST_DATABASE_DSN")
-	if dsn == "" {
-		dsn = "host=localhost user=postgres password=postgrespassword dbname=minecraft_hosting port=5432 sslmode=disable"
-	}
-	db, err := domain.InitDB(dsn)
+func setupTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
-		t.Skipf("skipping test: database unreachable: %v", err)
-		return nil
+		t.Fatalf("failed opening sqlite test db: %v", err)
 	}
-	if err := domain.AutoMigrate(db); err != nil {
+	if err := db.AutoMigrate(&User{}); err != nil {
 		t.Fatalf("failed automigrate: %v", err)
 	}
-	return nil
+	return db
 }
 
-func setupTestRouter() (*gin.Engine, string) {
+func setupTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, string) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
-	dsn := os.Getenv("TEST_DATABASE_DSN")
-	if dsn == "" {
-		dsn = "host=localhost user=postgres password=postgrespassword dbname=minecraft_hosting port=5432 sslmode=disable"
-	}
-	db, err := domain.InitDB(dsn)
-	if err != nil {
-		panic(err)
-	}
-	_ = domain.AutoMigrate(db)
+	db := setupTestDB(t)
 
 	jwtSecret := "test-secret-12345"
 	r := gin.New()
 	handler := NewHandler(db, jwtSecret)
 	handler.RegisterRoutes(r.Group("/api/v1/auth"))
-	return r, jwtSecret
+	return r, db, jwtSecret
 }
 
 func TestPasswordHashing(t *testing.T) {
@@ -67,9 +60,95 @@ func TestPasswordHashing(t *testing.T) {
 	}
 }
 
+func TestGenerateRandomPassword(t *testing.T) {
+	p1, err := GenerateRandomPassword(24)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	p2, err := GenerateRandomPassword(24)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p1 == "" || p1 == p2 {
+		t.Fatalf("expected distinct non-empty passwords, got %q and %q", p1, p2)
+	}
+	if _, err := GenerateRandomPassword(0); err == nil {
+		t.Fatal("expected error for non-positive byte count")
+	}
+}
+
+func TestGenerateAndParseLoginToken(t *testing.T) {
+	secret := "login-token-secret"
+	tok, exp, jti, err := GenerateLoginToken(42, "player@example.com", UserRoleUser, secret, 60*time.Second)
+	if err != nil {
+		t.Fatalf("GenerateLoginToken failed: %v", err)
+	}
+	if tok == "" || jti == "" || exp.Before(time.Now()) {
+		t.Fatalf("invalid login token output: tok=%q jti=%q exp=%v", tok, jti, exp)
+	}
+
+	claims, err := ParseAndValidateToken(tok, secret, TokenTypeLogin)
+	if err != nil {
+		t.Fatalf("ParseAndValidateToken failed: %v", err)
+	}
+	if claims.UserID != 42 || claims.ID != jti || claims.Email != "player@example.com" {
+		t.Errorf("unexpected claims: %+v", claims)
+	}
+
+	// Reject login token when parsed as access token
+	if _, err := ParseAndValidateToken(tok, secret, TokenTypeAccess); err == nil {
+		t.Error("expected login token to fail access token type validation")
+	}
+}
+
+func TestCookieAuthMiddleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	secret := "cookie-secret"
+	r := gin.New()
+	r.GET("/protected", CookieAuthMiddleware(secret, "session", "/login"), func(c *gin.Context) {
+		uid, err := GetUserIDFromContext(c)
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		c.String(http.StatusOK, fmt.Sprintf("user=%d", uid))
+	})
+	r.GET("/api-cookie", CookieAuthMiddleware(secret, "session", ""), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	// Missing cookie redirects when loginPath is configured
+	wNoCookie := httptest.NewRecorder()
+	reqNoCookie, _ := http.NewRequest(http.MethodGet, "/protected", nil)
+	r.ServeHTTP(wNoCookie, reqNoCookie)
+	if wNoCookie.Code != http.StatusFound || wNoCookie.Header().Get("Location") != "/login" {
+		t.Errorf("expected redirect to /login, got %d (%s)", wNoCookie.Code, wNoCookie.Header().Get("Location"))
+	}
+
+	// Missing cookie returns 401 when loginPath is empty
+	wNoCookieAPI := httptest.NewRecorder()
+	reqNoCookieAPI, _ := http.NewRequest(http.MethodGet, "/api-cookie", nil)
+	r.ServeHTTP(wNoCookieAPI, reqNoCookieAPI)
+	if wNoCookieAPI.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", wNoCookieAPI.Code)
+	}
+
+	// Valid cookie succeeds
+	pair, err := GenerateTokenPair(7, "cookie@example.com", UserRoleUser, secret)
+	if err != nil {
+		t.Fatalf("failed generating tokens: %v", err)
+	}
+	wValid := httptest.NewRecorder()
+	reqValid, _ := http.NewRequest(http.MethodGet, "/protected", nil)
+	reqValid.AddCookie(&http.Cookie{Name: "session", Value: pair.AccessToken})
+	r.ServeHTTP(wValid, reqValid)
+	if wValid.Code != http.StatusOK || wValid.Body.String() != "user=7" {
+		t.Errorf("expected 200 user=7, got %d (%s)", wValid.Code, wValid.Body.String())
+	}
+}
+
 func TestAuthFlowIntegration(t *testing.T) {
-	_ = getAuthTestDB(t)
-	r, jwtSecret := setupTestRouter()
+	r, db, jwtSecret := setupTestRouter(t)
 
 	uniqueEmail := fmt.Sprintf("user-%d@example.com", time.Now().UnixNano())
 	password := "SecurePassword123!"
@@ -98,6 +177,15 @@ func TestAuthFlowIntegration(t *testing.T) {
 	}
 	if regResp.Tokens.AccessToken == "" || regResp.Tokens.RefreshToken == "" {
 		t.Fatal("expected access and refresh tokens to be populated")
+	}
+
+	// Direct Authenticate helper check
+	authUser, err := Authenticate(db, " "+uniqueEmail+" ", password)
+	if err != nil || authUser.ID != regResp.User.ID {
+		t.Fatalf("Authenticate failed: %v", err)
+	}
+	if _, err := Authenticate(db, uniqueEmail, "wrong"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("expected ErrInvalidCredentials, got %v", err)
 	}
 
 	// 2. Duplicate registration returns 409
@@ -156,7 +244,7 @@ func TestAuthFlowIntegration(t *testing.T) {
 	expiredClaims := CustomClaims{
 		UserID:    regResp.User.ID,
 		Email:     uniqueEmail,
-		Role:      domain.UserRoleUser,
+		Role:      UserRoleUser,
 		TokenType: TokenTypeAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-1 * time.Hour)),

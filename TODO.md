@@ -34,7 +34,9 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
-- [ ] File Manager is not showing any files. should show list files in /var/lib/mc-platform/mounts/<server-id>.
+- [x] File Manager is not showing any files. should show list files in /var/lib/mc-platform/mounts/<server-id>.
+
+- [x] new fileserver project. for manage files.
 
 ---
 
@@ -48,6 +50,8 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [ ] move "Host Worker Status panel" & "Host Migration panel" to new page. only allow/visible to staff and admin.
 
+- [ ] user can choose vanilla/paper/fabric/forge server jar, and server version in server settings page.
+
 ---
 
 - [ ] make create_server/delete_server/backup/restore become queue. don't make user wait when create server. queue also add retry ability.
@@ -55,6 +59,16 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 - [ ] log server create/stop/delete/backup/restore with success or error in postgresql db.
 
 ---
+
+- [ ] ensure cmd/worker CRON backup all mc server imgs files at /var/lib/mc-platform/images/<server-id>.img to S3 bucket
+
+---
+
+### Debug Utils
+
+- [ ] add shell debug script to manually mount /var/lib/mc-platform/images/<server-id>.img for inspection.
+
+- [ ] add debug script to list mount status of each /var/lib/mc-platform/mounts/<server-id>.
 
 # BACKLOG
 

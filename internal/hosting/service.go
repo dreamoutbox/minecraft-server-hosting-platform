@@ -6,8 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
+	"net/url"
 	"strconv"
+	"strings"
 
+	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
@@ -18,12 +22,16 @@ import (
 // WorkerClientFactory produces a typed worker client given host credentials.
 type WorkerClientFactory func(baseURL string, apiKey string) worker.Client
 
+// FileServerClientFactory produces a fileserver management client given host credentials.
+type FileServerClientFactory func(baseURL string, apiKey string) fsclient.Client
+
 // Service coordinates server scheduling, port allocation, and host worker provisioning.
 type Service struct {
-	db                  *gorm.DB
-	scheduler           Scheduler
-	portAllocator       *PortAllocator
-	workerClientFactory WorkerClientFactory
+	db                      *gorm.DB
+	scheduler               Scheduler
+	portAllocator           *PortAllocator
+	workerClientFactory     WorkerClientFactory
+	fileServerClientFactory FileServerClientFactory
 }
 
 // NewService instantiates the hosting orchestrator service.
@@ -48,6 +56,23 @@ func NewService(db *gorm.DB, scheduler Scheduler, portAllocator *PortAllocator, 
 		scheduler:           scheduler,
 		portAllocator:       portAllocator,
 		workerClientFactory: factory,
+		fileServerClientFactory: func(baseURL string, apiKey string) fsclient.Client {
+			return fsclient.New(baseURL, apiKey)
+		},
+	}
+}
+
+// SetFileServerClientFactory overrides the factory used to contact node fileservers.
+//
+// Arguments:
+//   - factory: Factory creating fileserver management clients.
+//
+// Example usage:
+//
+//	svc.SetFileServerClientFactory(customFactory)
+func (s *Service) SetFileServerClientFactory(factory FileServerClientFactory) {
+	if factory != nil {
+		s.fileServerClientFactory = factory
 	}
 }
 
@@ -335,11 +360,71 @@ func (s *Service) DeleteServer(ctx context.Context, userID uint, serverID uint) 
 		return fmt.Errorf("worker delete volume failed: %w", err)
 	}
 
+	if host.FileServerBaseURL != "" && s.fileServerClientFactory != nil {
+		fsClient := s.fileServerClientFactory(host.FileServerBaseURL, host.APIKey)
+		if err := fsClient.RevokeServer(ctx, server.ID); err != nil {
+			log.Printf("[WARN] fileserver revoke failed for server %d on host %s: %v", server.ID, host.Hostname, err)
+		}
+	}
+
 	if err := s.db.WithContext(ctx).Delete(server).Error; err != nil {
 		return fmt.Errorf("failed deleting server from database: %w", err)
 	}
 
 	return nil
+}
+
+// OpenFileManagerURL provisions the user and directory permission on the target node's
+// fileserver, requests a short-lived login token, and constructs the redirect URL.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Account ID requesting file manager access.
+//   - serverID: Target game server ID.
+//
+// Example usage:
+//
+//	redirectURL, err := svc.OpenFileManagerURL(ctx, user.ID, 42)
+func (s *Service) OpenFileManagerURL(ctx context.Context, userID uint, serverID uint) (string, error) {
+	server, host, err := s.getServerAndHost(ctx, userID, serverID)
+	if err != nil {
+		return "", err
+	}
+
+	if host.FileServerBaseURL == "" {
+		return "", fmt.Errorf("fileserver URL is not configured for host %s", host.Hostname)
+	}
+
+	var user domain.User
+	if err := s.db.WithContext(ctx).First(&user, server.UserID).Error; err != nil {
+		return "", fmt.Errorf("failed loading server owner: %w", err)
+	}
+
+	fsClient := s.fileServerClientFactory(host.FileServerBaseURL, host.APIKey)
+	if _, err := fsClient.EnsureUser(ctx, user.ID, user.Email); err != nil {
+		return "", fmt.Errorf("failed provisioning fileserver user: %w", err)
+	}
+
+	if err := fsClient.Allow(ctx, user.ID, server.ID); err != nil {
+		return "", fmt.Errorf("failed granting fileserver directory permission: %w", err)
+	}
+
+	tokResp, err := fsClient.CreateLoginToken(ctx, user.ID)
+	if err != nil {
+		return "", fmt.Errorf("failed creating fileserver login token: %w", err)
+	}
+
+	targetPath := server.MountPath
+	if targetPath == "" {
+		targetPath = fmt.Sprintf("/var/lib/mc-platform/mounts/%d", server.ID)
+	}
+
+	q := url.Values{}
+	q.Set("token", tokResp.Token)
+	q.Set("target", targetPath)
+
+	base := strings.TrimRight(host.FileServerBaseURL, "/")
+	return fmt.Sprintf("%s/login?%s", base, q.Encode()), nil
 }
 
 // GetServer returns server details along with live status from its worker node.
