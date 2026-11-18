@@ -32,16 +32,6 @@ const (
 	ServerStatusError        ServerStatus = "error"
 )
 
-// SubscriptionStatus represents customer subscription billing states.
-type SubscriptionStatus string
-
-const (
-	SubscriptionStatusActive    SubscriptionStatus = "active"
-	SubscriptionStatusPastDue   SubscriptionStatus = "past_due"
-	SubscriptionStatusCancelled SubscriptionStatus = "cancelled"
-	SubscriptionStatusSuspended SubscriptionStatus = "suspended"
-)
-
 // PaymentStatus represents status outcomes of transaction charges.
 type PaymentStatus string
 
@@ -357,33 +347,20 @@ type Order struct {
 	Status          OrderStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
 	CreatedAt       time.Time   `json:"created_at"`
 	UpdatedAt       time.Time   `json:"updated_at"`
-}
-
-// Subscription tracks recurring billing state managed by platform cron.
-type Subscription struct {
-	ID              uint               `gorm:"primaryKey" json:"id"`
-	UserID          uint               `gorm:"index;not null" json:"user_id"`
-	PlanID          uint               `gorm:"not null" json:"plan_id"`
-	ServerID        *uint              `gorm:"index" json:"server_id,omitempty"`
-	Status          SubscriptionStatus `gorm:"type:varchar(32);not null;default:'active'" json:"status"`
-	FailureCount    int                `gorm:"default:0;not null" json:"failure_count"`
-	NextBillingDate time.Time          `gorm:"not null" json:"next_billing_date"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
 
 	Plan Plan `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
 }
 
-// PaymentRecord maintains historical ledger of subscription charges.
+// PaymentRecord maintains historical ledger of checkout and charge transactions.
 type PaymentRecord struct {
-	ID             uint          `gorm:"primaryKey" json:"id"`
-	UserID         uint          `gorm:"index;not null" json:"user_id"`
-	SubscriptionID *uint         `gorm:"index" json:"subscription_id,omitempty"`
-	AmountCents    int64         `gorm:"not null" json:"amount_cents"`
-	Status         PaymentStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
-	ProviderTxID   string        `gorm:"type:varchar(128)" json:"provider_tx_id"`
-	CreatedAt      time.Time     `json:"created_at"`
-	UpdatedAt      time.Time     `json:"updated_at"`
+	ID           uint          `gorm:"primaryKey" json:"id"`
+	UserID       uint          `gorm:"index;not null" json:"user_id"`
+	OrderID      *uint         `gorm:"index" json:"order_id,omitempty"`
+	AmountCents  int64         `gorm:"not null" json:"amount_cents"`
+	Status       PaymentStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
+	ProviderTxID string        `gorm:"type:varchar(128)" json:"provider_tx_id"`
+	CreatedAt    time.Time     `json:"created_at"`
+	UpdatedAt    time.Time     `json:"updated_at"`
 }
 
 // BackupRecord tracks a discrete world archive stored in object storage.

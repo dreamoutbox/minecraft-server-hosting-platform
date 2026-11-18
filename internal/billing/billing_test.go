@@ -21,20 +21,7 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 )
 
-// mockSuspender records server stop calls during payment suspension tests.
-type mockSuspender struct {
-	stoppedServers map[uint]bool
-}
-
-func (m *mockSuspender) StopServer(ctx context.Context, userID uint, serverID uint) (*domain.Server, error) {
-	if m.stoppedServers == nil {
-		m.stoppedServers = make(map[uint]bool)
-	}
-	m.stoppedServers[serverID] = true
-	return &domain.Server{ID: serverID, Status: domain.ServerStatusSuspended}, nil
-}
-
-func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *mockSuspender, *domain.User, *domain.Server, *domain.Plan, string) {
+func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *domain.User, *domain.Server, *domain.Plan, string) {
 	dsn := os.Getenv("TEST_DATABASE_DSN")
 	if dsn == "" {
 		dsn = "host=localhost user=postgres password=postgrespassword dbname=minecraft_hosting port=5432 sslmode=disable"
@@ -42,22 +29,19 @@ func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *mockSus
 	db, err := domain.InitDB(dsn)
 	if err != nil {
 		t.Skipf("skipping test: database unreachable: %v", err)
-		return nil, nil, nil, nil, nil, nil, ""
+		return nil, nil, nil, nil, nil, ""
 	}
 	_ = domain.AutoMigrate(db)
 	_ = domain.SeedPlans(db)
 
 	mockProvider := NewMockPaymentProvider()
-	suspender := &mockSuspender{stoppedServers: make(map[uint]bool)}
 	webhookSecret := "whsec_test_secret_123"
-	service := NewService(db, mockProvider, suspender, webhookSecret)
+	service := NewService(db, mockProvider, webhookSecret)
 
 	user := domain.User{
-		Email:           fmt.Sprintf("billing-user-%d@example.com", time.Now().UnixNano()),
-		PasswordHash:    "hashed",
-		Role:            domain.UserRoleUser,
-		CustomerID:      fmt.Sprintf("cust_%d", time.Now().UnixNano()),
-		PaymentMethodID: "pm_card_test_visa",
+		Email:        fmt.Sprintf("billing-user-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hashed",
+		Role:         domain.UserRoleUser,
 	}
 	_ = db.Create(&user)
 
@@ -90,92 +74,11 @@ func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *mockSus
 	jwtSecret := "billing-jwt-secret"
 	tokens, _ := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
 
-	return service, mockProvider, suspender, &user, &server, &plan, tokens.AccessToken
-}
-
-func TestBillingFullCycle(t *testing.T) {
-	service, mockProvider, suspender, user, server, plan, _ := setupBillingTestEnv(t)
-	if service == nil {
-		return
-	}
-
-	ctx := context.Background()
-
-	// 1. Create subscription -> initial charge succeeds
-	sub, err := service.CreateSubscription(ctx, user.ID, plan.ID, &server.ID)
-	if err != nil {
-		t.Fatalf("CreateSubscription failed: %v", err)
-	}
-
-	if sub.Status != domain.SubscriptionStatusActive {
-		t.Errorf("expected subscription active, got: %s", sub.Status)
-	}
-
-	// 2. Advance next_billing_date to the past to simulate due renewal
-	pastBillingDate := time.Now().Add(-1 * time.Hour)
-	sub.NextBillingDate = pastBillingDate
-	service.db.Save(sub)
-
-	// Process cycle -> successful renewal
-	if err := service.ProcessBillingCycle(ctx); err != nil {
-		t.Fatalf("ProcessBillingCycle failed: %v", err)
-	}
-
-	service.db.First(sub, sub.ID)
-	if sub.Status != domain.SubscriptionStatusActive {
-		t.Errorf("expected subscription active after renewal, got %s", sub.Status)
-	}
-	if !sub.NextBillingDate.After(pastBillingDate) {
-		t.Errorf("expected next_billing_date to advance forward, got %v", sub.NextBillingDate)
-	}
-
-	// 3. Configure mock payment provider to fail charges
-	mockProvider.FailCharges = true
-
-	// Advance billing date to past again
-	sub.NextBillingDate = time.Now().Add(-1 * time.Hour)
-	service.db.Save(sub)
-
-	// Failure 1
-	_ = service.ProcessBillingCycle(ctx)
-	service.db.First(sub, sub.ID)
-	if sub.FailureCount != 1 || sub.Status != domain.SubscriptionStatusPastDue {
-		t.Errorf("failure 1: expected past_due with count 1, got status=%s count=%d", sub.Status, sub.FailureCount)
-	}
-
-	// Failure 2
-	sub.NextBillingDate = time.Now().Add(-1 * time.Hour)
-	service.db.Save(sub)
-	_ = service.ProcessBillingCycle(ctx)
-	service.db.First(sub, sub.ID)
-	if sub.FailureCount != 2 || sub.Status != domain.SubscriptionStatusPastDue {
-		t.Errorf("failure 2: expected past_due with count 2, got status=%s count=%d", sub.Status, sub.FailureCount)
-	}
-
-	// Failure 3 -> should trigger suspension
-	sub.NextBillingDate = time.Now().Add(-1 * time.Hour)
-	service.db.Save(sub)
-	_ = service.ProcessBillingCycle(ctx)
-	service.db.First(sub, sub.ID)
-	if sub.FailureCount != 3 || sub.Status != domain.SubscriptionStatusSuspended {
-		t.Errorf("failure 3: expected suspended with count 3, got status=%s count=%d", sub.Status, sub.FailureCount)
-	}
-
-	// Verify server suspension triggered on suspender
-	if !suspender.stoppedServers[server.ID] {
-		t.Errorf("expected server %d to be suspended by billing coordinator", server.ID)
-	}
-
-	// Verify server status in DB is suspended
-	var reloadedServer domain.Server
-	service.db.First(&reloadedServer, server.ID)
-	if reloadedServer.Status != domain.ServerStatusSuspended {
-		t.Errorf("expected server DB status to be suspended, got: %s", reloadedServer.Status)
-	}
+	return service, mockProvider, &user, &server, &plan, tokens.AccessToken
 }
 
 func TestWebhookSignatureVerification(t *testing.T) {
-	service, mockProvider, _, _, _, _, _ := setupBillingTestEnv(t)
+	service, mockProvider, _, _, _, _ := setupBillingTestEnv(t)
 	if service == nil {
 		return
 	}
@@ -223,48 +126,73 @@ func TestWebhookSignatureVerification(t *testing.T) {
 }
 
 func TestBillingHTTPRoutes(t *testing.T) {
-	service, _, _, _, _, plan, token := setupBillingTestEnv(t)
+	service, _, user, srv, plan, token := setupBillingTestEnv(t)
 	if service == nil {
 		return
+	}
+
+	jq := &mockCheckoutJobQueue{db: service.db, hostID: srv.HostID}
+	service.SetJobQueue(jq)
+	cs, order, err := service.CreateServerCheckout(context.Background(), user.ID, plan.ID, "OrderHistoryTest", domain.ServerTypeVanilla, "LATEST")
+	if err != nil {
+		t.Fatalf("CreateServerCheckout failed: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": "checkout.session.completed",
+		"data": map[string]interface{}{
+			"object": map[string]interface{}{
+				"id":             cs.SessionID,
+				"payment_intent": fmt.Sprintf("pi_routes_%d", time.Now().UnixNano()),
+				"amount_total":   plan.PriceCents,
+				"metadata": map[string]string{
+					"order_id": fmt.Sprintf("%d", order.ID),
+				},
+			},
+		},
+	})
+	if err := service.HandleWebhook(context.Background(), payload, signMockStripePayload(payload, service.webhookSecret)); err != nil {
+		t.Fatalf("HandleWebhook failed: %v", err)
 	}
 
 	handler := NewHandler(service)
 	r := gin.New()
 	handler.RegisterRoutes(r, "billing-jwt-secret")
 
-	// 1. Save payment method
-	pmBody, _ := json.Marshal(SavePaymentMethodRequest{
-		PaymentMethodID: "pm_card_brand_new",
-	})
-	wPM := httptest.NewRecorder()
-	reqPM, _ := http.NewRequest(http.MethodPost, "/api/v1/billing/payment-methods", bytes.NewReader(pmBody))
-	reqPM.Header.Set("Authorization", "Bearer "+token)
-	reqPM.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(wPM, reqPM)
-	if wPM.Code != http.StatusOK {
-		t.Fatalf("save payment method failed: %d: %s", wPM.Code, wPM.Body.String())
+	// 1. List orders
+	wOrders := httptest.NewRecorder()
+	reqOrders, _ := http.NewRequest(http.MethodGet, "/api/v1/billing/orders", nil)
+	reqOrders.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(wOrders, reqOrders)
+	if wOrders.Code != http.StatusOK {
+		t.Fatalf("list orders failed: %d: %s", wOrders.Code, wOrders.Body.String())
+	}
+	var ordersResp struct {
+		Orders []domain.Order `json:"orders"`
+	}
+	if err := json.Unmarshal(wOrders.Body.Bytes(), &ordersResp); err != nil {
+		t.Fatalf("unmarshal orders failed: %v", err)
+	}
+	if len(ordersResp.Orders) == 0 || ordersResp.Orders[0].ID != order.ID {
+		t.Fatalf("expected order #%d in orders response, got %+v", order.ID, ordersResp.Orders)
 	}
 
-	// 2. Create subscription
-	subBody, _ := json.Marshal(CreateSubscriptionRequest{
-		PlanID: plan.ID,
-	})
-	wSub := httptest.NewRecorder()
-	reqSub, _ := http.NewRequest(http.MethodPost, "/api/v1/billing/subscriptions", bytes.NewReader(subBody))
-	reqSub.Header.Set("Authorization", "Bearer "+token)
-	reqSub.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(wSub, reqSub)
-	if wSub.Code != http.StatusCreated {
-		t.Fatalf("create subscription failed: %d: %s", wSub.Code, wSub.Body.String())
+	// 2. List payments
+	wPayments := httptest.NewRecorder()
+	reqPayments, _ := http.NewRequest(http.MethodGet, "/api/v1/billing/payments", nil)
+	reqPayments.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(wPayments, reqPayments)
+	if wPayments.Code != http.StatusOK {
+		t.Fatalf("list payments failed: %d: %s", wPayments.Code, wPayments.Body.String())
 	}
-
-	// 3. List subscriptions
-	wList := httptest.NewRecorder()
-	reqList, _ := http.NewRequest(http.MethodGet, "/api/v1/billing/subscriptions", nil)
-	reqList.Header.Set("Authorization", "Bearer "+token)
-	r.ServeHTTP(wList, reqList)
-	if wList.Code != http.StatusOK {
-		t.Fatalf("list subscriptions failed: %d", wList.Code)
+	var paymentsResp struct {
+		Payments []domain.PaymentRecord `json:"payments"`
+	}
+	if err := json.Unmarshal(wPayments.Body.Bytes(), &paymentsResp); err != nil {
+		t.Fatalf("unmarshal payments failed: %v", err)
+	}
+	if len(paymentsResp.Payments) == 0 || paymentsResp.Payments[0].OrderID == nil || *paymentsResp.Payments[0].OrderID != order.ID {
+		t.Fatalf("expected payment linked to order #%d, got %+v", order.ID, paymentsResp.Payments)
 	}
 }
 
@@ -301,7 +229,7 @@ func signMockStripePayload(payload []byte, secret string) string {
 }
 
 func TestCheckoutWebhookCreateAndExtendServer(t *testing.T) {
-	svc, _, _, user, srv, plan, _ := setupBillingTestEnv(t)
+	svc, _, user, srv, plan, _ := setupBillingTestEnv(t)
 	if svc == nil {
 		return
 	}

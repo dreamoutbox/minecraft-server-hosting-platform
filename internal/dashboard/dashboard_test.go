@@ -146,7 +146,7 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 	db.Model(&domain.ServerJob{}).Where("status = ?", domain.JobStatusPending).Update("status", domain.JobStatusFailed)
 
 	paymentProvider := billing.NewMockPaymentProvider()
-	billingSvc := billing.NewService(db, paymentProvider, hostingSvc, "whsec_test")
+	billingSvc := billing.NewService(db, paymentProvider, "whsec_test")
 
 	fakeFS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -235,17 +235,23 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 
 	authCookie := &http.Cookie{Name: "token", Value: cookieToken}
 
-	// 3. Add payment method: POST /dashboard/billing/payment-methods
-	formPM := url.Values{}
-	formPM.Set("payment_method_id", "pm_card_mock_visa")
-	wPM := httptest.NewRecorder()
-	reqPM, _ := http.NewRequest(http.MethodPost, "/dashboard/billing/payment-methods", strings.NewReader(formPM.Encode()))
-	reqPM.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	reqPM.AddCookie(authCookie)
-	r.ServeHTTP(wPM, reqPM)
+	// 3. Billing page displays Order History and Payment History without Saved Payment Method
+	wBilling := httptest.NewRecorder()
+	reqBilling, _ := http.NewRequest(http.MethodGet, "/dashboard/billing", nil)
+	reqBilling.AddCookie(authCookie)
+	r.ServeHTTP(wBilling, reqBilling)
 
-	if wPM.Code != http.StatusFound {
-		t.Fatalf("save payment method failed: %d", wPM.Code)
+	if wBilling.Code != http.StatusOK {
+		t.Fatalf("billing page failed: %d", wBilling.Code)
+	}
+	billingHTML := wBilling.Body.String()
+	for _, expected := range []string{"Billing & Orders", "Order History", "Payment History"} {
+		if !strings.Contains(billingHTML, expected) {
+			t.Errorf("billing page missing %q", expected)
+		}
+	}
+	if strings.Contains(billingHTML, "Saved Payment Method") {
+		t.Errorf("billing page should no longer display Saved Payment Method panel")
 	}
 
 	// 4. Regular user cannot access /dashboard/servers/new (staff/admin only), but can access /dashboard/servers/buy
@@ -281,6 +287,15 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	r.ServeHTTP(wBuyPost, reqBuyPost)
 	if wBuyPost.Code != http.StatusSeeOther || wBuyPost.Header().Get("Location") == "" {
 		t.Fatalf("buy server post failed: code=%d location=%s", wBuyPost.Code, wBuyPost.Header().Get("Location"))
+	}
+
+	// Verify created checkout order renders on /dashboard/billing
+	wBillingOrder := httptest.NewRecorder()
+	reqBillingOrder, _ := http.NewRequest(http.MethodGet, "/dashboard/billing", nil)
+	reqBillingOrder.AddCookie(authCookie)
+	r.ServeHTTP(wBillingOrder, reqBillingOrder)
+	if wBillingOrder.Code != http.StatusOK || !strings.Contains(wBillingOrder.Body.String(), buySrvName) {
+		t.Fatalf("expected created order %q on billing page, code=%d", buySrvName, wBillingOrder.Code)
 	}
 
 	// 5. Staff/Admin can access /dashboard/servers/new and queue direct server creation
@@ -360,7 +375,7 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	reqBackupsPage, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/backups", server.ID), nil)
 	reqBackupsPage.AddCookie(authCookie)
 	r.ServeHTTP(wBackupsPage, reqBackupsPage)
-	if wBackupsPage.Code != http.StatusOK || !strings.Contains(wBackupsPage.Body.String(), "World Backups") {
+	if wBackupsPage.Code != http.StatusOK || !strings.Contains(wBackupsPage.Body.String(), `<h5 class="fw-bold mb-0">Backups</h5>`) {
 		t.Fatalf("backups page failed: %d", wBackupsPage.Code)
 	}
 

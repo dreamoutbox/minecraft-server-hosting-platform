@@ -11,7 +11,7 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/middleware"
 )
 
-// Handler serves HTTP endpoints for billing, subscriptions, and payment webhooks.
+// Handler serves HTTP endpoints for billing orders, payment history, and payment webhooks.
 type Handler struct {
 	service *Service
 }
@@ -28,98 +28,52 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// SavePaymentMethodRequest holds payment method token to attach.
-type SavePaymentMethodRequest struct {
-	PaymentMethodID string `json:"payment_method_id" binding:"required"`
-}
-
-// CreateSubscriptionRequest holds plan and server details for a new subscription.
-type CreateSubscriptionRequest struct {
-	PlanID   uint  `json:"plan_id" binding:"required"`
-	ServerID *uint `json:"server_id"`
-}
-
-// SavePaymentMethod stores a customer's payment method token.
-//
-// Arguments:
-//   - c: Active Gin request context containing SavePaymentMethodRequest JSON.
-//
-// Example usage:
-//
-//	POST /api/v1/billing/payment-methods
-func (h *Handler) SavePaymentMethod(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	var req SavePaymentMethodRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payment method request: " + err.Error()})
-		return
-	}
-
-	if err := h.service.SavePaymentMethod(c.Request.Context(), userID, req.PaymentMethodID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "payment method saved successfully"})
-}
-
-// CreateSubscription provisions a recurring subscription and charges the first month.
-//
-// Arguments:
-//   - c: Active Gin request context containing CreateSubscriptionRequest JSON.
-//
-// Example usage:
-//
-//	POST /api/v1/billing/subscriptions
-func (h *Handler) CreateSubscription(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	var req CreateSubscriptionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid subscription request: " + err.Error()})
-		return
-	}
-
-	sub, err := h.service.CreateSubscription(c.Request.Context(), userID, req.PlanID, req.ServerID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusCreated, sub)
-}
-
-// ListSubscriptions lists all subscriptions belonging to the user.
+// ListOrders lists all checkout orders belonging to the user.
 //
 // Arguments:
 //   - c: Active Gin request context.
 //
 // Example usage:
 //
-//	GET /api/v1/billing/subscriptions
-func (h *Handler) ListSubscriptions(c *gin.Context) {
+//	GET /api/v1/billing/orders
+func (h *Handler) ListOrders(c *gin.Context) {
 	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
-	subs, err := h.service.ListUserSubscriptions(c.Request.Context(), userID)
+	orders, err := h.service.ListUserOrders(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"subscriptions": subs})
+	c.JSON(http.StatusOK, gin.H{"orders": orders})
+}
+
+// ListPayments lists all payment records belonging to the user.
+//
+// Arguments:
+//   - c: Active Gin request context.
+//
+// Example usage:
+//
+//	GET /api/v1/billing/payments
+func (h *Handler) ListPayments(c *gin.Context) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	payments, err := h.service.ListUserPayments(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"payments": payments})
 }
 
 // Webhook processes asynchronous payment notifications with mandatory signature verification.
@@ -168,12 +122,11 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 	// Webhook endpoint (unauthenticated, signature-protected)
 	billingGroup.POST("/webhook", h.Webhook)
 
-	// User-authenticated billing management
+	// User-authenticated billing history queries
 	authenticated := billingGroup.Group("")
 	authenticated.Use(authkit.AuthMiddleware(jwtSecret))
 	{
-		authenticated.POST("/payment-methods", h.SavePaymentMethod)
-		authenticated.POST("/subscriptions", h.CreateSubscription)
-		authenticated.GET("/subscriptions", h.ListSubscriptions)
+		authenticated.GET("/orders", h.ListOrders)
+		authenticated.GET("/payments", h.ListPayments)
 	}
 }

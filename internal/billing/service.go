@@ -4,57 +4,45 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
-	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 )
-
-// ServerSuspender abstracts server suspension to decouple billing from hosting infrastructure.
-type ServerSuspender interface {
-	StopServer(ctx context.Context, userID uint, serverID uint) (*domain.Server, error)
-}
 
 // JobEnqueuer enqueues async server provisioning jobs after checkout payment completes.
 type JobEnqueuer interface {
 	EnqueueCreateServerWithExpiry(ctx context.Context, userID uint, name string, planID uint, serverType domain.ServerType, serverVersion string, expiresAt *time.Time) (*domain.Server, *domain.ServerJob, error)
 }
 
-// Service manages subscriptions, cron billing renewal cycles, checkout orders, and payment webhooks.
+// Service manages checkout orders, payment history, and payment webhooks.
 type Service struct {
 	db            *gorm.DB
 	provider      PaymentProvider
-	suspender     ServerSuspender
 	jobQueue      JobEnqueuer
 	webhookSecret string
 	appBaseURL    string
 	retentionDays int
-	cronRunner    *cron.Cron
 }
 
-// NewService instantiates a subscription billing service.
+// NewService instantiates a billing service for checkout orders and webhook fulfillment.
 //
 // Arguments:
 //   - db: Active database handle.
 //   - provider: Configured payment provider (Stripe or Mock).
-//   - suspender: Server lifecycle coordinator for payment failure suspensions.
 //   - webhookSecret: Secret key used to verify incoming webhook signatures.
 //
 // Example usage:
 //
-//	svc := billing.NewService(db, paymentProvider, hostingSvc, "whsec_123")
-func NewService(db *gorm.DB, provider PaymentProvider, suspender ServerSuspender, webhookSecret string) *Service {
+//	svc := billing.NewService(db, paymentProvider, "whsec_123")
+func NewService(db *gorm.DB, provider PaymentProvider, webhookSecret string) *Service {
 	return &Service{
 		db:            db,
 		provider:      provider,
-		suspender:     suspender,
 		webhookSecret: webhookSecret,
 		appBaseURL:    "http://localhost:8080",
 		retentionDays: 7,
-		cronRunner:    cron.New(),
 	}
 }
 
@@ -75,188 +63,6 @@ func (s *Service) SetRetentionDays(days int) {
 	if days > 0 {
 		s.retentionDays = days
 	}
-}
-
-// SavePaymentMethod attaches a customer payment method and records it in the user profile.
-//
-// Arguments:
-//   - ctx: Operation cancellation context.
-//   - userID: User primary key.
-//   - paymentMethodID: Token or ID of the payment method (e.g. pm_card_...).
-//
-// Example usage:
-//
-//	err := svc.SavePaymentMethod(ctx, user.ID, "pm_card_visa")
-func (s *Service) SavePaymentMethod(ctx context.Context, userID uint, paymentMethodID string) error {
-	var user domain.User
-	if err := s.db.WithContext(ctx).First(&user, userID).Error; err != nil {
-		return fmt.Errorf("user not found: %w", err)
-	}
-
-	if user.CustomerID == "" {
-		user.CustomerID = fmt.Sprintf("cust_%d_%s", user.ID, user.Email)
-	}
-
-	if err := s.provider.SavePaymentMethod(ctx, user.CustomerID, paymentMethodID); err != nil {
-		return fmt.Errorf("failed attaching payment method: %w", err)
-	}
-
-	user.PaymentMethodID = paymentMethodID
-	if err := s.db.WithContext(ctx).Save(&user).Error; err != nil {
-		return fmt.Errorf("failed saving payment method to user: %w", err)
-	}
-
-	return nil
-}
-
-// CreateSubscription initiates a recurring subscription, executing the initial cycle charge.
-//
-// Arguments:
-//   - ctx: Operation cancellation context.
-//   - userID: Account ID of subscriber.
-//   - planID: Plan tier ID.
-//   - serverID: Associated game server ID (optional).
-//
-// Example usage:
-//
-//	sub, err := svc.CreateSubscription(ctx, user.ID, plan.ID, &server.ID)
-func (s *Service) CreateSubscription(ctx context.Context, userID uint, planID uint, serverID *uint) (*domain.Subscription, error) {
-	var user domain.User
-	if err := s.db.WithContext(ctx).First(&user, userID).Error; err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
-	}
-
-	if user.PaymentMethodID == "" {
-		return nil, errors.New("no saved payment method found; please attach a payment method first")
-	}
-
-	var plan domain.Plan
-	if err := s.db.WithContext(ctx).First(&plan, planID).Error; err != nil {
-		return nil, fmt.Errorf("plan not found: %w", err)
-	}
-
-	// Immediate charge for the upcoming month
-	description := fmt.Sprintf("Initial cycle for %s plan", plan.Name)
-	res, err := s.provider.ChargeSavedPaymentMethod(ctx, user.CustomerID, user.PaymentMethodID, plan.PriceCents, description)
-
-	paymentStatus := domain.PaymentStatusSucceeded
-	txID := ""
-	if res != nil {
-		paymentStatus = res.Status
-		txID = res.TransactionID
-	}
-
-	paymentRecord := domain.PaymentRecord{
-		UserID:       user.ID,
-		AmountCents:  plan.PriceCents,
-		Status:       paymentStatus,
-		ProviderTxID: txID,
-	}
-	_ = s.db.WithContext(ctx).Create(&paymentRecord)
-
-	if err != nil || paymentStatus != domain.PaymentStatusSucceeded {
-		return nil, fmt.Errorf("initial payment charge failed: %v", err)
-	}
-
-	nextBilling := time.Now().AddDate(0, 1, 0)
-	sub := domain.Subscription{
-		UserID:          user.ID,
-		PlanID:          plan.ID,
-		ServerID:        serverID,
-		Status:          domain.SubscriptionStatusActive,
-		FailureCount:    0,
-		NextBillingDate: nextBilling,
-	}
-
-	if err := s.db.WithContext(ctx).Create(&sub).Error; err != nil {
-		return nil, fmt.Errorf("failed creating subscription record: %w", err)
-	}
-
-	paymentRecord.SubscriptionID = &sub.ID
-	_ = s.db.WithContext(ctx).Save(&paymentRecord)
-
-	return &sub, nil
-}
-
-// ProcessBillingCycle sweeps active and past due subscriptions whose billing date has arrived.
-// Upon successful charge, next_billing_date is advanced by 1 month.
-// Upon repeated charge failure (threshold 3), the server is suspended (container stopped, volume kept).
-//
-// Arguments:
-//   - ctx: Operation cancellation context.
-//
-// Example usage:
-//
-//	err := svc.ProcessBillingCycle(ctx)
-func (s *Service) ProcessBillingCycle(ctx context.Context) error {
-	now := time.Now()
-	var subs []domain.Subscription
-	err := s.db.WithContext(ctx).
-		Preload("Plan").
-		Where("status IN (?) AND next_billing_date <= ?", []domain.SubscriptionStatus{
-			domain.SubscriptionStatusActive,
-			domain.SubscriptionStatusPastDue,
-		}, now).
-		Find(&subs).Error
-	if err != nil {
-		return fmt.Errorf("failed querying subscriptions due for billing: %w", err)
-	}
-
-	for i := range subs {
-		sub := &subs[i]
-		var user domain.User
-		if err := s.db.WithContext(ctx).First(&user, sub.UserID).Error; err != nil {
-			log.Printf("[ERROR] user %d not found for subscription %d: %v", sub.UserID, sub.ID, err)
-			continue
-		}
-
-		desc := fmt.Sprintf("Monthly renewal for subscription #%d (%s plan)", sub.ID, sub.Plan.Name)
-		res, chargeErr := s.provider.ChargeSavedPaymentMethod(ctx, user.CustomerID, user.PaymentMethodID, sub.Plan.PriceCents, desc)
-
-		txID := ""
-		paymentStatus := domain.PaymentStatusFailed
-		if res != nil {
-			txID = res.TransactionID
-			paymentStatus = res.Status
-		}
-
-		payRec := domain.PaymentRecord{
-			UserID:         user.ID,
-			SubscriptionID: &sub.ID,
-			AmountCents:    sub.Plan.PriceCents,
-			Status:         paymentStatus,
-			ProviderTxID:   txID,
-		}
-		_ = s.db.WithContext(ctx).Create(&payRec)
-
-		if chargeErr == nil && paymentStatus == domain.PaymentStatusSucceeded {
-			// Success: advance next billing date by 1 month from successful charge
-			sub.Status = domain.SubscriptionStatusActive
-			sub.FailureCount = 0
-			sub.NextBillingDate = time.Now().AddDate(0, 1, 0)
-			_ = s.db.WithContext(ctx).Save(sub)
-		} else {
-			// Failure: increment failure count
-			sub.FailureCount++
-			if sub.FailureCount >= 3 {
-				sub.Status = domain.SubscriptionStatusSuspended
-				_ = s.db.WithContext(ctx).Save(sub)
-
-				// Repeated failure triggers server suspension (keeps volume intact)
-				if sub.ServerID != nil && s.suspender != nil {
-					_, _ = s.suspender.StopServer(ctx, sub.UserID, *sub.ServerID)
-					_ = s.db.WithContext(ctx).Model(&domain.Server{}).
-						Where("id = ?", *sub.ServerID).
-						Update("status", domain.ServerStatusSuspended).Error
-				}
-			} else {
-				sub.Status = domain.SubscriptionStatusPastDue
-				_ = s.db.WithContext(ctx).Save(sub)
-			}
-		}
-	}
-
-	return nil
 }
 
 // CreateServerCheckout creates a pending Order and Stripe Checkout session for purchasing a new server.
@@ -449,8 +255,10 @@ func (s *Service) handleCheckoutCompleted(ctx context.Context, event *WebhookEve
 		txID = event.SessionID
 	}
 	if txID != "" {
+		orderID := order.ID
 		_ = s.db.WithContext(ctx).Create(&domain.PaymentRecord{
 			UserID:       order.UserID,
+			OrderID:      &orderID,
 			AmountCents:  order.AmountCents,
 			Status:       domain.PaymentStatusSucceeded,
 			ProviderTxID: txID,
@@ -506,7 +314,7 @@ func (s *Service) handleCheckoutCompleted(ctx context.Context, event *WebhookEve
 	return nil
 }
 
-// ListUserSubscriptions returns all subscriptions owned by the user.
+// ListUserOrders returns checkout orders placed by the user, newest first, with their Plan preloaded.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
@@ -514,53 +322,37 @@ func (s *Service) handleCheckoutCompleted(ctx context.Context, event *WebhookEve
 //
 // Example usage:
 //
-//	subs, err := svc.ListUserSubscriptions(ctx, user.ID)
-func (s *Service) ListUserSubscriptions(ctx context.Context, userID uint) ([]domain.Subscription, error) {
-	var subs []domain.Subscription
+//	orders, err := svc.ListUserOrders(ctx, user.ID)
+func (s *Service) ListUserOrders(ctx context.Context, userID uint) ([]domain.Order, error) {
+	var orders []domain.Order
 	err := s.db.WithContext(ctx).
 		Preload("Plan").
 		Where("user_id = ?", userID).
-		Find(&subs).Error
+		Order("created_at DESC").
+		Find(&orders).Error
 	if err != nil {
 		return nil, err
 	}
-	return subs, nil
+	return orders, nil
 }
 
-// ScheduleBillingCron registers the background billing sweep on the cron runner.
+// ListUserPayments returns recorded payment transactions for the user, newest first.
 //
 // Arguments:
-//   - cronSpec: Standard cron schedule string (e.g. "@daily" or "@hourly").
+//   - ctx: Operation cancellation context.
+//   - userID: User primary key.
 //
 // Example usage:
 //
-//	err := svc.ScheduleBillingCron("@daily")
-func (s *Service) ScheduleBillingCron(cronSpec string) error {
-	_, err := s.cronRunner.AddFunc(cronSpec, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-		defer cancel()
-		if err := s.ProcessBillingCycle(ctx); err != nil {
-			log.Printf("[ERROR] billing sweep failed: %v", err)
-		}
-	})
+//	payments, err := svc.ListUserPayments(ctx, user.ID)
+func (s *Service) ListUserPayments(ctx context.Context, userID uint) ([]domain.PaymentRecord, error) {
+	var payments []domain.PaymentRecord
+	err := s.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Find(&payments).Error
 	if err != nil {
-		return fmt.Errorf("invalid cron expression %s: %w", cronSpec, err)
+		return nil, err
 	}
-
-	s.cronRunner.Start()
-	return nil
-}
-
-// StopCron halts the billing background scheduler.
-//
-// Arguments:
-//   - None.
-//
-// Example usage:
-//
-//	svc.StopCron()
-func (s *Service) StopCron() {
-	if s.cronRunner != nil {
-		s.cronRunner.Stop()
-	}
+	return payments, nil
 }

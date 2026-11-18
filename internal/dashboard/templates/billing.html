@@ -1,85 +1,129 @@
-{{define "title"}}Billing & Subscriptions{{end}}
+{{define "title"}}Billing & Orders{{end}}
 {{define "content"}}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h2 class="fw-bold mb-0">Billing & Subscriptions</h2>
-        <p class="text-muted mb-0">Manage saved payment methods and recurring platform subscriptions</p>
+        <h2 class="fw-bold mb-0">Billing & Orders</h2>
+        <p class="text-muted mb-0">View your server purchase orders and Stripe payment history</p>
+    </div>
+    <a href="/dashboard/servers/buy" class="btn btn-primary btn-sm">Buy Server</a>
+</div>
+
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header bg-white border-0 pt-4 pb-2">
+        <h5 class="fw-bold mb-0">Order History</h5>
+    </div>
+    <div class="card-body">
+        {{if .Orders}}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr class="text-muted small">
+                        <th>Order ID</th>
+                        <th>Type</th>
+                        <th>Server</th>
+                        <th>Plan</th>
+                        <th>Duration</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Orders}}
+                    <tr>
+                        <td class="fw-semibold">#{{.ID}}</td>
+                        <td>
+                            {{if eq .OrderType "create_server"}}
+                            <span class="badge bg-primary-subtle text-primary">Create Server</span>
+                            {{else if eq .OrderType "extend_server"}}
+                            <span class="badge bg-info-subtle text-info">Extend Server</span>
+                            {{else}}
+                            <span class="badge bg-secondary">{{.OrderType}}</span>
+                            {{end}}
+                        </td>
+                        <td>
+                            {{if .ServerID}}
+                            <a href="/dashboard/servers/{{.ServerID}}"
+                                class="text-decoration-none fw-semibold">{{.ServerName}}</a>
+                            {{else}}
+                            <span class="text-muted">{{.ServerName}}</span>
+                            {{end}}
+                        </td>
+                        <td>{{if .Plan.Name}}{{.Plan.Name}}{{else}}Plan #{{.PlanID}}{{end}}</td>
+                        <td>{{.DurationDays}} days</td>
+                        <td class="fw-semibold">{{formatUSD .AmountCents}}</td>
+                        <td>
+                            {{if eq .Status "fulfilled"}}
+                            <span class="badge bg-success">Fulfilled</span>
+                            {{else if eq .Status "paid"}}
+                            <span class="badge bg-info text-dark">Paid</span>
+                            {{else if eq .Status "pending"}}
+                            <span class="badge bg-warning text-dark">Pending</span>
+                            {{else if eq .Status "failed"}}
+                            <span class="badge bg-danger">Failed</span>
+                            {{else}}
+                            <span class="badge bg-secondary">{{.Status}}</span>
+                            {{end}}
+                        </td>
+                        <td class="small text-muted">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <p class="text-muted small mb-0 py-3 text-center">No checkout orders found.</p>
+        {{end}}
     </div>
 </div>
 
-<div class="row g-4">
-    <div class="col-lg-8">
-        <div class="card shadow-sm border-0 mb-4">
-            <div class="card-header bg-white border-0 pt-4 pb-2">
-                <h5 class="fw-bold mb-0">Active Subscriptions</h5>
-            </div>
-            <div class="card-body">
-                {{if .Subscriptions}}
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0">
-                        <thead>
-                            <tr class="text-muted small">
-                                <th>Sub ID</th>
-                                <th>Plan</th>
-                                <th>Monthly Rate</th>
-                                <th>Next Billing</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .Subscriptions}}
-                            <tr>
-                                <td class="fw-semibold">#{{.ID}}</td>
-                                <td>{{.Plan.Name}}</td>
-                                <td>${{div .Plan.PriceCents 100}}/mo</td>
-                                <td>{{.NextBillingDate.Format "2006-01-02"}}</td>
-                                <td>
-                                    {{if eq .Status "active"}}
-                                    <span class="badge bg-success">Active</span>
-                                    {{else if eq .Status "past_due"}}
-                                    <span class="badge bg-warning text-dark">Past Due</span>
-                                    {{else if eq .Status "suspended"}}
-                                    <span class="badge bg-danger">Suspended</span>
-                                    {{else}}
-                                    <span class="badge bg-secondary">{{.Status}}</span>
-                                    {{end}}
-                                </td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                </div>
-                {{else}}
-                <p class="text-muted small mb-0 py-3 text-center">No active subscriptions found.</p>
-                {{end}}
-            </div>
-        </div>
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white border-0 pt-4 pb-2">
+        <h5 class="fw-bold mb-0">Payment History</h5>
     </div>
-
-    <div class="col-lg-4">
-        <div class="card shadow-sm border-0 mb-4">
-            <div class="card-body p-4">
-                <h5 class="fw-bold mb-3">Saved Payment Method</h5>
-                {{if .User.PaymentMethodID}}
-                <div class="alert alert-success py-2 small mb-3">
-                    Payment Method Active: <code>{{.User.PaymentMethodID}}</code>
-                </div>
-                {{else}}
-                <div class="alert alert-warning py-2 small mb-3">
-                    No payment method on file. Add one before provisioning paid servers.
-                </div>
-                {{end}}
-
-                <form method="POST" action="/dashboard/billing/payment-methods">
-                    <div class="mb-3">
-                        <label for="payment_method_id" class="form-label small fw-semibold">Payment Method ID</label>
-                        <input type="text" class="form-control form-control-sm" id="payment_method_id" name="payment_method_id" placeholder="pm_card_visa or test_pm" required>
-                        <div class="form-text small">In development mode, enter any mock card ID.</div>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-sm w-100">Save Payment Method</button>
-                </form>
-            </div>
+    <div class="card-body">
+        {{if .Payments}}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr class="text-muted small">
+                        <th>Payment ID</th>
+                        <th>Order</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Transaction ID</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Payments}}
+                    <tr>
+                        <td class="fw-semibold">#{{.ID}}</td>
+                        <td>{{if .OrderID}}#{{.OrderID}}{{else}}-{{end}}</td>
+                        <td class="fw-semibold">{{formatUSD .AmountCents}}</td>
+                        <td>
+                            {{if eq .Status "succeeded"}}
+                            <span class="badge bg-success">Succeeded</span>
+                            {{else if eq .Status "pending"}}
+                            <span class="badge bg-warning text-dark">Pending</span>
+                            {{else if eq .Status "failed"}}
+                            <span class="badge bg-danger">Failed</span>
+                            {{else if eq .Status "refunded"}}
+                            <span class="badge bg-secondary">Refunded</span>
+                            {{else}}
+                            <span class="badge bg-secondary">{{.Status}}</span>
+                            {{end}}
+                        </td>
+                        <td class="small"><code>{{.ProviderTxID}}</code></td>
+                        <td class="small text-muted">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
         </div>
+        {{else}}
+        <p class="text-muted small mb-0 py-3 text-center">No payment transactions recorded yet.</p>
+        {{end}}
     </div>
 </div>
 {{end}}

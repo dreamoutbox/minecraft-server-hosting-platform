@@ -17,7 +17,6 @@ import (
 	"github.com/stripe/stripe-go/v81"
 	"github.com/stripe/stripe-go/v81/checkout/session"
 	"github.com/stripe/stripe-go/v81/paymentintent"
-	"github.com/stripe/stripe-go/v81/paymentmethod"
 	"github.com/stripe/stripe-go/v81/refund"
 	"github.com/stripe/stripe-go/v81/webhook"
 
@@ -61,24 +60,19 @@ type CheckoutSessionResult struct {
 	CheckoutURL string `json:"checkout_url"`
 }
 
-// PaymentProvider defines payment operations for moving money and verifying webhook notifications.
-// Subscriptions are intentionally managed by platform DB and cron, not through provider subscription APIs.
+// PaymentProvider defines payment operations for hosted checkout, charges, refunds, and webhook verification.
 type PaymentProvider interface {
 	CreatePayment(ctx context.Context, amountCents int64, currency string, customerID string) (*PaymentResult, error)
 	GetPayment(ctx context.Context, paymentID string) (*PaymentResult, error)
 	Refund(ctx context.Context, paymentID string) error
-	SavePaymentMethod(ctx context.Context, customerID string, paymentMethodID string) error
-	ChargeSavedPaymentMethod(ctx context.Context, customerID string, paymentMethodID string, amountCents int64, description string) (*PaymentResult, error)
 	CreateCheckoutSession(ctx context.Context, req CheckoutSessionRequest) (*CheckoutSessionResult, error)
 	VerifyWebhookSignature(payload []byte, signatureHeader string, secret string) (*WebhookEvent, error)
 }
 
 // MockPaymentProvider provides deterministic in-memory payment responses for local testing and development.
 type MockPaymentProvider struct {
-	mu          sync.RWMutex
-	FailCharges bool
-	payments    map[string]*PaymentResult
-	methods     map[string]string // customerID -> paymentMethodID
+	mu       sync.RWMutex
+	payments map[string]*PaymentResult
 }
 
 // NewMockPaymentProvider constructs a mock payment provider with in-memory ledger.
@@ -92,7 +86,6 @@ type MockPaymentProvider struct {
 func NewMockPaymentProvider() *MockPaymentProvider {
 	return &MockPaymentProvider{
 		payments: make(map[string]*PaymentResult),
-		methods:  make(map[string]string),
 	}
 }
 
@@ -131,38 +124,6 @@ func (m *MockPaymentProvider) Refund(ctx context.Context, paymentID string) erro
 	}
 	res.Status = domain.PaymentStatusRefunded
 	return nil
-}
-
-func (m *MockPaymentProvider) SavePaymentMethod(ctx context.Context, customerID string, paymentMethodID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.methods[customerID] = paymentMethodID
-	return nil
-}
-
-func (m *MockPaymentProvider) ChargeSavedPaymentMethod(ctx context.Context, customerID string, paymentMethodID string, amountCents int64, description string) (*PaymentResult, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	txID := fmt.Sprintf("mock_charge_%s", uuid.New().String())
-	if m.FailCharges {
-		res := &PaymentResult{
-			TransactionID: txID,
-			AmountCents:   amountCents,
-			Status:        domain.PaymentStatusFailed,
-			ErrorMessage:  "card_declined: insufficient funds",
-		}
-		m.payments[txID] = res
-		return res, errors.New("payment failed: card_declined")
-	}
-
-	res := &PaymentResult{
-		TransactionID: txID,
-		AmountCents:   amountCents,
-		Status:        domain.PaymentStatusSucceeded,
-	}
-	m.payments[txID] = res
-	return res, nil
 }
 
 // GenerateSignedWebhook crafts a valid mock payload and HMAC signature for testing the webhook pipeline.
@@ -350,40 +311,6 @@ func (s *StripePaymentProvider) Refund(ctx context.Context, paymentID string) er
 		return fmt.Errorf("stripe refund failed: %w", err)
 	}
 	return nil
-}
-
-func (s *StripePaymentProvider) SavePaymentMethod(ctx context.Context, customerID string, paymentMethodID string) error {
-	params := &stripe.PaymentMethodAttachParams{
-		Customer: stripe.String(customerID),
-	}
-	_, err := paymentmethod.Attach(paymentMethodID, params)
-	if err != nil {
-		return fmt.Errorf("failed attaching payment method: %w", err)
-	}
-	return nil
-}
-
-func (s *StripePaymentProvider) ChargeSavedPaymentMethod(ctx context.Context, customerID string, paymentMethodID string, amountCents int64, description string) (*PaymentResult, error) {
-	params := &stripe.PaymentIntentParams{
-		Amount:        stripe.Int64(amountCents),
-		Currency:      stripe.String(string(stripe.CurrencyUSD)),
-		Customer:      stripe.String(customerID),
-		PaymentMethod: stripe.String(paymentMethodID),
-		Confirm:       stripe.Bool(true),
-		OffSession:    stripe.Bool(true),
-		Description:   stripe.String(description),
-	}
-
-	pi, err := paymentintent.New(params)
-	if err != nil {
-		return nil, fmt.Errorf("stripe recurring charge failed: %w", err)
-	}
-
-	return &PaymentResult{
-		TransactionID: pi.ID,
-		AmountCents:   pi.Amount,
-		Status:        mapStripeStatus(pi.Status),
-	}, nil
 }
 
 // CreateCheckoutSession creates a hosted Stripe Checkout session for a server purchase or extension.

@@ -42,7 +42,7 @@ type Service struct {
 //   - db: Database handle for queries.
 //   - hostingSvc: Hosting lifecycle service.
 //   - backupSvc: Backup and restore service.
-//   - billingSvc: Subscription and billing service.
+//   - billingSvc: Checkout order and payment history service.
 //   - migrationSvc: Host migration coordinator.
 //   - jobSvc: Async job queue coordinator.
 //   - jwtSecret: Secret key to verify and issue session tokens.
@@ -81,6 +81,9 @@ func (s *Service) loadTemplates() {
 				return 0
 			}
 			return a / b
+		},
+		"formatUSD": func(cents int64) string {
+			return fmt.Sprintf("$%.2f", float64(cents)/100.0)
 		},
 	}
 
@@ -934,32 +937,17 @@ func (s *Service) OpenFileManager(c *gin.Context) {
 	c.Redirect(http.StatusFound, targetURL)
 }
 
-// ShowBilling displays customer subscriptions and payment method status.
+// ShowBilling displays customer checkout order history and payment records.
 func (s *Service) ShowBilling(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
 
-	var user domain.User
-	_ = s.db.First(&user, userID)
-
-	subs, _ := s.billingSvc.ListUserSubscriptions(c.Request.Context(), userID)
+	orders, _ := s.billingSvc.ListUserOrders(c.Request.Context(), userID)
+	payments, _ := s.billingSvc.ListUserPayments(c.Request.Context(), userID)
 
 	s.renderView(c, "billing.html", map[string]interface{}{
-		"User":          user,
-		"Subscriptions": subs,
+		"Orders":   orders,
+		"Payments": payments,
 	})
-}
-
-// SavePaymentMethod attaches a new payment method via billing service.
-func (s *Service) SavePaymentMethod(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
-	pmID := strings.TrimSpace(c.PostForm("payment_method_id"))
-
-	if err := s.billingSvc.SavePaymentMethod(c.Request.Context(), userID, pmID); err != nil {
-		c.Redirect(http.StatusFound, "/dashboard/billing?error="+err.Error())
-		return
-	}
-
-	c.Redirect(http.StatusFound, "/dashboard/billing?success=Payment+method+saved+successfully")
 }
 
 // ListUsers renders the admin-only user role management page.
@@ -1076,7 +1064,6 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 		dash.GET("/servers/:id/files/open", s.OpenFileManager)
 
 		dash.GET("/billing", s.ShowBilling)
-		dash.POST("/billing/payment-methods", s.SavePaymentMethod)
 
 		dash.GET("/users", s.ListUsers)
 		dash.POST("/users/:id/role", s.UpdateUserRole)

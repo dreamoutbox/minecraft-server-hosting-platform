@@ -111,6 +111,14 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] restore from backup failed: failed importing volume contents on worker: import volume failed with code 500: {"error":"failed creating file /var/lib/mc-platform/mounts/1/.install-vanilla.env: open /var/lib/mc-platform/mounts/1/.install-vanilla.env: permission denied"}
 
+- [ ] admin user. navbar add menu (with search and pagination):
+    - list all servers 
+    - orders
+    - payment_records
+    - server_jobs
+    - server_operation_logs
+    - plans (with CRUD)
+
 ---
 
 # BACKLOG
