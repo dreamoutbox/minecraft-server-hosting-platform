@@ -2,6 +2,7 @@ package worker
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -271,7 +272,11 @@ func (h *Handler) ExportVolume(c *gin.Context) {
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"volume-%s.tar\"", id))
 
 	if err := h.volumes.ExportVolume(c.Request.Context(), id, c.Writer); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if !c.Writer.Written() {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		log.Printf("export volume %s aborted mid-stream: %v", id, err)
 		return
 	}
 }

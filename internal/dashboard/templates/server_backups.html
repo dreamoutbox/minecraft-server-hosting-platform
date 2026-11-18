@@ -4,7 +4,7 @@
 
 <div class="card shadow-sm border-0 mb-4">
     <div class="card-header bg-white border-0 pt-4 pb-0 d-flex justify-content-between align-items-center">
-        <h5 class="fw-bold mb-0">World Backups</h5>
+        <h5 class="fw-bold mb-0">Backups</h5>
         <form method="POST" action="/dashboard/servers/{{.Server.ID}}/backups/now">
             <button type="submit" class="btn btn-sm btn-primary">Backup Now</button>
         </form>
@@ -39,8 +39,7 @@
                         </td>
                         <td class="text-end">
                             {{if eq .Status "completed"}}
-                            <form method="POST"
-                                action="/dashboard/servers/{{$.Server.ID}}/backups/{{.ID}}/restore"
+                            <form method="POST" action="/dashboard/servers/{{$.Server.ID}}/backups/{{.ID}}/restore"
                                 class="d-inline"
                                 onsubmit="return confirm('Restore this snapshot? Active changes will be replaced.');">
                                 <button type="submit" class="btn btn-sm btn-outline-warning">Restore</button>
@@ -55,7 +54,8 @@
             </table>
         </div>
         {{else}}
-        <p class="text-muted small mb-0">No backups found. Trigger a manual backup or wait for scheduled daily sweeps.</p>
+        <p class="text-muted small mb-0">No backups found. Trigger a manual backup or wait for scheduled daily sweeps.
+        </p>
         {{end}}
     </div>
 </div>
@@ -96,8 +96,10 @@
                         <td class="small text-danger">{{.LastError}}</td>
                         <td class="text-end">
                             {{if eq .Status "failed"}}
-                            <form method="POST" action="/dashboard/servers/{{$.Server.ID}}/jobs/{{.ID}}/retry" class="d-inline">
-                                <input type="hidden" name="return_to" value="/dashboard/servers/{{$.Server.ID}}/backups">
+                            <form method="POST" action="/dashboard/servers/{{$.Server.ID}}/jobs/{{.ID}}/retry"
+                                class="d-inline">
+                                <input type="hidden" name="return_to"
+                                    value="/dashboard/servers/{{$.Server.ID}}/backups">
                                 <button type="submit" class="btn btn-sm btn-outline-warning">Retry</button>
                             </form>
                             {{end}}

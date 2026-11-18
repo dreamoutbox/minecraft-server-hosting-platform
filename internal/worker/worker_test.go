@@ -452,3 +452,74 @@ func TestDockerStopAndDeleteIgnoreNotFound(t *testing.T) {
 		t.Fatal("expected Delete to return error on 500 response")
 	}
 }
+
+func TestExportAndImportSkipLostAndFoundAndCheckCleanup(t *testing.T) {
+	tempBaseDir, err := os.MkdirTemp("", "worker-vol-laf-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tempBaseDir) }()
+
+	vm := NewLocalVolumeManager(tempBaseDir, false)
+	ctx := context.Background()
+
+	mountPath, _, err := vm.CreateVolume(ctx, "1", 1)
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+
+	lostAndFound := filepath.Join(mountPath, "lost+found")
+	if err := os.MkdirAll(lostAndFound, 0700); err != nil {
+		t.Fatalf("failed creating lost+found: %v", err)
+	}
+	// Make lost+found non-readable when running non-root so filepath.Walk would fail if not skipped
+	if os.Geteuid() != 0 {
+		if err := os.Chmod(lostAndFound, 0000); err != nil {
+			t.Fatalf("failed chmodding lost+found: %v", err)
+		}
+		defer func() { _ = os.Chmod(lostAndFound, 0700) }()
+	}
+
+	if err := os.WriteFile(filepath.Join(mountPath, "server.properties"), []byte("motd=test\n"), 0644); err != nil {
+		t.Fatalf("failed writing server.properties: %v", err)
+	}
+
+	var tarBuf bytes.Buffer
+	if err := vm.ExportVolume(ctx, "1", &tarBuf); err != nil {
+		t.Fatalf("ExportVolume should skip lost+found, got error: %v", err)
+	}
+
+	tr := tar.NewReader(bytes.NewReader(tarBuf.Bytes()))
+	found := make(map[string]bool)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("reading exported tar failed: %v", err)
+		}
+		found[hdr.Name] = true
+	}
+	if found["lost+found"] {
+		t.Fatal("expected lost+found to be omitted from exported archive")
+	}
+	if !found["server.properties"] {
+		t.Fatalf("expected server.properties in exported archive, found: %+v", found)
+	}
+
+	// Create stale file and verify ImportVolume removes it while keeping lost+found
+	stalePath := filepath.Join(mountPath, "stale.txt")
+	if err := os.WriteFile(stalePath, []byte("old"), 0644); err != nil {
+		t.Fatalf("failed writing stale file: %v", err)
+	}
+	if err := vm.ImportVolume(ctx, "1", bytes.NewReader(tarBuf.Bytes())); err != nil {
+		t.Fatalf("ImportVolume failed: %v", err)
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale.txt to be cleaned up during ImportVolume, stat err=%v", err)
+	}
+	if _, err := os.Stat(lostAndFound); err != nil {
+		t.Fatalf("expected lost+found directory to be preserved, stat err=%v", err)
+	}
+}

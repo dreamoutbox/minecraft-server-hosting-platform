@@ -109,9 +109,7 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] change "Create Your First Server" to "Buy Server" if user is not admin/staff
 
----
-
-- [ ] restore from backup failed: failed importing volume contents on worker: import volume failed with code 500: {"error":"failed creating file /var/lib/mc-platform/mounts/1/.install-vanilla.env: open /var/lib/mc-platform/mounts/1/.install-vanilla.env: permission denied"}
+- [x] restore from backup failed: failed importing volume contents on worker: import volume failed with code 500: {"error":"failed creating file /var/lib/mc-platform/mounts/1/.install-vanilla.env: open /var/lib/mc-platform/mounts/1/.install-vanilla.env: permission denied"}
 
 ---
 

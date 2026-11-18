@@ -295,9 +295,15 @@ func (m *LocalVolumeManager) ExportVolume(ctx context.Context, volumeID string, 
 	}
 
 	tw := tar.NewWriter(w)
-	defer func() { _ = tw.Close() }()
 
-	return filepath.Walk(mountDir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(mountDir, func(path string, info os.FileInfo, err error) error {
+		relPath, relErr := filepath.Rel(mountDir, path)
+		if relErr == nil && isLostAndFoundRelPath(filepath.ToSlash(relPath)) {
+			if info != nil && info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -307,15 +313,19 @@ func (m *LocalVolumeManager) ExportVolume(ctx context.Context, volumeID string, 
 		default:
 		}
 
-		relPath, err := filepath.Rel(mountDir, path)
-		if err != nil {
-			return err
+		if relErr != nil {
+			return relErr
 		}
 		if relPath == "." {
 			return nil
 		}
 
-		header, err := tar.FileInfoHeader(info, info.Name())
+		linkTarget := ""
+		if info.Mode()&os.ModeSymlink != 0 {
+			linkTarget, _ = os.Readlink(path)
+		}
+
+		header, err := tar.FileInfoHeader(info, linkTarget)
 		if err != nil {
 			return err
 		}
@@ -325,7 +335,7 @@ func (m *LocalVolumeManager) ExportVolume(ctx context.Context, volumeID string, 
 			return err
 		}
 
-		if info.Mode().IsDir() {
+		if !info.Mode().IsRegular() {
 			return nil
 		}
 
@@ -333,11 +343,17 @@ func (m *LocalVolumeManager) ExportVolume(ctx context.Context, volumeID string, 
 		if err != nil {
 			return err
 		}
-		defer func() { _ = file.Close() }()
-
-		_, err = io.Copy(tw, file)
+		_, copyErr := io.Copy(tw, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
+	}); err != nil {
 		return err
-	})
+	}
+
+	return tw.Close()
 }
 
 // ImportVolume unpacks a tar stream into the volume's mount point, sanitizing paths to prevent traversal.
@@ -363,11 +379,18 @@ func (m *LocalVolumeManager) ImportVolume(ctx context.Context, volumeID string, 
 		return fmt.Errorf("failed creating mount target directory: %w", err)
 	}
 
-	// Clean out existing contents prior to import
+	// Clean out existing contents prior to import (preserve ext4 lost+found)
 	entries, err := os.ReadDir(mountDir)
-	if err == nil {
-		for _, e := range entries {
-			_ = os.RemoveAll(filepath.Join(mountDir, e.Name()))
+	if err != nil {
+		return fmt.Errorf("failed reading mount directory %s: %w", mountDir, err)
+	}
+	for _, e := range entries {
+		if e.Name() == "lost+found" {
+			continue
+		}
+		target := filepath.Join(mountDir, e.Name())
+		if err := os.RemoveAll(target); err != nil {
+			return fmt.Errorf("failed removing existing entry %s: %w", target, err)
 		}
 	}
 
@@ -392,6 +415,9 @@ func (m *LocalVolumeManager) ImportVolume(ctx context.Context, volumeID string, 
 		if strings.HasPrefix(cleanRel, "..") || filepath.IsAbs(cleanRel) {
 			return fmt.Errorf("illegal relative path in tar archive: %s", header.Name)
 		}
+		if cleanRel == "." || isLostAndFoundRelPath(filepath.ToSlash(cleanRel)) {
+			continue
+		}
 
 		targetPath := filepath.Join(mountDir, cleanRel)
 
@@ -400,11 +426,16 @@ func (m *LocalVolumeManager) ImportVolume(ctx context.Context, volumeID string, 
 			if err := os.MkdirAll(targetPath, 0755); err != nil {
 				return fmt.Errorf("failed creating directory %s: %w", targetPath, err)
 			}
+			applyTarOwnership(targetPath, header.Uid, header.Gid)
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 				return fmt.Errorf("failed creating parent dir for %s: %w", targetPath, err)
 			}
-			outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
+			mode := os.FileMode(header.Mode) & os.ModePerm
+			if mode == 0 {
+				mode = 0644
+			}
+			outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, mode)
 			if err != nil {
 				return fmt.Errorf("failed creating file %s: %w", targetPath, err)
 			}
@@ -415,10 +446,30 @@ func (m *LocalVolumeManager) ImportVolume(ctx context.Context, volumeID string, 
 			if err := outFile.Close(); err != nil {
 				return fmt.Errorf("failed closing file %s: %w", targetPath, err)
 			}
+			applyTarOwnership(targetPath, header.Uid, header.Gid)
+		case tar.TypeSymlink:
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+				return fmt.Errorf("failed creating parent dir for symlink %s: %w", targetPath, err)
+			}
+			_ = os.Remove(targetPath)
+			if err := os.Symlink(header.Linkname, targetPath); err != nil {
+				return fmt.Errorf("failed creating symlink %s: %w", targetPath, err)
+			}
+			applyTarOwnership(targetPath, header.Uid, header.Gid)
 		}
 	}
 
 	return nil
+}
+
+func isLostAndFoundRelPath(slashRelPath string) bool {
+	return slashRelPath == "lost+found" || strings.HasPrefix(slashRelPath, "lost+found/")
+}
+
+func applyTarOwnership(path string, uid, gid int) {
+	if os.Geteuid() == 0 {
+		_ = os.Lchown(path, uid, gid)
+	}
 }
 
 // GetVolumePath retrieves the current filesystem mount path for a known volume.

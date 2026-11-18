@@ -59,6 +59,9 @@ services:
       - ALL
     cap_add:
       - SYS_ADMIN
+      - DAC_OVERRIDE
+      - CHOWN
+      - FOWNER
     # Allow allocating and mounting loop devices (block major 7)
     # without full privileged mode. Docker does not dynamically create
     # /dev/loopN nodes inside non-privileged containers, so loop0-loop7

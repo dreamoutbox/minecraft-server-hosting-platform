@@ -47,6 +47,7 @@ services:
     restart: unless-stopped
     command: [ "server", "-dir=/data", "-s3" ]
     ports:
+      - "8888:8888"
       - "8333:8333"
       - "9333:9333"
     volumes:
