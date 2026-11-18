@@ -30,29 +30,7 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
-- [x] File Manager is not showing any files. should show list files in /var/lib/mc-platform/mounts/<server-id>.
-
----
-
-### fileserver
-
-- [x] new fileserver project. for manage files.
-
-- [x] remove `[DIR]` prefix. make dir show as blue link, and file show as normal text.
-
-- [x] new sub-navbar toolbar for upload file, new file, new folder.
-
-- [x] remove upload file panel & new folder panel
-
-- [x] add ability to edit .txt, .json, .yml .properties on the web. open modal to edit the file and save.
-
-- [x] add button to zip and download folder
-
-- [x] remove rename input text. rename button should open popup to rename.
-
-- [x] BUG: can't open .yaml, .env file
-
-- [x] determine if file is text file. and allow open to edit. disallow edit binary file or large file.
+- [x] ~~File Manager is not showing any files. should show list files in /var/lib/mc-platform/mounts/<server-id>.~~ use fileserver now.
 
 ---
 
@@ -90,11 +68,11 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ### 11/18/2026
 
-- [ ] test upload file exceed ext4 mount disk should fail. 
-    - add new plan with 1 gb disk
-    - create random large file 1.1 gb
-    - test upload file
-    - expected fail.
+- [x] test upload file exceed ext4 mount disk should fail. 
+    - [x] add new plan with 1 gb disk
+    - [x] create random large file 1.1 gb
+    - [x] test upload file
+    - [x] expected fail.
 
 - [x] show server connect domain on web dashboard. add field public_domain, public_ip to node host tables in postgres
 
