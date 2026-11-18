@@ -94,6 +94,14 @@ func (m *mockWorkerForBackup) GetContainerStatus(ctx context.Context, containerI
 	return &worker.ContainerStatusResponse{ContainerID: containerID, Status: worker.ContainerStatusRunning}, nil
 }
 
+func (m *mockWorkerForBackup) GetContainerLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
+	return &worker.ContainerLogsResponse{ContainerID: containerID, Logs: ""}, nil
+}
+
+func (m *mockWorkerForBackup) ExecContainerCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
+	return &worker.ExecCommandResponse{ContainerID: containerID, Command: command, Output: ""}, nil
+}
+
 func setupBackupTestEnv(t *testing.T) (*Service, *mockWorkerForBackup, storage.StorageProvider, *domain.Server, *domain.User, string) {
 	dsn := os.Getenv("TEST_DATABASE_DSN")
 	if dsn == "" {

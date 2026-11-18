@@ -1,0 +1,194 @@
+{{define "title"}}Console: {{.Server.Name}}{{end}}
+{{define "content"}}
+{{template "server_subnav" .}}
+
+<div class="card shadow-sm border-0">
+    <div
+        class="card-header bg-white border-0 pt-4 pb-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+            <h5 class="fw-bold mb-0">Server Console</h5>
+            <p class="text-muted small mb-0">Live container stdout/stderr logs and console command execution.</p>
+        </div>
+        <form method="GET" action="/dashboard/servers/{{.Server.ID}}/console" class="d-flex align-items-center gap-2">
+            <label for="tail" class="form-label small text-muted mb-0">Lines:</label>
+            <select id="tail" name="tail" class="form-select form-select-sm" style="width: auto;"
+                onchange="this.form.submit()">
+                <option value="100" {{if eq .Tail 100}}selected{{end}}>100</option>
+                <option value="200" {{if eq .Tail 200}}selected{{end}}>200</option>
+                <option value="500" {{if eq .Tail 500}}selected{{end}}>500</option>
+            </select>
+            <button type="button" id="refresh-console-btn" class="btn btn-sm btn-outline-secondary">Refresh</button>
+        </form>
+    </div>
+
+    <div class="card-body">
+        <div id="console-logs-error" class="alert alert-warning small py-2 {{if not .LogsError}}d-none{{end}}">
+            {{.LogsError}}</div>
+
+        <pre id="console-output" class="bg-dark text-light p-3 rounded small mb-3"
+            style="height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">{{if ne .Server.Status "running"}}Server is offline.{{else if .ConsoleLogs}}{{.ConsoleLogs}}{{else}}No console output available.{{end}}</pre>
+
+        <div id="console-command-error" class="alert alert-danger small py-2 d-none"></div>
+
+        {{if eq .Server.Status "running"}}
+        <form id="console-command-form" method="POST" action="/dashboard/servers/{{.Server.ID}}/console/command"
+            class="d-flex gap-2">
+            <input type="hidden" name="tail" value="{{.Tail}}">
+            <input type="text" id="console-command-input" name="command" class="form-control font-monospace"
+                placeholder="Enter Minecraft command (e.g. list, say Hello, time set day)" required autocomplete="off">
+            <button type="submit" id="console-command-submit" class="btn btn-primary text-nowrap">Send Command</button>
+        </form>
+        {{else}}
+        <div class="alert alert-info small py-2 mb-0">
+            Start the server to send commands to the Minecraft console (current status:
+            <strong>{{.Server.Status}}</strong>).
+        </div>
+        {{end}}
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var outputEl = document.getElementById("console-output");
+        var logsErrEl = document.getElementById("console-logs-error");
+        var cmdForm = document.getElementById("console-command-form");
+        var cmdInput = document.getElementById("console-command-input");
+        var cmdSubmit = document.getElementById("console-command-submit");
+        var cmdErrEl = document.getElementById("console-command-error");
+        var tailSelect = document.getElementById("tail");
+        var refreshBtn = document.getElementById("refresh-console-btn");
+
+        var logsURL = "/dashboard/servers/{{.Server.ID}}/console/logs";
+        var commandURL = "/dashboard/servers/{{.Server.ID}}/console/command";
+
+        function isScrolledToBottom(el) {
+            return (el.scrollHeight - el.scrollTop - el.clientHeight) <= 40;
+        }
+
+        function scrollToBottom(el) {
+            el.scrollTop = el.scrollHeight;
+        }
+
+        if (outputEl) {
+            scrollToBottom(outputEl);
+        }
+
+        var polling = false;
+        function refreshLogs() {
+            if (!outputEl || polling) {
+                return;
+            }
+            polling = true;
+            var tail = tailSelect ? tailSelect.value : "200";
+            fetch(logsURL + "?tail=" + encodeURIComponent(tail), {
+                headers: { "Accept": "application/json" }
+            })
+                .then(function (resp) {
+                    if (!resp.ok) {
+                        throw new Error("Failed loading console logs (" + resp.status + ")");
+                    }
+                    return resp.json();
+                })
+                .then(function (data) {
+                    var wasAtBottom = isScrolledToBottom(outputEl);
+                    var prevScrollTop = outputEl.scrollTop;
+
+                    if (data.error) {
+                        logsErrEl.textContent = data.error;
+                        logsErrEl.classList.remove("d-none");
+                    } else {
+                        logsErrEl.classList.add("d-none");
+                    }
+
+                    var nextText;
+                    if (data.status !== "running") {
+                        nextText = "Server is offline.";
+                    } else if (data.logs) {
+                        nextText = data.logs;
+                    } else {
+                        nextText = "No console output available.";
+                    }
+
+                    if (outputEl.textContent !== nextText) {
+                        outputEl.textContent = nextText;
+                        if (wasAtBottom) {
+                            scrollToBottom(outputEl);
+                        } else {
+                            outputEl.scrollTop = prevScrollTop;
+                        }
+                    }
+                })
+                .catch(function () {
+                    // Keep existing logs visible on transient polling errors.
+                })
+                .finally(function () {
+                    polling = false;
+                });
+        }
+
+        if (refreshBtn) {
+            refreshBtn.addEventListener("click", refreshLogs);
+        }
+
+        setInterval(refreshLogs, 1500);
+
+        if (cmdForm) {
+            cmdForm.addEventListener("submit", function (e) {
+                e.preventDefault();
+                var command = cmdInput ? cmdInput.value.trim() : "";
+                if (!command) {
+                    return;
+                }
+
+                cmdErrEl.classList.add("d-none");
+                if (cmdSubmit) {
+                    cmdSubmit.disabled = true;
+                }
+
+                var body = new URLSearchParams();
+                body.set("command", command);
+                if (tailSelect) {
+                    body.set("tail", tailSelect.value);
+                }
+
+                fetch(commandURL, {
+                    method: "POST",
+                    headers: {
+                        "Accept": "application/json",
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    body: body.toString()
+                })
+                    .then(function (resp) {
+                        return resp.json().then(function (data) {
+                            return { ok: resp.ok, data: data };
+                        });
+                    })
+                    .then(function (result) {
+                        if (!result.ok || result.data.error) {
+                            cmdErrEl.textContent = result.data.error || "Failed sending command";
+                            cmdErrEl.classList.remove("d-none");
+                            return;
+                        }
+                        cmdInput.value = "";
+                        scrollToBottom(outputEl);
+                        setTimeout(refreshLogs, 200);
+                    })
+                    .catch(function (err) {
+                        cmdErrEl.textContent = err.message || "Failed sending command";
+                        cmdErrEl.classList.remove("d-none");
+                    })
+                    .finally(function () {
+                        if (cmdSubmit) {
+                            cmdSubmit.disabled = false;
+                        }
+                        if (cmdInput) {
+                            cmdInput.focus();
+                        }
+                    });
+            });
+        }
+    });
+</script>
+{{end}}

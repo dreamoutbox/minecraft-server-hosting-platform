@@ -20,13 +20,13 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
-- [ ] add user role user/staff/admin
+- [x] add user role user/staff/admin
 
 ---
 
-- [ ] add new page server console logs.
+- [x] add new page server console logs.
 
-- [ ] add send command from web console to minecraft server.
+- [x] add send command from web console to minecraft server.
 
 ---
 

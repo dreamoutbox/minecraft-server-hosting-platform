@@ -27,7 +27,8 @@ type Handler struct {
 //   - baseDir: Storage directory on node used for disk capacity statistics.
 //
 // Example usage:
-//   h := worker.NewHandler(cm, vm, 50, "/var/lib/mc-platform")
+//
+//	h := worker.NewHandler(cm, vm, 50, "/var/lib/mc-platform")
 func NewHandler(containers ContainerManager, volumes VolumeManager, maxServers int, baseDir string) *Handler {
 	return &Handler{
 		containers: containers,
@@ -43,7 +44,8 @@ func NewHandler(containers ContainerManager, volumes VolumeManager, maxServers i
 //   - c: Active Gin request context containing CreateContainerRequest JSON.
 //
 // Example usage:
-//   POST /containers
+//
+//	POST /containers
 func (h *Handler) CreateContainer(c *gin.Context) {
 	var req CreateContainerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -74,7 +76,8 @@ func (h *Handler) CreateContainer(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   POST /containers/:id/stop
+//
+//	POST /containers/:id/stop
 func (h *Handler) StopContainer(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
@@ -96,7 +99,8 @@ func (h *Handler) StopContainer(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   DELETE /containers/:id
+//
+//	DELETE /containers/:id
 func (h *Handler) DeleteContainer(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
@@ -118,7 +122,8 @@ func (h *Handler) DeleteContainer(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   GET /containers/:id/status
+//
+//	GET /containers/:id/status
 func (h *Handler) GetContainerStatus(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
@@ -135,13 +140,75 @@ func (h *Handler) GetContainerStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// GetContainerLogs returns trailing console logs for a managed container.
+//
+// Arguments:
+//   - c: Active Gin request context with URL param 'id' and optional query param 'tail'.
+//
+// Example usage:
+//
+//	GET /containers/:id/logs?tail=200
+func (h *Handler) GetContainerLogs(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing container id"})
+		return
+	}
+
+	tail := 200
+	if rawTail := c.Query("tail"); rawTail != "" {
+		if parsed, err := strconv.Atoi(rawTail); err == nil && parsed > 0 {
+			tail = parsed
+		}
+	}
+
+	resp, err := h.containers.GetLogs(c.Request.Context(), id, tail)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// ExecContainerCommand executes a Minecraft console command inside a running container.
+//
+// Arguments:
+//   - c: Active Gin request context with URL param 'id' and ExecCommandRequest JSON body.
+//
+// Example usage:
+//
+//	POST /containers/:id/exec
+func (h *Handler) ExecContainerCommand(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing container id"})
+		return
+	}
+
+	var req ExecCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid command request: " + err.Error()})
+		return
+	}
+
+	resp, err := h.containers.ExecCommand(c.Request.Context(), id, "1000", req.Command)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // CreateVolume allocates and mounts a storage volume.
 //
 // Arguments:
 //   - c: Active Gin request context containing CreateVolumeRequest JSON.
 //
 // Example usage:
-//   POST /volumes
+//
+//	POST /volumes
 func (h *Handler) CreateVolume(c *gin.Context) {
 	var req CreateVolumeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -168,7 +235,8 @@ func (h *Handler) CreateVolume(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   DELETE /volumes/:id
+//
+//	DELETE /volumes/:id
 func (h *Handler) DeleteVolume(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
@@ -190,7 +258,8 @@ func (h *Handler) DeleteVolume(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   GET /volumes/:id/export
+//
+//	GET /volumes/:id/export
 func (h *Handler) ExportVolume(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
@@ -213,7 +282,8 @@ func (h *Handler) ExportVolume(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id' and tar stream body.
 //
 // Example usage:
-//   POST /volumes/:id/import
+//
+//	POST /volumes/:id/import
 func (h *Handler) ImportVolume(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
@@ -235,7 +305,8 @@ func (h *Handler) ImportVolume(c *gin.Context) {
 //   - c: Active Gin request context.
 //
 // Example usage:
-//   GET /status
+//
+//	GET /status
 func (h *Handler) GetStatus(c *gin.Context) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -268,7 +339,8 @@ func (h *Handler) GetStatus(c *gin.Context) {
 //   - path: Local filesystem path to inspect.
 //
 // Example usage:
-//   free, total, err := getDiskCapacity("/var/lib/mc-platform")
+//
+//	free, total, err := getDiskCapacity("/var/lib/mc-platform")
 func getDiskCapacity(path string) (uint64, uint64, error) {
 	var stat unix.Statfs_t
 	if err := unix.Statfs(path, &stat); err != nil {
@@ -286,7 +358,8 @@ func getDiskCapacity(path string) (uint64, uint64, error) {
 //   - apiKey: Configured worker secret key.
 //
 // Example usage:
-//   handler.RegisterRoutes(router, "secret-key")
+//
+//	handler.RegisterRoutes(router, "secret-key")
 func (h *Handler) RegisterRoutes(r *gin.Engine, apiKey string) {
 	authorized := r.Group("")
 	authorized.Use(APIKeyMiddleware(apiKey))
@@ -296,6 +369,8 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, apiKey string) {
 		authorized.POST("/containers/:id/stop", h.StopContainer)
 		authorized.DELETE("/containers/:id", h.DeleteContainer)
 		authorized.GET("/containers/:id/status", h.GetContainerStatus)
+		authorized.GET("/containers/:id/logs", h.GetContainerLogs)
+		authorized.POST("/containers/:id/exec", h.ExecContainerCommand)
 
 		authorized.POST("/volumes", h.CreateVolume)
 		authorized.DELETE("/volumes/:id", h.DeleteVolume)

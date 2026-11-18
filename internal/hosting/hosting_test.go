@@ -97,6 +97,21 @@ func (m *mockWorkerClient) GetContainerStatus(ctx context.Context, containerID s
 	}, nil
 }
 
+func (m *mockWorkerClient) GetContainerLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
+	return &worker.ContainerLogsResponse{
+		ContainerID: containerID,
+		Logs:        "[Server thread/INFO]: Starting minecraft server\n",
+	}, nil
+}
+
+func (m *mockWorkerClient) ExecContainerCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
+	return &worker.ExecCommandResponse{
+		ContainerID: containerID,
+		Command:     command,
+		Output:      "ok: " + command,
+	}, nil
+}
+
 func setupHostingTestEnv(t *testing.T) (*gin.Engine, *Service, *mockWorkerClient, *domain.User, string) {
 	gin.SetMode(gin.TestMode)
 	dsn := os.Getenv("TEST_DATABASE_DSN")

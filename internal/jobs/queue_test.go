@@ -103,6 +103,14 @@ func (q *queueTestWorker) GetContainerStatus(ctx context.Context, containerID st
 	return &worker.ContainerStatusResponse{ContainerID: containerID, Status: worker.ContainerStatusRunning}, nil
 }
 
+func (q *queueTestWorker) GetContainerLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
+	return &worker.ContainerLogsResponse{ContainerID: containerID, Logs: ""}, nil
+}
+
+func (q *queueTestWorker) ExecContainerCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
+	return &worker.ExecCommandResponse{ContainerID: containerID, Command: command, Output: ""}, nil
+}
+
 func TestAsyncQueueRetryAndOperationLogs(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_DSN")
 	if dsn == "" {

@@ -24,6 +24,12 @@ func (s *spyContainerManager) Delete(ctx context.Context, containerID string) er
 func (s *spyContainerManager) GetStatus(ctx context.Context, containerID string) (*worker.ContainerStatusResponse, error) {
 	return &worker.ContainerStatusResponse{}, nil
 }
+func (s *spyContainerManager) GetLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
+	return &worker.ContainerLogsResponse{}, nil
+}
+func (s *spyContainerManager) ExecCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
+	return &worker.ExecCommandResponse{}, nil
+}
 func (s *spyContainerManager) CountActive(ctx context.Context) (int, error) { return 0, nil }
 func (s *spyContainerManager) CleanupAll(ctx context.Context) error {
 	*s.events = append(*s.events, "containers.cleanup_all")

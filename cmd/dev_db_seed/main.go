@@ -62,6 +62,11 @@ func main() {
 			Role:     domain.UserRoleAdmin,
 		},
 		{
+			Email:    "staff@example.com",
+			Password: "password",
+			Role:     domain.UserRoleStaff,
+		},
+		{
 			Email:    "user1@example.com",
 			Password: "password",
 			Role:     domain.UserRoleUser,

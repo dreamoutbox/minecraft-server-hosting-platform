@@ -88,11 +88,13 @@ func (s *Service) loadTemplates() {
 		"servers_list.html",
 		"server_create.html",
 		"server_detail.html",
+		"server_console.html",
 		"server_backups.html",
 		"server_logs.html",
 		"server_settings.html",
 		"server_jobs.html",
 		"server_host.html",
+		"users.html",
 		"billing.html",
 		"forbidden.html",
 	}
@@ -130,6 +132,7 @@ func (s *Service) renderViewWithStatus(c *gin.Context, status int, page string, 
 	role := authkit.GetUserRoleFromContext(c)
 	data["UserRole"] = role
 	data["IsStaffOrAdmin"] = role.IsStaffOrAdmin()
+	data["IsAdmin"] = role.IsAdmin()
 
 	if msg := c.Query("success"); msg != "" {
 		data["FlashSuccess"] = msg
@@ -294,6 +297,159 @@ func (s *Service) ShowServerDetail(c *gin.Context) {
 		"Server":     server,
 		"LiveStatus": liveStatus,
 	})
+}
+
+// ShowServerConsole renders the live container console logs and RCON command form for a server.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id' and optional query param 'tail'.
+//
+// Example usage:
+//
+//	GET /dashboard/servers/:id/console?tail=200
+func (s *Service) ShowServerConsole(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+
+	server, _, err := s.hostingSvc.GetServerForOwner(c.Request.Context(), userID, serverIDVal)
+	if err != nil {
+		c.Redirect(http.StatusFound, "/dashboard?error=Server+not+found")
+		return
+	}
+
+	tail := 200
+	if rawTail := c.Query("tail"); rawTail != "" {
+		if parsed, convErr := strconv.Atoi(rawTail); convErr == nil && parsed > 0 {
+			tail = parsed
+		}
+	}
+
+	var consoleLogs string
+	var logsErr string
+	if server.Status == domain.ServerStatusRunning && server.ContainerID != "" {
+		logsResp, fetchErr := s.hostingSvc.GetServerConsoleLogs(c.Request.Context(), userID, server.ID, tail)
+		if fetchErr != nil {
+			logsErr = fetchErr.Error()
+		} else if logsResp != nil {
+			consoleLogs = logsResp.Logs
+		}
+	}
+
+	s.renderView(c, "server_console.html", map[string]interface{}{
+		"ActiveTab":   "console",
+		"Server":      server,
+		"ConsoleLogs": consoleLogs,
+		"LogsError":   logsErr,
+		"Tail":        tail,
+	})
+}
+
+// GetServerConsoleLogsJSON returns trailing container logs as JSON for live polling in the web console.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id' and optional query param 'tail'.
+//
+// Example usage:
+//
+//	GET /dashboard/servers/:id/console/logs?tail=200
+func (s *Service) GetServerConsoleLogsJSON(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID"})
+		return
+	}
+
+	server, _, err := s.hostingSvc.GetServerForOwner(c.Request.Context(), userID, serverIDVal)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Server not found"})
+		return
+	}
+
+	if server.Status != domain.ServerStatusRunning || server.ContainerID == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"status": server.Status,
+			"logs":   "",
+		})
+		return
+	}
+
+	tail := 200
+	if rawTail := c.Query("tail"); rawTail != "" {
+		if parsed, convErr := strconv.Atoi(rawTail); convErr == nil && parsed > 0 {
+			tail = parsed
+		}
+	}
+
+	logsResp, fetchErr := s.hostingSvc.GetServerConsoleLogs(c.Request.Context(), userID, server.ID, tail)
+	if fetchErr != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"status": server.Status,
+			"logs":   "",
+			"error":  fetchErr.Error(),
+		})
+		return
+	}
+
+	logs := ""
+	if logsResp != nil {
+		logs = logsResp.Logs
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status": server.Status,
+		"logs":   logs,
+	})
+}
+
+// SendConsoleCommand executes a Minecraft console command on the running server.
+// Returns JSON when requested via fetch/AJAX, or redirects back to /console for plain form submissions.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id' and form field 'command'.
+//
+// Example usage:
+//
+//	POST /dashboard/servers/:id/console/command
+func (s *Service) SendConsoleCommand(c *gin.Context) {
+	wantsJSON := strings.Contains(c.GetHeader("Accept"), "application/json") || c.GetHeader("X-Requested-With") == "XMLHttpRequest"
+
+	userID, _ := authkit.GetUserIDFromContext(c)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		if wantsJSON {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID"})
+			return
+		}
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+
+	command := c.PostForm("command")
+	tail := c.PostForm("tail")
+	_, err := s.hostingSvc.SendServerCommand(c.Request.Context(), userID, serverIDVal, command)
+	if err != nil {
+		if wantsJSON {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/console", "error", err.Error()))
+		return
+	}
+
+	if wantsJSON {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+
+	target := fmt.Sprintf("/dashboard/servers/%d/console?success=%s", serverIDVal, url.QueryEscape("Command sent"))
+	if tail != "" {
+		target += "&tail=" + url.QueryEscape(tail)
+	}
+	c.Redirect(http.StatusFound, target)
 }
 
 // ShowServerLogs renders PostgreSQL operation logs for a server.
@@ -706,6 +862,72 @@ func (s *Service) SavePaymentMethod(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/dashboard/billing?success=Payment+method+saved+successfully")
 }
 
+// ListUsers renders the admin-only user role management page.
+//
+// Arguments:
+//   - c: Active Gin request context.
+//
+// Example usage:
+//
+//	GET /dashboard/users
+func (s *Service) ListUsers(c *gin.Context) {
+	if !authkit.GetUserRoleFromContext(c).IsAdmin() {
+		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
+			"ErrorMessage": "User role management is restricted to administrator accounts.",
+		})
+		return
+	}
+
+	var users []domain.User
+	_ = s.db.WithContext(c.Request.Context()).Order("id asc").Find(&users).Error
+
+	s.renderView(c, "users.html", map[string]interface{}{
+		"Users": users,
+		"Roles": []domain.UserRole{domain.UserRoleUser, domain.UserRoleStaff, domain.UserRoleAdmin},
+	})
+}
+
+// UpdateUserRole updates a user's platform role (user, staff, or admin).
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id' and form field 'role'.
+//
+// Example usage:
+//
+//	POST /dashboard/users/:id/role
+func (s *Service) UpdateUserRole(c *gin.Context) {
+	if !authkit.GetUserRoleFromContext(c).IsAdmin() {
+		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
+			"ErrorMessage": "User role management is restricted to administrator accounts.",
+		})
+		return
+	}
+
+	targetUserID, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard/users?error=Invalid+user+ID")
+		return
+	}
+
+	newRole := domain.UserRole(strings.TrimSpace(c.PostForm("role")))
+	if !newRole.IsValid() {
+		c.Redirect(http.StatusFound, "/dashboard/users?error=Invalid+role")
+		return
+	}
+
+	res := s.db.WithContext(c.Request.Context()).Model(&domain.User{}).Where("id = ?", targetUserID).Update("role", newRole)
+	if res.Error != nil {
+		c.Redirect(http.StatusFound, "/dashboard/users?error="+url.QueryEscape(res.Error.Error()))
+		return
+	}
+	if res.RowsAffected == 0 {
+		c.Redirect(http.StatusFound, "/dashboard/users?error=User+not+found")
+		return
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/users?success=User+role+updated")
+}
+
 // RegisterRoutes registers all dashboard web pages and form actions onto the router.
 //
 // Arguments:
@@ -729,6 +951,9 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 		dash.GET("/servers/new", s.ShowCreateServer)
 		dash.POST("/servers/new", s.ProcessCreateServer)
 		dash.GET("/servers/:id", s.ShowServerDetail)
+		dash.GET("/servers/:id/console", s.ShowServerConsole)
+		dash.GET("/servers/:id/console/logs", s.GetServerConsoleLogsJSON)
+		dash.POST("/servers/:id/console/command", s.SendConsoleCommand)
 		dash.GET("/servers/:id/backups", s.ShowServerBackups)
 		dash.GET("/servers/:id/logs", s.ShowServerLogs)
 		dash.GET("/servers/:id/settings", s.ShowServerSettings)
@@ -748,6 +973,9 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 
 		dash.GET("/billing", s.ShowBilling)
 		dash.POST("/billing/payment-methods", s.SavePaymentMethod)
+
+		dash.GET("/users", s.ListUsers)
+		dash.POST("/users/:id/role", s.UpdateUserRole)
 	}
 
 	// Redirect root to /dashboard

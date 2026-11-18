@@ -80,6 +80,11 @@ type UpdateServerSettingsRequest struct {
 	ServerVersion string `json:"server_version" binding:"required"`
 }
 
+// ConsoleCommandRequest holds a Minecraft console command to execute on a running server.
+type ConsoleCommandRequest struct {
+	Command string `json:"command" binding:"required"`
+}
+
 // RegisterHost enrolls a host node and yields its generated API key.
 //
 // Arguments:
@@ -427,6 +432,77 @@ func (h *Handler) MigrateServer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "server migrated successfully"})
 }
 
+// GetConsoleLogs returns trailing console logs for a Minecraft server container.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id' and optional query param 'tail'.
+//
+// Example usage:
+//   GET /api/v1/servers/:id/console/logs?tail=200
+func (h *Handler) GetConsoleLogs(c *gin.Context) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing user context"})
+		return
+	}
+
+	serverID, err := parseIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid server id"})
+		return
+	}
+
+	tail := 200
+	if rawTail := c.Query("tail"); rawTail != "" {
+		if parsed, convErr := strconv.Atoi(rawTail); convErr == nil && parsed > 0 {
+			tail = parsed
+		}
+	}
+
+	res, err := h.service.GetServerConsoleLogs(c.Request.Context(), userID, serverID, tail)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
+// SendConsoleCommand executes a Minecraft console command on a running server container.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id' and ConsoleCommandRequest JSON body.
+//
+// Example usage:
+//   POST /api/v1/servers/:id/console/command
+func (h *Handler) SendConsoleCommand(c *gin.Context) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing user context"})
+		return
+	}
+
+	serverID, err := parseIDParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid server id"})
+		return
+	}
+
+	var req ConsoleCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid command request: " + err.Error()})
+		return
+	}
+
+	res, err := h.service.SendServerCommand(c.Request.Context(), userID, serverID, req.Command)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
 // parseIDParam extracts and converts a URL route parameter to an unsigned integer.
 func parseIDParam(c *gin.Context, paramName string) (uint, error) {
 	raw := c.Param(paramName)
@@ -468,5 +544,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 		servers.PUT("/:id/settings", h.UpdateSettings)
 		servers.DELETE("/:id", h.DeleteServer)
 		servers.POST("/:id/migrate", h.MigrateServer)
+		servers.GET("/:id/console/logs", h.GetConsoleLogs)
+		servers.POST("/:id/console/command", h.SendConsoleCommand)
 	}
 }

@@ -22,6 +22,8 @@ type Client interface {
 	StopContainer(ctx context.Context, containerID string) error
 	DeleteContainer(ctx context.Context, containerID string) error
 	GetContainerStatus(ctx context.Context, containerID string) (*ContainerStatusResponse, error)
+	GetContainerLogs(ctx context.Context, containerID string, tail int) (*ContainerLogsResponse, error)
+	ExecContainerCommand(ctx context.Context, containerID string, command string) (*ExecCommandResponse, error)
 }
 
 // HTTPClient implements Client via standard HTTP requests injecting the worker API key.
@@ -304,6 +306,69 @@ func (c *HTTPClient) GetContainerStatus(ctx context.Context, containerID string)
 	var res ContainerStatusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
 		return nil, fmt.Errorf("failed decoding container status response: %w", err)
+	}
+	return &res, nil
+}
+
+// GetContainerLogs retrieves trailing console logs for a container on the worker node.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - containerID: Target Docker container ID.
+//   - tail: Maximum number of trailing lines to return.
+//
+// Example usage:
+//   logs, err := client.GetContainerLogs(ctx, "ctr-123", 200)
+func (c *HTTPClient) GetContainerLogs(ctx context.Context, containerID string, tail int) (*ContainerLogsResponse, error) {
+	path := fmt.Sprintf("/containers/%s/logs?tail=%d", containerID, tail)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get container logs failed with code %d: %s", resp.StatusCode, string(b))
+	}
+
+	var res ContainerLogsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("failed decoding container logs response: %w", err)
+	}
+	return &res, nil
+}
+
+// ExecContainerCommand sends a Minecraft console command to a running container via the worker node.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - containerID: Target Docker container ID.
+//   - command: Minecraft console command to execute.
+//
+// Example usage:
+//   res, err := client.ExecContainerCommand(ctx, "ctr-123", "list")
+func (c *HTTPClient) ExecContainerCommand(ctx context.Context, containerID string, command string) (*ExecCommandResponse, error) {
+	payload, err := json.Marshal(ExecCommandRequest{Command: command})
+	if err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/containers/%s/exec", containerID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("exec container command failed with code %d: %s", resp.StatusCode, string(b))
+	}
+
+	var res ExecCommandResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("failed decoding exec command response: %w", err)
 	}
 	return &res, nil
 }

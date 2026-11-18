@@ -117,6 +117,14 @@ func (m *multiHostWorkerClient) GetContainerStatus(ctx context.Context, containe
 	}, nil
 }
 
+func (m *multiHostWorkerClient) GetContainerLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
+	return &worker.ContainerLogsResponse{ContainerID: containerID, Logs: ""}, nil
+}
+
+func (m *multiHostWorkerClient) ExecContainerCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
+	return &worker.ExecCommandResponse{ContainerID: containerID, Command: command, Output: ""}, nil
+}
+
 func setupMigrationTestEnv(t *testing.T) (*MigrationService, *Service, map[string]*multiHostWorkerClient, *domain.User, *domain.Host, *domain.Host, *domain.Server) {
 	dsn := os.Getenv("TEST_DATABASE_DSN")
 	if dsn == "" {

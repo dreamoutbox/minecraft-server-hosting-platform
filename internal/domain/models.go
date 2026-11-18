@@ -161,8 +161,9 @@ const (
 	ServerOpCreate  ServerOperationType = "create"
 	ServerOpStop    ServerOperationType = "stop"
 	ServerOpDelete  ServerOperationType = "delete"
-	ServerOpBackup  ServerOperationType = "backup"
-	ServerOpRestore ServerOperationType = "restore"
+	ServerOpBackup         ServerOperationType = "backup"
+	ServerOpRestore        ServerOperationType = "restore"
+	ServerOpConsoleCommand ServerOperationType = "console_command"
 )
 
 // ServerLogStatus represents the final outcome of an audited server operation.

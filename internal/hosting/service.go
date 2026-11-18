@@ -671,6 +671,69 @@ func (s *Service) ListServers(ctx context.Context, userID uint) ([]domain.Server
 	return servers, nil
 }
 
+// GetServerConsoleLogs retrieves trailing container console logs for a user's Minecraft server.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Account ID requesting access (or 0 to bypass ownership check).
+//   - serverID: Target server primary key.
+//   - tail: Maximum number of trailing lines to return.
+//
+// Example usage:
+//
+//	logs, err := svc.GetServerConsoleLogs(ctx, user.ID, server.ID, 200)
+func (s *Service) GetServerConsoleLogs(ctx context.Context, userID uint, serverID uint, tail int) (*worker.ContainerLogsResponse, error) {
+	server, host, err := s.getServerAndHost(ctx, userID, serverID)
+	if err != nil {
+		return nil, err
+	}
+	if server.ContainerID == "" {
+		return &worker.ContainerLogsResponse{Logs: ""}, nil
+	}
+
+	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
+	return wClient.GetContainerLogs(ctx, server.ContainerID, tail)
+}
+
+// SendServerCommand sends a Minecraft console command to a running server container via RCON.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Account ID requesting execution (or 0 to bypass ownership check).
+//   - serverID: Target server primary key.
+//   - command: Minecraft console command string.
+//
+// Example usage:
+//
+//	res, err := svc.SendServerCommand(ctx, user.ID, server.ID, "list")
+func (s *Service) SendServerCommand(ctx context.Context, userID uint, serverID uint, command string) (*worker.ExecCommandResponse, error) {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return nil, errors.New("command cannot be empty")
+	}
+
+	server, host, err := s.getServerAndHost(ctx, userID, serverID)
+	if err != nil {
+		return nil, err
+	}
+	if server.ContainerID == "" {
+		return nil, errors.New("server has no provisioned container")
+	}
+	if server.Status != domain.ServerStatusRunning {
+		return nil, fmt.Errorf("server must be running to send console commands (current status: %s)", server.Status)
+	}
+
+	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
+	res, err := wClient.ExecContainerCommand(ctx, server.ContainerID, trimmed)
+	if err != nil {
+		domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpConsoleCommand, domain.ServerLogStatusError, fmt.Sprintf("command %q failed: %v", trimmed, err))
+		return nil, err
+	}
+
+	domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpConsoleCommand, domain.ServerLogStatusSuccess, fmt.Sprintf("executed %q", trimmed))
+	return res, nil
+}
+
 // getServerAndHost retrieves the server entity, ensures caller ownership, and preloads associated host.
 func (s *Service) getServerAndHost(ctx context.Context, userID uint, serverID uint) (*domain.Server, *domain.Host, error) {
 	var server domain.Server

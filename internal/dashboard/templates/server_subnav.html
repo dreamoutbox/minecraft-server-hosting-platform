@@ -12,6 +12,9 @@
         <a class="nav-link {{if eq .ActiveTab "overview"}}active fw-semibold{{end}}" href="/dashboard/servers/{{.Server.ID}}">Overview</a>
     </li>
     <li class="nav-item">
+        <a class="nav-link {{if eq .ActiveTab "console"}}active fw-semibold{{end}}" href="/dashboard/servers/{{.Server.ID}}/console">Console</a>
+    </li>
+    <li class="nav-item">
         <a class="nav-link {{if eq .ActiveTab "backups"}}active fw-semibold{{end}}" href="/dashboard/servers/{{.Server.ID}}/backups">Backups</a>
     </li>
     <li class="nav-item">

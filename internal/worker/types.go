@@ -35,6 +35,24 @@ type ContainerStatusResponse struct {
 	Status      ContainerStatus `json:"status"`
 }
 
+// ContainerLogsResponse carries recent stdout/stderr console output from a container.
+type ContainerLogsResponse struct {
+	ContainerID string `json:"container_id"`
+	Logs        string `json:"logs"`
+}
+
+// ExecCommandRequest specifies a Minecraft console command to execute inside a running container.
+type ExecCommandRequest struct {
+	Command string `json:"command" binding:"required"`
+}
+
+// ExecCommandResponse returns the output produced by executing a console command.
+type ExecCommandResponse struct {
+	ContainerID string `json:"container_id"`
+	Command     string `json:"command"`
+	Output      string `json:"output"`
+}
+
 // CreateVolumeRequest specifies size bounds for loop-mounted sparse storage.
 type CreateVolumeRequest struct {
 	ServerID    uint `json:"server_id"`

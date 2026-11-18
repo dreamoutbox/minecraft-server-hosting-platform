@@ -63,6 +63,21 @@ func (m *mockContainerManager) GetStatus(ctx context.Context, containerID string
 	}, nil
 }
 
+func (m *mockContainerManager) GetLogs(ctx context.Context, containerID string, tail int) (*ContainerLogsResponse, error) {
+	return &ContainerLogsResponse{
+		ContainerID: containerID,
+		Logs:        "[Server thread/INFO]: Done (1.234s)! For help, type \"help\"\n",
+	}, nil
+}
+
+func (m *mockContainerManager) ExecCommand(ctx context.Context, containerID string, command string) (*ExecCommandResponse, error) {
+	return &ExecCommandResponse{
+		ContainerID: containerID,
+		Command:     command,
+		Output:      "Executed: " + command,
+	}, nil
+}
+
 func (m *mockContainerManager) CountActive(ctx context.Context) (int, error) {
 	active := 0
 	for _, s := range m.containers {

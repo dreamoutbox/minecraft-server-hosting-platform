@@ -94,6 +94,21 @@ func (d *dashboardTestWorker) GetContainerStatus(ctx context.Context, containerI
 	return &worker.ContainerStatusResponse{ContainerID: containerID, Status: worker.ContainerStatusRunning}, nil
 }
 
+func (d *dashboardTestWorker) GetContainerLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
+	return &worker.ContainerLogsResponse{
+		ContainerID: containerID,
+		Logs:        "[12:00:00] [Server thread/INFO]: Done (1.5s)! For help, type \"help\"\n",
+	}, nil
+}
+
+func (d *dashboardTestWorker) ExecContainerCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
+	return &worker.ExecCommandResponse{
+		ContainerID: containerID,
+		Command:     command,
+		Output:      "There are 0 of a max of 20 players online:",
+	}, nil
+}
+
 func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 	gin.SetMode(gin.TestMode)
 	dsn := os.Getenv("TEST_DATABASE_DSN")
@@ -319,6 +334,36 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 		t.Fatalf("logs page failed: %d", wLogsPage.Code)
 	}
 
+	// 6b2. Dedicated Console Page + Send Command
+	wConsolePage := httptest.NewRecorder()
+	reqConsolePage, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/console", server.ID), nil)
+	reqConsolePage.AddCookie(authCookie)
+	r.ServeHTTP(wConsolePage, reqConsolePage)
+	if wConsolePage.Code != http.StatusOK || !strings.Contains(wConsolePage.Body.String(), "Server Console") || !strings.Contains(wConsolePage.Body.String(), "Done (1.5s)") {
+		t.Fatalf("console page failed: code=%d body=%s", wConsolePage.Code, wConsolePage.Body.String())
+	}
+
+	cmdForm := url.Values{}
+	cmdForm.Set("command", "list")
+	cmdForm.Set("tail", "200")
+	wSendCmd := httptest.NewRecorder()
+	reqSendCmd, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/dashboard/servers/%d/console/command", server.ID), strings.NewReader(cmdForm.Encode()))
+	reqSendCmd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqSendCmd.Header.Set("Accept", "application/json")
+	reqSendCmd.AddCookie(authCookie)
+	r.ServeHTTP(wSendCmd, reqSendCmd)
+	if wSendCmd.Code != http.StatusOK || !strings.Contains(wSendCmd.Body.String(), `"ok":true`) {
+		t.Fatalf("send console command failed: code=%d body=%s", wSendCmd.Code, wSendCmd.Body.String())
+	}
+
+	wConsoleLogsJSON := httptest.NewRecorder()
+	reqConsoleLogsJSON, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/console/logs?tail=200", server.ID), nil)
+	reqConsoleLogsJSON.AddCookie(authCookie)
+	r.ServeHTTP(wConsoleLogsJSON, reqConsoleLogsJSON)
+	if wConsoleLogsJSON.Code != http.StatusOK || !strings.Contains(wConsoleLogsJSON.Body.String(), "Done (1.5s)") {
+		t.Fatalf("console logs JSON polling failed: code=%d body=%s", wConsoleLogsJSON.Code, wConsoleLogsJSON.Body.String())
+	}
+
 	// 6c. Dedicated Settings Page + Danger Zone + Server Jar/Version Update
 	wSettingsPage := httptest.NewRecorder()
 	reqSettingsPage, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/settings", server.ID), nil)
@@ -428,6 +473,42 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	r.ServeHTTP(wJobsStaff, reqJobsStaff)
 	if wJobsStaff.Code != http.StatusOK || !strings.Contains(wJobsStaff.Body.String(), "Background Job Queue") {
 		t.Fatalf("expected 200 with Background Job Queue on /jobs for staff role, got %d", wJobsStaff.Code)
+	}
+
+	// Role enforcement for Admin Users page: staff gets 403, admin updates user role
+	wUsersForbidden := httptest.NewRecorder()
+	reqUsersForbidden, _ := http.NewRequest(http.MethodGet, "/dashboard/users", nil)
+	reqUsersForbidden.AddCookie(staffCookie)
+	r.ServeHTTP(wUsersForbidden, reqUsersForbidden)
+	if wUsersForbidden.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on /dashboard/users for staff role, got %d", wUsersForbidden.Code)
+	}
+
+	adminTokens, _ := authkit.GenerateTokenPair(999998, "admin@example.com", domain.UserRoleAdmin, dashSvc.jwtSecret)
+	adminCookie := &http.Cookie{Name: "token", Value: adminTokens.AccessToken}
+
+	wUsersAdmin := httptest.NewRecorder()
+	reqUsersAdmin, _ := http.NewRequest(http.MethodGet, "/dashboard/users", nil)
+	reqUsersAdmin.AddCookie(adminCookie)
+	r.ServeHTTP(wUsersAdmin, reqUsersAdmin)
+	if wUsersAdmin.Code != http.StatusOK || !strings.Contains(wUsersAdmin.Body.String(), "User Management") {
+		t.Fatalf("expected 200 on /dashboard/users for admin role, got %d", wUsersAdmin.Code)
+	}
+
+	roleForm := url.Values{}
+	roleForm.Set("role", string(domain.UserRoleStaff))
+	wRoleUpdate := httptest.NewRecorder()
+	reqRoleUpdate, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/dashboard/users/%d/role", server.UserID), strings.NewReader(roleForm.Encode()))
+	reqRoleUpdate.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqRoleUpdate.AddCookie(adminCookie)
+	r.ServeHTTP(wRoleUpdate, reqRoleUpdate)
+	if wRoleUpdate.Code != http.StatusFound {
+		t.Fatalf("expected 302 on role update, got %d", wRoleUpdate.Code)
+	}
+	var updatedUser domain.User
+	_ = dashSvc.db.First(&updatedUser, server.UserID)
+	if updatedUser.Role != domain.UserRoleStaff {
+		t.Errorf("expected user role updated to staff, got %s", updatedUser.Role)
 	}
 
 	// Ensure alternate host exists active right now in case parallel tests disabled hosts

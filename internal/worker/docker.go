@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -28,6 +30,8 @@ type ContainerManager interface {
 	Stop(ctx context.Context, containerID string) error
 	Delete(ctx context.Context, containerID string) error
 	GetStatus(ctx context.Context, containerID string) (*ContainerStatusResponse, error)
+	GetLogs(ctx context.Context, containerID string, tail int) (*ContainerLogsResponse, error)
+	ExecCommand(ctx context.Context, containerID string, user string, command string) (*ExecCommandResponse, error)
 	CountActive(ctx context.Context) (int, error)
 	CleanupAll(ctx context.Context) error
 }
@@ -102,6 +106,7 @@ func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateC
 	envVars := []string{
 		"EULA=TRUE",
 		"ONLINE_MODE=FALSE",
+		"CREATE_CONSOLE_IN_PIPE=true",
 	}
 	if req.ServerType != "" {
 		envVars = append(envVars, "TYPE="+strings.ToUpper(req.ServerType))
@@ -236,6 +241,108 @@ func (d *DockerContainerManager) GetStatus(ctx context.Context, containerID stri
 	return &ContainerStatusResponse{
 		ContainerID: containerID,
 		Status:      status,
+	}, nil
+}
+
+// GetLogs fetches the trailing stdout/stderr lines from a container's console output.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - containerID: Target Docker container ID.
+//   - tail: Maximum number of trailing lines to return (defaults to 200 if <= 0).
+//
+// Example usage:
+//
+//	logs, err := cm.GetLogs(ctx, "abc123container", 200)
+func (d *DockerContainerManager) GetLogs(ctx context.Context, containerID string, tail int) (*ContainerLogsResponse, error) {
+	if tail <= 0 {
+		tail = 200
+	}
+	if tail > 2000 {
+		tail = 2000
+	}
+
+	reader, err := d.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Tail:       strconv.Itoa(tail),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed fetching logs for container %s: %w", containerID, err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, reader); err != nil {
+		return nil, fmt.Errorf("failed reading container log stream %s: %w", containerID, err)
+	}
+
+	combined := stdoutBuf.String()
+	if stderrBuf.Len() > 0 {
+		if combined != "" && !strings.HasSuffix(combined, "\n") {
+			combined += "\n"
+		}
+		combined += stderrBuf.String()
+	}
+
+	return &ContainerLogsResponse{
+		ContainerID: containerID,
+		Logs:        combined,
+	}, nil
+}
+
+// ExecCommand sends a Minecraft server command via mc-send-to-console inside the running container.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - containerID: Target Docker container ID.
+//   - command: Minecraft console command string (without leading slash).
+//
+// Example usage:
+//
+//	res, err := cm.ExecCommand(ctx, "abc123container", "list")
+func (d *DockerContainerManager) ExecCommand(ctx context.Context, containerID string, user string, command string) (*ExecCommandResponse, error) {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return nil, errors.New("command cannot be empty")
+	}
+
+	execCfg := types.ExecConfig{
+		User:         user,
+		Cmd:          []string{"mc-send-to-console", trimmed},
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+	execCreated, err := d.cli.ContainerExecCreate(ctx, containerID, execCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed creating exec in container %s: %w", containerID, err)
+	}
+
+	attachResp, err := d.cli.ContainerExecAttach(ctx, execCreated.ID, types.ExecStartCheck{})
+	if err != nil {
+		return nil, fmt.Errorf("failed attaching exec in container %s: %w", containerID, err)
+	}
+	defer attachResp.Close()
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, attachResp.Reader); err != nil {
+		return nil, fmt.Errorf("failed reading exec output in container %s: %w", containerID, err)
+	}
+
+	inspectResp, err := d.cli.ContainerExecInspect(ctx, execCreated.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed inspecting exec in container %s: %w", containerID, err)
+	}
+
+	output := strings.TrimSpace(stdoutBuf.String() + stderrBuf.String())
+	if inspectResp.ExitCode != 0 {
+		return nil, fmt.Errorf("mc-send-to-console exited with code %d: %s", inspectResp.ExitCode, output)
+	}
+
+	return &ExecCommandResponse{
+		ContainerID: containerID,
+		Command:     trimmed,
+		Output:      output,
 	}, nil
 }
 
