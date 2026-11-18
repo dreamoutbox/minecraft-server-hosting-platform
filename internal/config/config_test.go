@@ -33,8 +33,8 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 	if cfg.DefaultWorkerKey != "dev-worker-key" {
 		t.Errorf("expected default DefaultWorkerKey dev-worker-key, got: %s", cfg.DefaultWorkerKey)
 	}
-	if cfg.DefaultWorkerName != "compose-worker" {
-		t.Errorf("expected default DefaultWorkerName compose-worker, got: %s", cfg.DefaultWorkerName)
+	if cfg.DefaultWorkerName != "worker1" {
+		t.Errorf("expected default DefaultWorkerName worker1, got: %s", cfg.DefaultWorkerName)
 	}
 }
 

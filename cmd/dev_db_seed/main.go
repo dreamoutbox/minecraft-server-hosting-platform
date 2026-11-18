@@ -28,7 +28,7 @@ func main() {
 
 	workerName := cfg.DefaultWorkerName
 	if workerName == "" {
-		workerName = "compose-worker"
+		workerName = "worker1"
 	}
 	workerURL := cfg.DefaultWorkerURL
 	if workerURL == "" {

@@ -34,7 +34,7 @@ services:
       S3_USE_PATH_STYLE: "true"
       DEFAULT_WORKER_URL: http://worker:9090
       DEFAULT_WORKER_KEY: dev-worker-key
-      DEFAULT_WORKER_NAME: compose-worker
+      DEFAULT_WORKER_NAME: worker1
       DEFAULT_WORKER_PUBLIC_DOMAIN: localhost
       DEFAULT_WORKER_PUBLIC_IP: 127.0.0.1
       DEFAULT_FILESERVER_URL: http://localhost:9100

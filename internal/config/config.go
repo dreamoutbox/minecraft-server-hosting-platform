@@ -66,7 +66,7 @@ func LoadFromEnv() (*Config, error) {
 	stripeWebhookSecret := getEnv("STRIPE_WEBHOOK_SECRET", "whsec_dev_mock_key")
 	defaultWorkerURL := getEnv("DEFAULT_WORKER_URL", "")
 	defaultWorkerKey := getEnv("DEFAULT_WORKER_KEY", "dev-worker-key")
-	defaultWorkerName := getEnv("DEFAULT_WORKER_NAME", "compose-worker")
+	defaultWorkerName := getEnv("DEFAULT_WORKER_NAME", "worker1")
 	defaultWorkerPublicDomain := getEnv("DEFAULT_WORKER_PUBLIC_DOMAIN", "")
 	defaultWorkerPublicIP := getEnv("DEFAULT_WORKER_PUBLIC_IP", "")
 	defaultFileServerURL := getEnv("DEFAULT_FILESERVER_URL", "")

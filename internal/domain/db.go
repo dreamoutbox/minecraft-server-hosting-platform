@@ -52,7 +52,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&Plan{},
 		&Host{},
 		&Server{},
-		&Subscription{},
 		&PaymentRecord{},
 		&BackupRecord{},
 		&ServerOperationLog{},
@@ -128,7 +127,7 @@ func SeedPlans(db *gorm.DB) error {
 //
 // Example usage:
 //
-//	err := domain.SeedDefaultHost(db, "compose-worker", "http://worker:9090", "http://localhost:9100", "localhost", "127.0.0.1", "dev-worker-key", 20)
+//	err := domain.SeedDefaultHost(db, "worker1", "http://worker:9090", "http://localhost:9100", "localhost", "127.0.0.1", "dev-worker-key", 20)
 func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, fileServerBaseURL, publicDomain, publicIP, apiKey string, maxServers int) error {
 	if workerBaseURL == "" {
 		return nil

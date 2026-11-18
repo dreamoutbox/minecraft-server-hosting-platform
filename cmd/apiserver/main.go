@@ -116,7 +116,7 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 	} else {
 		paymentProvider = billing.NewMockPaymentProvider()
 	}
-	billingService := billing.NewService(db, paymentProvider, hostingService, cfg.StripeWebhookSecret)
+	billingService := billing.NewService(db, paymentProvider, cfg.StripeWebhookSecret)
 	billingService.SetJobQueue(jobService)
 	billingService.SetAppBaseURL(cfg.AppBaseURL)
 	billingService.SetRetentionDays(cfg.RetentionDays)
