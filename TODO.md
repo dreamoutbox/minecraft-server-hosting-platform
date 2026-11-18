@@ -90,7 +90,11 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ### 11/18/2026
 
-- [ ] test upload file exceed ext4 mount disk should fail
+- [ ] test upload file exceed ext4 mount disk should fail. 
+    - add new plan with 1 gb disk
+    - create random large file 1.1 gb
+    - test upload file
+    - expected fail.
 
 - [x] show server connect domain on web dashboard. add field public_domain, public_ip to node host tables in postgres
 
@@ -111,13 +115,17 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] restore from backup failed: failed importing volume contents on worker: import volume failed with code 500: {"error":"failed creating file /var/lib/mc-platform/mounts/1/.install-vanilla.env: open /var/lib/mc-platform/mounts/1/.install-vanilla.env: permission denied"}
 
-- [ ] admin user. navbar add menu (with search and pagination):
-    - list all servers 
-    - orders
-    - payment_records
-    - server_jobs
-    - server_operation_logs
-    - plans (with CRUD)
+- [x] admin navbar. new menu (with search and pagination):
+    - [x] list all servers 
+    - [x] orders
+    - [x] payment_records
+    - [x] server_jobs
+    - [x] server_operation_logs
+    - [x] plans (with CRUD)
+
+- [x] add script to reset dev seaweedfs s3 bucket. also add to dev-reset-wrapper.sh.
+
+- [ ] add ability for user to install mods/modpacks from modrinth/curseforge.
 
 ---
 
@@ -128,5 +136,3 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 - [ ] add AI chat to manage server.
 
 - [ ] add server_instance_type for vps, container to servers tables
-
-- [ ] add ability for user to install mods/modpacks from modrinth/curseforge.
