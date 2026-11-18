@@ -25,14 +25,14 @@
         <div class="row g-3 my-2">
             <div class="col-sm-6 col-lg-3">
                 <div class="p-3 bg-light rounded">
-                    <span class="text-muted small">Assigned Port</span>
-                    <div class="fw-bold fs-5">{{.Server.Port}}</div>
+                    <span class="text-muted small">Connect Address</span>
+                    <div class="fw-bold fs-5"><code>{{.Server.ConnectAddress}}</code></div>
                 </div>
             </div>
             <div class="col-sm-6 col-lg-3">
                 <div class="p-3 bg-light rounded">
-                    <span class="text-muted small">Current Host</span>
-                    <div class="fw-bold fs-5">{{.Server.Host.Hostname}}</div>
+                    <span class="text-muted small">Connect IP Address</span>
+                    <div class="fw-bold fs-5">{{if .Server.ConnectIPAddress}}<code>{{.Server.ConnectIPAddress}}</code>{{else}}<span class="text-muted">Not set</span>{{end}}</div>
                 </div>
             </div>
             <div class="col-sm-6 col-lg-3">
@@ -62,109 +62,6 @@
             <a href="/dashboard/servers/{{.Server.ID}}/files/open" target="_blank" rel="noopener" class="btn btn-outline-primary">Manage Files</a>
             <a href="/dashboard/servers/{{.Server.ID}}/backups" class="btn btn-outline-info">Backups</a>
             <a href="/dashboard/servers/{{.Server.ID}}/settings" class="btn btn-outline-secondary">Settings</a>
-        </div>
-    </div>
-</div>
-
-<div class="row g-4">
-    <div class="col-lg-6">
-        <div class="card shadow-sm border-0 h-100">
-            <div class="card-header bg-white border-0 pt-4 pb-0">
-                <h5 class="fw-bold mb-0">Background Job Queue</h5>
-            </div>
-            <div class="card-body">
-                {{if .Jobs}}
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover align-middle mb-0">
-                        <thead>
-                            <tr class="text-muted small">
-                                <th>Job</th>
-                                <th>Status</th>
-                                <th>Attempts</th>
-                                <th class="text-end">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .Jobs}}
-                            <tr>
-                                <td>
-                                    <div class="fw-semibold">#{{.ID}} {{.Type}}</div>
-                                    {{if .LastError}}
-                                    <div class="text-danger small text-truncate" style="max-width: 240px;" title="{{.LastError}}">{{.LastError}}</div>
-                                    {{end}}
-                                </td>
-                                <td>
-                                    {{if eq .Status "completed"}}
-                                    <span class="badge bg-success">completed</span>
-                                    {{else if eq .Status "failed"}}
-                                    <span class="badge bg-danger">failed</span>
-                                    {{else if eq .Status "running"}}
-                                    <span class="badge bg-primary">running</span>
-                                    {{else}}
-                                    <span class="badge bg-info text-dark">pending</span>
-                                    {{end}}
-                                </td>
-                                <td class="small text-muted">{{.Attempts}}/{{.MaxAttempts}}</td>
-                                <td class="text-end">
-                                    {{if eq .Status "failed"}}
-                                    <form method="POST" action="/dashboard/servers/{{$.Server.ID}}/jobs/{{.ID}}/retry" class="d-inline">
-                                        <button type="submit" class="btn btn-sm btn-outline-warning">Retry</button>
-                                    </form>
-                                    {{else}}
-                                    <span class="text-muted small">-</span>
-                                    {{end}}
-                                </td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                </div>
-                {{else}}
-                <p class="text-muted small mb-0">No queued jobs recorded for this server.</p>
-                {{end}}
-            </div>
-        </div>
-    </div>
-
-    <div class="col-lg-6">
-        <div class="card shadow-sm border-0 h-100">
-            <div class="card-header bg-white border-0 pt-4 pb-0">
-                <h5 class="fw-bold mb-0">Operation Logs</h5>
-            </div>
-            <div class="card-body">
-                {{if .Logs}}
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover align-middle mb-0">
-                        <thead>
-                            <tr class="text-muted small">
-                                <th>Operation</th>
-                                <th>Status</th>
-                                <th>Detail</th>
-                                <th>Time</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .Logs}}
-                            <tr>
-                                <td class="fw-semibold">{{.Operation}}</td>
-                                <td>
-                                    {{if eq .Status "success"}}
-                                    <span class="badge bg-success">success</span>
-                                    {{else}}
-                                    <span class="badge bg-danger">error</span>
-                                    {{end}}
-                                </td>
-                                <td class="small text-muted">{{.Message}}</td>
-                                <td class="small text-muted text-nowrap">{{.CreatedAt.Format "01-02 15:04:05"}}</td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                </div>
-                {{else}}
-                <p class="text-muted small mb-0">No operation logs recorded yet.</p>
-                {{end}}
-            </div>
         </div>
     </div>
 </div>

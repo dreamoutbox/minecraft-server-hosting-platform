@@ -19,6 +19,8 @@ type Config struct {
 	DefaultWorkerURL             string
 	DefaultWorkerKey             string
 	DefaultWorkerName            string
+	DefaultWorkerPublicDomain    string
+	DefaultWorkerPublicIP        string
 	DefaultFileServerURL         string
 	DefaultFileServerInternalURL string
 }
@@ -51,6 +53,8 @@ func LoadFromEnv() (*Config, error) {
 	defaultWorkerURL := getEnv("DEFAULT_WORKER_URL", "")
 	defaultWorkerKey := getEnv("DEFAULT_WORKER_KEY", "dev-worker-key")
 	defaultWorkerName := getEnv("DEFAULT_WORKER_NAME", "compose-worker")
+	defaultWorkerPublicDomain := getEnv("DEFAULT_WORKER_PUBLIC_DOMAIN", "")
+	defaultWorkerPublicIP := getEnv("DEFAULT_WORKER_PUBLIC_IP", "")
 	defaultFileServerURL := getEnv("DEFAULT_FILESERVER_URL", "")
 	defaultFileServerInternalURL := getEnv("DEFAULT_FILESERVER_INTERNAL_URL", "")
 
@@ -89,6 +93,8 @@ func LoadFromEnv() (*Config, error) {
 		DefaultWorkerURL:             defaultWorkerURL,
 		DefaultWorkerKey:             defaultWorkerKey,
 		DefaultWorkerName:            defaultWorkerName,
+		DefaultWorkerPublicDomain:    defaultWorkerPublicDomain,
+		DefaultWorkerPublicIP:        defaultWorkerPublicIP,
 		DefaultFileServerURL:         defaultFileServerURL,
 		DefaultFileServerInternalURL: defaultFileServerInternalURL,
 	}, nil

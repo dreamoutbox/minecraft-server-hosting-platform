@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -212,6 +213,8 @@ type Plan struct {
 type Host struct {
 	ID                uint       `gorm:"primaryKey" json:"id"`
 	Hostname          string     `gorm:"not null" json:"hostname"`
+	PublicDomain      string     `gorm:"type:varchar(255);not null;default:''" json:"public_domain"`
+	PublicIP          string     `gorm:"type:varchar(64);not null;default:''" json:"public_ip"`
 	WorkerBaseURL     string     `gorm:"not null" json:"worker_base_url"`
 	FileServerBaseURL string     `gorm:"type:varchar(255);not null;default:''" json:"fileserver_base_url"`
 	APIKey            string     `gorm:"type:varchar(255);not null;default:''" json:"-"`
@@ -241,6 +244,44 @@ type Server struct {
 
 	Plan Plan `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
 	Host Host `gorm:"foreignKey:HostID" json:"host,omitempty"`
+}
+
+// ConnectAddress returns the player-facing host:port address for connecting to the Minecraft server.
+// It prefers the host's PublicDomain, falling back to PublicIP, then Hostname.
+//
+// Arguments:
+//   - None (uses the receiver's Host and Port fields).
+//
+// Example usage:
+//
+//	addr := server.ConnectAddress() // e.g. "mc1.example.com:25565"
+func (s Server) ConnectAddress() string {
+	host := s.Host.PublicDomain
+	if host == "" {
+		host = s.Host.PublicIP
+	}
+	if host == "" {
+		host = s.Host.Hostname
+	}
+	if host == "" {
+		return fmt.Sprintf(":%d", s.Port)
+	}
+	return fmt.Sprintf("%s:%d", host, s.Port)
+}
+
+// ConnectIPAddress returns the node's public IP and server port (or empty string if PublicIP is unset).
+//
+// Arguments:
+//   - None (uses the receiver's Host.PublicIP and Port fields).
+//
+// Example usage:
+//
+//	ipAddr := server.ConnectIPAddress() // e.g. "203.0.113.10:25565"
+func (s Server) ConnectIPAddress() string {
+	if s.Host.PublicIP == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", s.Host.PublicIP, s.Port)
 }
 
 // Subscription tracks recurring billing state managed by platform cron.

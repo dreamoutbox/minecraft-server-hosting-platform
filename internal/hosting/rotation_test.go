@@ -19,7 +19,7 @@ func TestRotateHostAPIKey(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Register host
-	host, originalKey, err := service.RegisterHost(ctx, "rotate-node.internal", "http://127.0.0.1:9090", 10)
+	host, originalKey, err := service.RegisterHost(ctx, "rotate-node.internal", "http://127.0.0.1:9090", 10, "", "")
 	if err != nil {
 		t.Fatalf("failed registering host: %v", err)
 	}

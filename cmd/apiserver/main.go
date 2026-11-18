@@ -155,7 +155,16 @@ func main() {
 		log.Fatalf("failed seeding plans: %v", err)
 	}
 
-	if err := domain.SeedDefaultHost(db, cfg.DefaultWorkerName, cfg.DefaultWorkerURL, cfg.DefaultFileServerURL, cfg.DefaultWorkerKey, 20); err != nil {
+	if err := domain.SeedDefaultHost(
+		db,
+		cfg.DefaultWorkerName,
+		cfg.DefaultWorkerURL,
+		cfg.DefaultFileServerURL,
+		cfg.DefaultWorkerPublicDomain,
+		cfg.DefaultWorkerPublicIP,
+		cfg.DefaultWorkerKey,
+		20,
+	); err != nil {
 		log.Printf("[WARN] failed seeding default worker host: %v", err)
 	}
 

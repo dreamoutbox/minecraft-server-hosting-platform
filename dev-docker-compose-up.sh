@@ -47,7 +47,7 @@ main() {
 	"$script_dir/dev-setup-shared-mount.sh"
 
 	echo "Starting platform services with docker compose..."
-	"${DOCKER_COMPOSE[@]}" -f docker-compose.base.yml -f docker-compose.app.yml up -d "$@"
+	"${DOCKER_COMPOSE[@]}" -f docker-compose.base.yml -f docker-compose.app.yml -f docker-compose.stripe.yml up -d "$@"
 	echo "Platform services started successfully."
 }
 

@@ -24,10 +24,6 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
-- [ ] add server expire datetime. user can extend with payment.
-
----
-
 - [ ] add new page server console logs.
 
 - [ ] add send command from web console to minecraft server.
@@ -95,13 +91,19 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 ### 11/18/2026
 
 - [ ] test upload file exceed ext4 mount disk should fail
-- [ ] show server connect domain. add field public_domain, public_ip to node host tables in postgres
-- [ ] add server type for droplet,vps, container
+
+- [x] show server connect domain on web dashboard. add field public_domain, public_ip to node host tables in postgres
+
+- [ ] add server expire datetime. user can extend with payment.
+- [ ] prevent user from starting server if server is expired
 - [ ] data retention 7 days after server expired
 - [ ] allow extend server duration if within 7 days after server expired
+
 - [ ] move server create form panel to only admin/staff
+- [ ] add stripe webhooks to handle user payment
 - [ ] create server after purchase. place order create server in queue postgres table. and wait for worker to pick up and create server
-- [ ] queue worker to create server, stop expired server, delete server data after passed retention days
+
+- [ ] new CRON worker to create server from queue, stop expired server, delete server data after passed retention days
 
 ---
 
@@ -110,5 +112,7 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 - [ ] connect to cloudflare API for minecraft server custom subdomain.
 
 - [ ] add AI chat to manage server.
+
+- [ ] add server_instance_type for vps, container to servers tables
 
 - [ ] add ability for user to install mods/modpacks from modrinth/curseforge.

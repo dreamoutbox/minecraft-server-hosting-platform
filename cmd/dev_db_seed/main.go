@@ -42,8 +42,16 @@ func main() {
 	if fileServerURL == "" {
 		fileServerURL = "http://localhost:9100"
 	}
+	publicDomain := cfg.DefaultWorkerPublicDomain
+	if publicDomain == "" {
+		publicDomain = "localhost"
+	}
+	publicIP := cfg.DefaultWorkerPublicIP
+	if publicIP == "" {
+		publicIP = "127.0.0.1"
+	}
 
-	if err := domain.SeedDefaultHost(db, workerName, workerURL, fileServerURL, workerKey, 20); err != nil {
+	if err := domain.SeedDefaultHost(db, workerName, workerURL, fileServerURL, publicDomain, publicIP, workerKey, 20); err != nil {
 		log.Fatalf("failed seeding default host: %v", err)
 	}
 

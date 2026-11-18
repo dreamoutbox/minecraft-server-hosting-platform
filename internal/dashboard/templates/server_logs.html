@@ -1,0 +1,44 @@
+{{define "title"}}Operation Logs: {{.Server.Name}}{{end}}
+{{define "content"}}
+{{template "server_subnav" .}}
+
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white border-0 pt-4 pb-0">
+        <h5 class="fw-bold mb-0">Operation Logs</h5>
+    </div>
+    <div class="card-body">
+        {{if .Logs}}
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                    <tr class="text-muted small">
+                        <th>Operation</th>
+                        <th>Status</th>
+                        <th>Detail</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Logs}}
+                    <tr>
+                        <td class="fw-semibold">{{.Operation}}</td>
+                        <td>
+                            {{if eq .Status "success"}}
+                            <span class="badge bg-success">success</span>
+                            {{else}}
+                            <span class="badge bg-danger">error</span>
+                            {{end}}
+                        </td>
+                        <td class="small text-muted">{{.Message}}</td>
+                        <td class="small text-muted text-nowrap">{{.CreatedAt.Format "01-02 15:04:05"}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <p class="text-muted small mb-0">No operation logs recorded yet.</p>
+        {{end}}
+    </div>
+</div>
+{{end}}

@@ -60,6 +60,8 @@ type MigrateServerRequest struct {
 // RegisterHostRequest holds payload fields for registering a worker node.
 type RegisterHostRequest struct {
 	Hostname      string `json:"hostname" binding:"required"`
+	PublicDomain  string `json:"public_domain"`
+	PublicIP      string `json:"public_ip"`
 	WorkerBaseURL string `json:"worker_base_url" binding:"required,url"`
 	MaxServers    int    `json:"max_servers" binding:"required,gt=0"`
 }
@@ -92,7 +94,7 @@ func (h *Handler) RegisterHost(c *gin.Context) {
 		return
 	}
 
-	host, apiKey, err := h.service.RegisterHost(c.Request.Context(), req.Hostname, req.WorkerBaseURL, req.MaxServers)
+	host, apiKey, err := h.service.RegisterHost(c.Request.Context(), req.Hostname, req.WorkerBaseURL, req.MaxServers, req.PublicDomain, req.PublicIP)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

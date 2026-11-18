@@ -20,6 +20,9 @@ func TestDatabaseMigrationAndSeed(t *testing.T) {
 		t.Skipf("skipping postgres test (database unreachable: %v)", err)
 		return
 	}
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate failed: %v", err)
+	}
 
 	if err := AutoMigrate(db); err != nil {
 		t.Fatalf("AutoMigrate failed: %v", err)
@@ -69,6 +72,9 @@ func TestServerPortUniqueConstraint(t *testing.T) {
 	if err != nil {
 		t.Skipf("skipping postgres test (database unreachable: %v)", err)
 		return
+	}
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate failed: %v", err)
 	}
 
 	if err := AutoMigrate(db); err != nil {
@@ -129,10 +135,15 @@ func TestSeedDefaultHost(t *testing.T) {
 		t.Skipf("skipping postgres test (database unreachable: %v)", err)
 		return
 	}
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate failed: %v", err)
+	}
 
 	testURL := "http://test-worker-node:9090"
 	testFSURL := "http://test-worker-node:9100"
-	if err := SeedDefaultHost(db, "test-worker", testURL, testFSURL, "test-key-123", 20); err != nil {
+	testDomain := "play.test-node.example.com"
+	testIP := "203.0.113.50"
+	if err := SeedDefaultHost(db, "test-worker", testURL, testFSURL, testDomain, testIP, "test-key-123", 20); err != nil {
 		t.Fatalf("SeedDefaultHost failed: %v", err)
 	}
 
@@ -146,9 +157,15 @@ func TestSeedDefaultHost(t *testing.T) {
 	if host.FileServerBaseURL != testFSURL {
 		t.Errorf("expected fileserver url %s, got: %s", testFSURL, host.FileServerBaseURL)
 	}
+	if host.PublicDomain != testDomain {
+		t.Errorf("expected public domain %s, got: %s", testDomain, host.PublicDomain)
+	}
+	if host.PublicIP != testIP {
+		t.Errorf("expected public ip %s, got: %s", testIP, host.PublicIP)
+	}
 
 	// Test idempotency
-	if err := SeedDefaultHost(db, "test-worker", testURL, testFSURL, "new-test-key", 20); err != nil {
+	if err := SeedDefaultHost(db, "test-worker", testURL, testFSURL, testDomain, testIP, "new-test-key", 20); err != nil {
 		t.Fatalf("SeedDefaultHost idempotent run failed: %v", err)
 	}
 	_ = db.Where("worker_base_url = ?", testURL).First(&host)
@@ -157,4 +174,36 @@ func TestSeedDefaultHost(t *testing.T) {
 	}
 	// Clean up test host
 	db.Delete(&host)
+}
+
+func TestServerConnectAddress(t *testing.T) {
+	cases := []struct {
+		name string
+		srv  Server
+		want string
+	}{
+		{
+			name: "prefers public domain",
+			srv:  Server{Port: 25565, Host: Host{Hostname: "node-1", PublicDomain: "mc1.example.com", PublicIP: "203.0.113.10"}},
+			want: "mc1.example.com:25565",
+		},
+		{
+			name: "falls back to public ip",
+			srv:  Server{Port: 25566, Host: Host{Hostname: "node-1", PublicIP: "203.0.113.10"}},
+			want: "203.0.113.10:25566",
+		},
+		{
+			name: "falls back to hostname",
+			srv:  Server{Port: 25567, Host: Host{Hostname: "node-1"}},
+			want: "node-1:25567",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.srv.ConnectAddress(); got != tc.want {
+				t.Errorf("ConnectAddress() = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }

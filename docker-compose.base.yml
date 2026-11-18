@@ -1,3 +1,11 @@
+volumes:
+  pgdata:
+  seaweedfs_data:
+
+networks:
+  mc_platform_net:
+    driver: bridge
+
 services:
   postgres:
     image: postgres:18-alpine
@@ -17,6 +25,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - mc_platform_net
 
   adminer:
     image: adminer:latest
@@ -28,6 +38,8 @@ services:
       ADMINER_DEFAULT_SERVER: postgres
     depends_on:
       - postgres
+    networks:
+      - mc_platform_net
 
   seaweedfs:
     image: chrislusf/seaweedfs:latest
@@ -39,7 +51,5 @@ services:
       - "9333:9333"
     volumes:
       - seaweedfs_data:/data
-
-volumes:
-  pgdata:
-  seaweedfs_data:
+    networks:
+      - mc_platform_net

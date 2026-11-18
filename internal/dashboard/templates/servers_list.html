@@ -12,54 +12,34 @@
 <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
     {{range .Servers}}
     <div class="col">
-        <div class="card h-100 shadow-sm border-0">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-start mb-2">
-                    <h5 class="card-title fw-bold mb-0">
-                        <a href="/dashboard/servers/{{.ID}}" class="text-decoration-none text-dark">{{.Name}}</a>
-                    </h5>
-                    {{if eq .Status "running"}}
-                    <span class="badge bg-success">Running</span>
-                    {{else if eq .Status "stopped"}}
-                    <span class="badge bg-secondary">Stopped</span>
-                    {{else if eq .Status "migrating"}}
-                    <span class="badge bg-warning text-dark">Migrating</span>
-                    {{else if or (eq .Status "suspended") (eq .Status "error")}}
-                    <span class="badge bg-danger">{{.Status}}</span>
-                    {{else}}
-                    <span class="badge bg-info text-dark">{{.Status}}</span>
-                    {{end}}
-                </div>
-                <p class="card-text text-muted small mb-3">
-                    <strong>Port:</strong> {{.Port}}<br>
-                    <strong>Plan:</strong> {{.Plan.Name}} ({{.Plan.CPULimit}} CPU, {{.Plan.MemLimitMB}}MB RAM, {{.Plan.DiskLimitGB}}GB Disk)<br>
-                    <strong>Host:</strong> {{.Host.Hostname}}<br>
-                    <strong>Software:</strong> {{.ServerType}} {{.ServerVersion}}
-                </p>
-                <div class="d-flex flex-wrap gap-2">
-                    <a href="/dashboard/servers/{{.ID}}" class="btn btn-sm btn-outline-primary">Manage</a>
-                    <a href="/dashboard/servers/{{.ID}}/files/open" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">Files</a>
-                    <a href="/dashboard/servers/{{.ID}}/backups" class="btn btn-sm btn-outline-info">Backups</a>
-                    <a href="/dashboard/servers/{{.ID}}/settings" class="btn btn-sm btn-outline-dark">Settings</a>
+        <a href="/dashboard/servers/{{.ID}}" class="text-decoration-none text-reset d-block h-100">
+            <div class="card h-100 shadow-sm border-0">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h5 class="card-title fw-bold text-dark mb-0 text-start">{{.Name}}</h5>
+                        {{if eq .Status "running"}}
+                        <span class="badge bg-success">Running</span>
+                        {{else if eq .Status "stopped"}}
+                        <span class="badge bg-secondary">Stopped</span>
+                        {{else if eq .Status "migrating"}}
+                        <span class="badge bg-warning text-dark">Migrating</span>
+                        {{else if or (eq .Status "suspended") (eq .Status "error")}}
+                        <span class="badge bg-danger">{{.Status}}</span>
+                        {{else}}
+                        <span class="badge bg-info text-dark">{{.Status}}</span>
+                        {{end}}
+                    </div>
+                    <p class="card-text text-muted small mb-0">
+                        <strong>Connect:</strong> <code>{{.ConnectAddress}}</code><br>
+                        <strong>Port:</strong> {{.Port}}<br>
+                        <strong>Plan:</strong> {{.Plan.Name}} ({{.Plan.CPULimit}} CPU, {{.Plan.MemLimitMB}}MB RAM,
+                        {{.Plan.DiskLimitGB}}GB Disk)<br>
+                        <strong>Host:</strong> {{.Host.Hostname}}<br>
+                        <strong>Software:</strong> {{.ServerType}} {{.ServerVersion}}
+                    </p>
                 </div>
             </div>
-            <div class="card-footer bg-transparent border-0 d-flex justify-content-between align-items-center pt-0">
-                <div class="btn-group btn-group-sm">
-                    {{if eq .Status "running"}}
-                    <form method="POST" action="/dashboard/servers/{{.ID}}/stop" class="d-inline">
-                        <button type="submit" class="btn btn-sm btn-outline-warning">Stop</button>
-                    </form>
-                    {{else if eq .Status "stopped"}}
-                    <form method="POST" action="/dashboard/servers/{{.ID}}/start" class="d-inline">
-                        <button type="submit" class="btn btn-sm btn-outline-success">Start</button>
-                    </form>
-                    {{end}}
-                </div>
-                <form method="POST" action="/dashboard/servers/{{.ID}}/delete" onsubmit="return confirm('Permanently delete this server?');">
-                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                </form>
-            </div>
-        </div>
+        </a>
     </div>
     {{end}}
 </div>
@@ -67,7 +47,8 @@
 <div class="card shadow-sm border-0 text-center py-5">
     <div class="card-body">
         <h4 class="fw-bold mb-2">No servers yet</h4>
-        <p class="text-muted mb-4">Deploy your first Minecraft server with allocated CPU, memory, and loop-mounted disk.</p>
+        <p class="text-muted mb-4">Deploy your first Minecraft server with allocated CPU, memory, and loop-mounted disk.
+        </p>
         <a href="/dashboard/servers/new" class="btn btn-primary px-4">Create Your First Server</a>
     </div>
 </div>

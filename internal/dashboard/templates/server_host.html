@@ -3,12 +3,15 @@
 {{template "server_subnav" .}}
 
 <div class="row g-4">
-    <div class="col-lg-6">
-        <div class="card shadow-sm border-0 h-100">
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
             <div class="card-body p-4">
                 <h5 class="fw-bold mb-3">Host Worker Status</h5>
                 <p class="text-muted small">
+                    <strong>Current Host:</strong> {{.Server.Host.Hostname}}<br>
                     <strong>Worker URL:</strong> {{.Server.Host.WorkerBaseURL}}<br>
+                    <strong>Public Domain:</strong> {{if .Server.Host.PublicDomain}}<code>{{.Server.Host.PublicDomain}}</code>{{else}}<span class="text-muted">Not set</span>{{end}}<br>
+                    <strong>Public IP:</strong> {{if .Server.Host.PublicIP}}<code>{{.Server.Host.PublicIP}}</code>{{else}}<span class="text-muted">Not set</span>{{end}}<br>
                     <strong>Container ID:</strong> <code>{{.Server.ContainerID}}</code><br>
                     <strong>Mount Path:</strong> <code>{{.Server.MountPath}}</code>
                 </p>
@@ -21,8 +24,8 @@
         </div>
     </div>
 
-    <div class="col-lg-6">
-        <div class="card shadow-sm border-0 h-100">
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
             <div class="card-body p-4">
                 <h5 class="fw-bold mb-2">Host Migration</h5>
                 <p class="text-muted small">Transfer this server to another cluster host with blue/green verification while preserving port <code>{{.Server.Port}}</code>.</p>

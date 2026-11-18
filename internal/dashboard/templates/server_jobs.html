@@ -1,0 +1,62 @@
+{{define "title"}}Background Job Queue: {{.Server.Name}}{{end}}
+{{define "content"}}
+{{template "server_subnav" .}}
+
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white border-0 pt-4 pb-0">
+        <h5 class="fw-bold mb-0">Background Job Queue</h5>
+    </div>
+    <div class="card-body">
+        {{if .Jobs}}
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                    <tr class="text-muted small">
+                        <th>Job</th>
+                        <th>Status</th>
+                        <th>Attempts</th>
+                        <th class="text-end">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Jobs}}
+                    <tr>
+                        <td>
+                            <div class="fw-semibold">#{{.ID}} {{.Type}}</div>
+                            {{if .LastError}}
+                            <div class="text-danger small text-truncate" style="max-width: 360px;" title="{{.LastError}}">{{.LastError}}</div>
+                            {{end}}
+                        </td>
+                        <td>
+                            {{if eq .Status "completed"}}
+                            <span class="badge bg-success">completed</span>
+                            {{else if eq .Status "failed"}}
+                            <span class="badge bg-danger">failed</span>
+                            {{else if eq .Status "running"}}
+                            <span class="badge bg-primary">running</span>
+                            {{else}}
+                            <span class="badge bg-info text-dark">pending</span>
+                            {{end}}
+                        </td>
+                        <td class="small text-muted">{{.Attempts}}/{{.MaxAttempts}}</td>
+                        <td class="text-end">
+                            {{if eq .Status "failed"}}
+                            <form method="POST" action="/dashboard/servers/{{$.Server.ID}}/jobs/{{.ID}}/retry" class="d-inline">
+                                <input type="hidden" name="return_to" value="/dashboard/servers/{{$.Server.ID}}/jobs">
+                                <button type="submit" class="btn btn-sm btn-outline-warning">Retry</button>
+                            </form>
+                            {{else}}
+                            <span class="text-muted small">-</span>
+                            {{end}}
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <p class="text-muted small mb-0">No queued jobs recorded for this server.</p>
+        {{end}}
+    </div>
+</div>
+{{end}}

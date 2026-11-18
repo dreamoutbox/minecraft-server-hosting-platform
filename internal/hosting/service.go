@@ -83,11 +83,13 @@ func (s *Service) SetFileServerClientFactory(factory FileServerClientFactory) {
 //   - hostname: Fully qualified domain name or label of the node.
 //   - workerBaseURL: HTTP address of the node's worker daemon.
 //   - maxServers: Capacity limit for simultaneous servers on this host.
+//   - publicDomain: Public DNS domain players use to connect to servers on this node.
+//   - publicIP: Public IPv4/IPv6 address of this node.
 //
 // Example usage:
 //
-//	host, apiKey, err := svc.RegisterHost(ctx, "node-1.internal", "http://10.0.0.1:9090", 20)
-func (s *Service) RegisterHost(ctx context.Context, hostname string, workerBaseURL string, maxServers int) (*domain.Host, string, error) {
+//	host, apiKey, err := svc.RegisterHost(ctx, "node-1.internal", "http://10.0.0.1:9090", 20, "mc1.example.com", "203.0.113.10")
+func (s *Service) RegisterHost(ctx context.Context, hostname string, workerBaseURL string, maxServers int, publicDomain string, publicIP string) (*domain.Host, string, error) {
 	if hostname == "" || workerBaseURL == "" || maxServers <= 0 {
 		return nil, "", errors.New("invalid host registration parameters")
 	}
@@ -98,6 +100,8 @@ func (s *Service) RegisterHost(ctx context.Context, hostname string, workerBaseU
 
 	host := domain.Host{
 		Hostname:      hostname,
+		PublicDomain:  publicDomain,
+		PublicIP:      publicIP,
 		WorkerBaseURL: workerBaseURL,
 		APIKey:        rawAPIKey,
 		APIKeyHash:    hashHex,

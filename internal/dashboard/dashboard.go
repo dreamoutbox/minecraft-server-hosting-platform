@@ -89,7 +89,9 @@ func (s *Service) loadTemplates() {
 		"server_create.html",
 		"server_detail.html",
 		"server_backups.html",
+		"server_logs.html",
 		"server_settings.html",
+		"server_jobs.html",
 		"server_host.html",
 		"billing.html",
 		"forbidden.html",
@@ -272,7 +274,7 @@ func (s *Service) ProcessCreateServer(c *gin.Context) {
 	c.Redirect(http.StatusFound, serverRedirectURL(server.ID, "", "success", "Server creation queued!"))
 }
 
-// ShowServerDetail renders server overview, background jobs queue, and PostgreSQL operation logs.
+// ShowServerDetail renders the server overview page.
 func (s *Service) ShowServerDetail(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
 	serverIDVal, ok := parseIDParam(c, "id")
@@ -287,18 +289,79 @@ func (s *Service) ShowServerDetail(c *gin.Context) {
 		return
 	}
 
-	var jobList []domain.ServerJob
-	if s.jobSvc != nil {
-		jobList, _ = s.jobSvc.ListServerJobs(c.Request.Context(), server.ID, 15)
-	}
-	logs, _ := domain.ListServerLogs(c.Request.Context(), s.db, server.ID, 20)
-
 	s.renderView(c, "server_detail.html", map[string]interface{}{
 		"ActiveTab":  "overview",
 		"Server":     server,
 		"LiveStatus": liveStatus,
-		"Jobs":       jobList,
-		"Logs":       logs,
+	})
+}
+
+// ShowServerLogs renders PostgreSQL operation logs for a server.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id'.
+//
+// Example usage:
+//
+//	GET /dashboard/servers/:id/logs
+func (s *Service) ShowServerLogs(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+
+	server, _, err := s.hostingSvc.GetServerForOwner(c.Request.Context(), userID, serverIDVal)
+	if err != nil {
+		c.Redirect(http.StatusFound, "/dashboard?error=Server+not+found")
+		return
+	}
+
+	logs, _ := domain.ListServerLogs(c.Request.Context(), s.db, server.ID, 50)
+	s.renderView(c, "server_logs.html", map[string]interface{}{
+		"ActiveTab": "logs",
+		"Server":    server,
+		"Logs":      logs,
+	})
+}
+
+// ShowServerJobs renders the background job queue for a server exclusively to staff and admin users.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id'.
+//
+// Example usage:
+//
+//	GET /dashboard/servers/:id/jobs
+func (s *Service) ShowServerJobs(c *gin.Context) {
+	if !authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
+			"ErrorMessage": "Background job queue is only available to staff and admin users.",
+		})
+		return
+	}
+
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+
+	server, _, err := s.hostingSvc.GetServer(c.Request.Context(), 0, serverIDVal)
+	if err != nil {
+		c.Redirect(http.StatusFound, "/dashboard?error=Server+not+found")
+		return
+	}
+
+	var jobList []domain.ServerJob
+	if s.jobSvc != nil {
+		jobList, _ = s.jobSvc.ListServerJobs(c.Request.Context(), server.ID, 30)
+	}
+	s.renderView(c, "server_jobs.html", map[string]interface{}{
+		"ActiveTab": "jobs",
+		"Server":    server,
+		"Jobs":      jobList,
 	})
 }
 
@@ -537,7 +600,7 @@ func (s *Service) RetryJob(c *gin.Context) {
 		return
 	}
 
-	subpath := ""
+	subpath := "/jobs"
 	if strings.HasPrefix(c.PostForm("return_to"), fmt.Sprintf("/dashboard/servers/%d/backups", serverIDVal)) {
 		subpath = "/backups"
 	}
@@ -667,8 +730,10 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 		dash.POST("/servers/new", s.ProcessCreateServer)
 		dash.GET("/servers/:id", s.ShowServerDetail)
 		dash.GET("/servers/:id/backups", s.ShowServerBackups)
+		dash.GET("/servers/:id/logs", s.ShowServerLogs)
 		dash.GET("/servers/:id/settings", s.ShowServerSettings)
 		dash.POST("/servers/:id/settings", s.UpdateServerSettings)
+		dash.GET("/servers/:id/jobs", s.ShowServerJobs)
 		dash.GET("/servers/:id/host", s.ShowServerHost)
 		dash.POST("/servers/:id/start", s.StartServer)
 		dash.POST("/servers/:id/stop", s.StopServer)

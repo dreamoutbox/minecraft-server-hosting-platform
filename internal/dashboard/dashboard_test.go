@@ -150,13 +150,21 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 	t.Cleanup(fakeFS.Close)
 
 	// Ensure at least two active hosts for migration
-	h1 := domain.Host{Hostname: "dash-node-1", WorkerBaseURL: "http://dash-node-1:9090", FileServerBaseURL: fakeFS.URL, APIKey: "k1", APIKeyHash: "h1", MaxServers: 10, Status: domain.HostStatusActive}
-	h2 := domain.Host{Hostname: "dash-node-2", WorkerBaseURL: "http://dash-node-2:9090", FileServerBaseURL: fakeFS.URL, APIKey: "k2", APIKeyHash: "h2", MaxServers: 10, Status: domain.HostStatusActive}
+	h1 := domain.Host{Hostname: "dash-node-1", PublicDomain: "play1.dash.example.com", PublicIP: "203.0.113.11", WorkerBaseURL: "http://dash-node-1:9090", FileServerBaseURL: fakeFS.URL, APIKey: "k1", APIKeyHash: "h1", MaxServers: 10, Status: domain.HostStatusActive}
+	h2 := domain.Host{Hostname: "dash-node-2", PublicDomain: "play2.dash.example.com", PublicIP: "203.0.113.12", WorkerBaseURL: "http://dash-node-2:9090", FileServerBaseURL: fakeFS.URL, APIKey: "k2", APIKeyHash: "h2", MaxServers: 10, Status: domain.HostStatusActive}
 	_ = db.Where("hostname = ?", h1.Hostname).FirstOrCreate(&h1)
 	_ = db.Where("hostname = ?", h2.Hostname).FirstOrCreate(&h2)
-	db.Model(&domain.Host{}).Where("hostname IN (?)", []string{h1.Hostname, h2.Hostname}).Updates(map[string]interface{}{
+	db.Model(&domain.Host{}).Where("hostname = ?", h1.Hostname).Updates(map[string]interface{}{
 		"status":               domain.HostStatusActive,
 		"file_server_base_url": fakeFS.URL,
+		"public_domain":        h1.PublicDomain,
+		"public_ip":            h1.PublicIP,
+	})
+	db.Model(&domain.Host{}).Where("hostname = ?", h2.Hostname).Updates(map[string]interface{}{
+		"status":               domain.HostStatusActive,
+		"file_server_base_url": fakeFS.URL,
+		"public_domain":        h2.PublicDomain,
+		"public_ip":            h2.PublicIP,
 	})
 
 	dashService := NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, jwtSecret)
@@ -275,22 +283,40 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 		t.Fatalf("server detail failed: %d", wDetail.Code)
 	}
 	detailHTML := wDetail.Body.String()
-	for _, unexpected := range []string{"World Backups", "Host Worker Status", "Host Migration", "Danger Zone", "/host\">Host"} {
+	for _, unexpected := range []string{"World Backups", "Host Worker Status", "Host Migration", "Danger Zone", "Current Host", "Background Job Queue", "Operation Logs", "/host\">Host", "/jobs\">Job Queue"} {
 		if strings.Contains(detailHTML, unexpected) {
 			t.Errorf("overview page must not contain %q after refactor", unexpected)
 		}
 	}
-	if !strings.Contains(detailHTML, "/backups\"") || !strings.Contains(detailHTML, "/settings\"") {
-		t.Errorf("expected sub-navbar links to Backups and Settings on overview page")
+	if !strings.Contains(detailHTML, "/backups\"") || !strings.Contains(detailHTML, "/settings\"") || !strings.Contains(detailHTML, "/logs\"") {
+		t.Errorf("expected sub-navbar links to Backups, Logs, and Settings on overview page")
+	}
+	if !strings.Contains(detailHTML, "Connect IP Address") {
+		t.Errorf("expected Connect IP Address card on overview page")
+	}
+	var loadedServer domain.Server
+	if err := dashSvc.db.Preload("Host").First(&loadedServer, server.ID).Error; err != nil {
+		t.Fatalf("failed reloading server with host: %v", err)
+	}
+	if !strings.Contains(detailHTML, loadedServer.ConnectAddress()) {
+		t.Errorf("expected connect address %q on overview page", loadedServer.ConnectAddress())
 	}
 
-	// 6b. Dedicated Backups Page
+	// 6b. Dedicated Backups & Logs Pages
 	wBackupsPage := httptest.NewRecorder()
 	reqBackupsPage, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/backups", server.ID), nil)
 	reqBackupsPage.AddCookie(authCookie)
 	r.ServeHTTP(wBackupsPage, reqBackupsPage)
 	if wBackupsPage.Code != http.StatusOK || !strings.Contains(wBackupsPage.Body.String(), "World Backups") {
 		t.Fatalf("backups page failed: %d", wBackupsPage.Code)
+	}
+
+	wLogsPage := httptest.NewRecorder()
+	reqLogsPage, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/logs", server.ID), nil)
+	reqLogsPage.AddCookie(authCookie)
+	r.ServeHTTP(wLogsPage, reqLogsPage)
+	if wLogsPage.Code != http.StatusOK || !strings.Contains(wLogsPage.Body.String(), "Operation Logs") {
+		t.Fatalf("logs page failed: %d", wLogsPage.Code)
 	}
 
 	// 6c. Dedicated Settings Page + Danger Zone + Server Jar/Version Update
@@ -383,8 +409,25 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 		t.Fatalf("expected 200 on /host for staff role, got %d", wHostStaff.Code)
 	}
 	hostHTML := wHostStaff.Body.String()
-	if !strings.Contains(hostHTML, "Host Worker Status") || !strings.Contains(hostHTML, "Host Migration") || !strings.Contains(hostHTML, "/host\">Host") {
-		t.Errorf("expected Host Worker Status, Host Migration, and sub-navbar Host tab for staff role")
+	if !strings.Contains(hostHTML, "Host Worker Status") || !strings.Contains(hostHTML, "Host Migration") || !strings.Contains(hostHTML, "Current Host:") || !strings.Contains(hostHTML, "/host\">Host") {
+		t.Errorf("expected Host Worker Status, Host Migration, Current Host, and sub-navbar Host tab for staff role")
+	}
+
+	// Role enforcement for Jobs page: regular user gets 403, staff user succeeds
+	wJobsForbidden := httptest.NewRecorder()
+	reqJobsForbidden, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/jobs", server.ID), nil)
+	reqJobsForbidden.AddCookie(authCookie)
+	r.ServeHTTP(wJobsForbidden, reqJobsForbidden)
+	if wJobsForbidden.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on /jobs for regular user, got %d", wJobsForbidden.Code)
+	}
+
+	wJobsStaff := httptest.NewRecorder()
+	reqJobsStaff, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/jobs", server.ID), nil)
+	reqJobsStaff.AddCookie(staffCookie)
+	r.ServeHTTP(wJobsStaff, reqJobsStaff)
+	if wJobsStaff.Code != http.StatusOK || !strings.Contains(wJobsStaff.Body.String(), "Background Job Queue") {
+		t.Fatalf("expected 200 with Background Job Queue on /jobs for staff role, got %d", wJobsStaff.Code)
 	}
 
 	// Ensure alternate host exists active right now in case parallel tests disabled hosts

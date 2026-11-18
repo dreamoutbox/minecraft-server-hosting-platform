@@ -1,0 +1,14 @@
+services:
+  docker-stripe:
+    build:
+      context: ./docker-stripe
+      dockerfile: Dockerfile
+    container_name: docker-stripe
+    environment:
+      - STRIPE_API_KEY=${STRIPE_SECRET_KEY:-NOT_SET}
+      - FORWARD_TO=http://host.docker.internal:8080/stripe
+    networks:
+      - mc_platform_net
+    # restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

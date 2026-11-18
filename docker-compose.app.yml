@@ -1,3 +1,6 @@
+volumes:
+  fileserver_data:
+
 services:
   apiserver:
     image: ${APISERVER_IMAGE:-dreamoutbox/minecraft-hosting-apiserver:latest}
@@ -28,10 +31,14 @@ services:
       DEFAULT_WORKER_URL: http://worker:9090
       DEFAULT_WORKER_KEY: dev-worker-key
       DEFAULT_WORKER_NAME: compose-worker
+      DEFAULT_WORKER_PUBLIC_DOMAIN: localhost
+      DEFAULT_WORKER_PUBLIC_IP: 127.0.0.1
       DEFAULT_FILESERVER_URL: http://localhost:9100
       DEFAULT_FILESERVER_INTERNAL_URL: http://fileserver:9100
     ports:
       - "8080:8080"
+    networks:
+      - mc_platform_net
 
   worker:
     image: ${WORKER_IMAGE:-dreamoutbox/minecraft-hosting-worker:latest}
@@ -73,6 +80,8 @@ services:
       # rshared propagates loop mounts created inside mc_worker 
       # to the host and spawned Minecraft containers
       - /var/lib/mc-platform:/var/lib/mc-platform:rshared
+    networks:
+      - mc_platform_net
 
   fileserver:
     image: ${FILESERVER_IMAGE:-dreamoutbox/minecraft-hosting-fileserver:latest}
@@ -89,6 +98,5 @@ services:
     volumes:
       - /var/lib/mc-platform:/var/lib/mc-platform:rshared
       - fileserver_data:/data
-
-volumes:
-  fileserver_data:
+    networks:
+      - mc_platform_net

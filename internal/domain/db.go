@@ -120,13 +120,15 @@ func SeedPlans(db *gorm.DB) error {
 //   - hostname: Display hostname of the node.
 //   - workerBaseURL: HTTP root URL of the worker daemon.
 //   - fileServerBaseURL: Public HTTP root URL of the node fileserver daemon.
+//   - publicDomain: Public DNS domain players use to connect to servers on this node.
+//   - publicIP: Public IPv4/IPv6 address of this node.
 //   - apiKey: Worker authentication key.
 //   - maxServers: Capacity limit for the host.
 //
 // Example usage:
 //
-//	err := domain.SeedDefaultHost(db, "compose-worker", "http://worker:9090", "http://localhost:9100", "dev-worker-key", 20)
-func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, fileServerBaseURL, apiKey string, maxServers int) error {
+//	err := domain.SeedDefaultHost(db, "compose-worker", "http://worker:9090", "http://localhost:9100", "localhost", "127.0.0.1", "dev-worker-key", 20)
+func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, fileServerBaseURL, publicDomain, publicIP, apiKey string, maxServers int) error {
 	if workerBaseURL == "" {
 		return nil
 	}
@@ -139,6 +141,8 @@ func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, fileServerBaseURL, ap
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			host = Host{
 				Hostname:          hostname,
+				PublicDomain:      publicDomain,
+				PublicIP:          publicIP,
 				WorkerBaseURL:     workerBaseURL,
 				FileServerBaseURL: fileServerBaseURL,
 				APIKey:            apiKey,
@@ -156,6 +160,12 @@ func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, fileServerBaseURL, ap
 	host.APIKeyHash = hashHex
 	if fileServerBaseURL != "" {
 		host.FileServerBaseURL = fileServerBaseURL
+	}
+	if publicDomain != "" {
+		host.PublicDomain = publicDomain
+	}
+	if publicIP != "" {
+		host.PublicIP = publicIP
 	}
 	return db.Save(&host).Error
 }
