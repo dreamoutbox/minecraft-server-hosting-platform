@@ -59,8 +59,8 @@ jobs:
           S3_USE_PATH_STYLE: "true"
         run: go test -v -race ./...
 
-      - name: Build server binary
-        run: go build -v -o /dev/null ./cmd/server
+      - name: Build apiserver binary
+        run: go build -v -o /dev/null ./cmd/apiserver
 
       - name: Build worker binary
         run: go build -v -o /dev/null ./cmd/worker

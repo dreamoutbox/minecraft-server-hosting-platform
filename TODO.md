@@ -86,9 +86,22 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ### Debug Utils
 
-- [ ] add shell debug script to manually mount /var/lib/mc-platform/images/<server-id>.img for inspection.
+- [x] add shell debug script to manually mount /var/lib/mc-platform/images/<server-id>.img for inspection.
 
-- [ ] add debug script to list mount status of each /var/lib/mc-platform/mounts/<server-id>.
+- [x] add debug script to list mount status of each dir in /var/lib/mc-platform/mounts/<server-id>.
+
+---
+
+### 11/18/2026
+
+- [ ] test upload file exceed ext4 mount disk should fail
+- [ ] show server connect domain. add field public_domain, public_ip to node host tables in postgres
+- [ ] add server type for droplet,vps, container
+- [ ] data retention 7 days after server expired
+- [ ] allow extend server duration if within 7 days after server expired
+- [ ] move server create form panel to only admin/staff
+- [ ] create server after purchase. place order create server in queue postgres table. and wait for worker to pick up and create server
+- [ ] queue worker to create server, stop expired server, delete server data after passed retention days
 
 ---
 

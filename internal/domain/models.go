@@ -172,7 +172,7 @@ const (
 	ServerLogStatusError   ServerLogStatus = "error"
 )
 
-// JobType identifies background queue tasks processed asynchronously by cmd/server.
+// JobType identifies background queue tasks processed asynchronously by cmd/apiserver.
 type JobType string
 
 const (

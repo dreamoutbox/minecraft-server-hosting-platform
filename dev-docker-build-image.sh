@@ -2,11 +2,12 @@
 #
 # docker-build-image.sh
 # Builds the Docker container images for the Minecraft Hosting Platform services.
-# Configurable via environment variables SERVER_IMAGE and WORKER_IMAGE.
+# Configurable via environment variables APISERVER_IMAGE, WORKER_IMAGE, and FILESERVER_IMAGE.
 #
 # Environment variables:
-#   SERVER_IMAGE: Tag for the web orchestrator server image (default: dreamoutbox/minecraft-hosting-server:latest)
+#   APISERVER_IMAGE: Tag for the web orchestrator apiserver image (default: dreamoutbox/minecraft-hosting-apiserver:latest)
 #   WORKER_IMAGE: Tag for the host worker daemon image (default: dreamoutbox/minecraft-hosting-worker:latest)
+#   FILESERVER_IMAGE: Tag for the node fileserver image (default: dreamoutbox/minecraft-hosting-fileserver:latest)
 #
 # Arguments:
 #   $@: Optional flags forwarded directly to docker build (e.g., --no-cache).
@@ -14,26 +15,26 @@
 # Example usage:
 #   ./docker-build-image.sh
 #   ./docker-build-image.sh --no-cache
-#   SERVER_IMAGE=myregistry/server:v1.0 WORKER_IMAGE=myregistry/worker:v1.0 ./docker-build-image.sh
+#   APISERVER_IMAGE=myregistry/apiserver:v1.0 WORKER_IMAGE=myregistry/worker:v1.0 ./docker-build-image.sh
 
 set -euo pipefail
 
 # Configuration with environment variable overrides
-SERVER_IMAGE="${SERVER_IMAGE:-dreamoutbox/minecraft-hosting-server:latest}"
+APISERVER_IMAGE="${APISERVER_IMAGE:-dreamoutbox/minecraft-hosting-apiserver:latest}"
 WORKER_IMAGE="${WORKER_IMAGE:-dreamoutbox/minecraft-hosting-worker:latest}"
 FILESERVER_IMAGE="${FILESERVER_IMAGE:-dreamoutbox/minecraft-hosting-fileserver:latest}"
 
-# build_server_image compiles and packages the orchestrator binary into an Alpine container image.
+# build_apiserver_image compiles and packages the orchestrator binary into an Alpine container image.
 #
 # Arguments:
 #   $@: Extra arguments passed to docker build.
 #
 # Example usage:
-#   build_server_image --no-cache
-build_server_image() {
-	echo "Building server image: ${SERVER_IMAGE}..."
-	docker build -t "${SERVER_IMAGE}" -f Dockerfile.server . "$@"
-	echo "Server image built successfully: ${SERVER_IMAGE}"
+#   build_apiserver_image --no-cache
+build_apiserver_image() {
+	echo "Building apiserver image: ${APISERVER_IMAGE}..."
+	docker build -t "${APISERVER_IMAGE}" -f Dockerfile.apiserver . "$@"
+	echo "API server image built successfully: ${APISERVER_IMAGE}"
 }
 
 # build_worker_image compiles and packages the worker daemon binary into an Alpine container image.
@@ -71,11 +72,11 @@ build_fileserver_image() {
 #   main "$@"
 main() {
 	echo "Starting platform Docker image builds..."
-	echo "  Server tag: ${SERVER_IMAGE}"
+	echo "  API server tag: ${APISERVER_IMAGE}"
 	echo "  Worker tag: ${WORKER_IMAGE}"
 	echo "  Fileserver tag: ${FILESERVER_IMAGE}"
 
-	build_server_image "$@"
+	build_apiserver_image "$@"
 	build_worker_image "$@"
 	build_fileserver_image "$@"
 

@@ -1,37 +1,7 @@
 services:
-  postgres:
-    image: postgres:18-alpine
-    container_name: mc_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: minecraft_hosting
-      PGDATA: /var/lib/postgresql
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql
-    healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "postgres", "-d", "minecraft_hosting" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  seaweedfs:
-    image: chrislusf/seaweedfs:latest
-    container_name: mc_seaweedfs
-    restart: unless-stopped
-    command: [ "server", "-dir=/data", "-s3" ]
-    ports:
-      - "8333:8333"
-      - "9333:9333"
-    volumes:
-      - seaweedfs_data:/data
-
-  server:
-    image: ${SERVER_IMAGE:-dreamoutbox/minecraft-hosting-server:latest}
-    container_name: mc_server
+  apiserver:
+    image: ${APISERVER_IMAGE:-dreamoutbox/minecraft-hosting-apiserver:latest}
+    container_name: mc_apiserver
     restart: unless-stopped
     depends_on:
       postgres:
@@ -121,6 +91,4 @@ services:
       - fileserver_data:/data
 
 volumes:
-  pgdata:
-  seaweedfs_data:
   fileserver_data:

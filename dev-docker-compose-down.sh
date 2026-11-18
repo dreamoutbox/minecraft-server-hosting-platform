@@ -79,7 +79,7 @@ main() {
 	resolve_compose_command
 
 	echo "Stopping and tearing down platform services..."
-	"${DOCKER_COMPOSE[@]}" -f docker-compose.yml -f docker-compose.dev.yml down "$@"
+	"${DOCKER_COMPOSE[@]}" -f docker-compose.base.yml -f docker-compose.app.yml down "$@"
 	cleanup_orphaned_servers
 	echo "Platform services stopped."
 }
