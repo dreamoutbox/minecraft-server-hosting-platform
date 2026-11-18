@@ -105,53 +105,126 @@ func TestCreateEditAndZipOperations(t *testing.T) {
 		t.Fatalf("write secret: %v", err)
 	}
 
-	// Extension checks
-	for _, name := range []string{"eula.txt", "ops.json", "bukkit.yml", "server.properties", "UPPER.JSON"} {
-		if !IsEditableFile(name) {
-			t.Errorf("expected %s to be editable", name)
-		}
+	// Text vs binary content detection & known binary extension rejection
+	if !IsTextContent([]byte("HOST=localhost\nPORT=25575\n"), false) {
+		t.Error("expected .env-style UTF-8 text to be recognized as text")
 	}
-	for _, name := range []string{"server.jar", "region.mca", "README"} {
-		if IsEditableFile(name) {
-			t.Errorf("expected %s not to be editable", name)
+	if !IsTextContent([]byte{}, false) {
+		t.Error("expected empty file content to be recognized as text")
+	}
+	// Simulate 4096-byte sniff boundary cutting a 3-byte UTF-8 rune ("中") in half
+	prefixSplitUTF8 := append(bytes.Repeat([]byte("a"), 4095), 0xe4)
+	if !IsTextContent(prefixSplitUTF8, true) {
+		t.Error("expected truncated multi-byte UTF-8 boundary to be recognized as text")
+	}
+	if IsTextContent(prefixSplitUTF8, false) {
+		t.Error("expected untruncated incomplete UTF-8 to be rejected")
+	}
+	if IsTextContent([]byte{0xff, 0xfe, 0x00, 0x01}, false) {
+		t.Error("expected binary bytes to be rejected")
+	}
+
+	// Create .yaml, .env, binary, and oversized files to verify ListDir Editable detection
+	for _, tc := range []struct {
+		name    string
+		content []byte
+		want    bool
+	}{
+		{"config.yaml", []byte("key: value\n"), true},
+		{".paper.env", []byte("MEMORY=2G\n"), true},
+		{".env", []byte("PORT=8080\n"), true},
+		{"README", []byte("plain text without extension\n"), true},
+		{"eula.txt", []byte("eula=true\n"), true},
+		{"ops.json", []byte("[]\n"), true},
+		{"bukkit.yml", []byte("settings:\n"), true},
+		{"server.properties", []byte("motd=test\n"), true},
+		{"split-utf8.yaml", append(bytes.Repeat([]byte("a"), 4095), []byte("中文\n")...), true},
+		{"level.dat", []byte{0x1f, 0x8b, 0x08, 0x00, 0x00}, false},
+		{"icon.png", []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, false},
+		{"huge.log", bytes.Repeat([]byte("x"), int(MaxEditableFileBytes)+1), false},
+	} {
+		if err := os.WriteFile(filepath.Join(rootDir, tc.name), tc.content, 0644); err != nil {
+			t.Fatalf("write %s: %v", tc.name, err)
 		}
 	}
 
-	// CreateFile and duplicate guard
-	if err := CreateFile(rootDir, ".", "notes.txt"); err != nil {
-		t.Fatalf("CreateFile failed: %v", err)
+	listed, err := ListDir(rootDir, ".")
+	if err != nil {
+		t.Fatalf("ListDir failed: %v", err)
+	}
+	editableByName := make(map[string]bool, len(listed))
+	for _, e := range listed {
+		editableByName[e.Name] = e.Editable
+	}
+	for name, want := range map[string]bool{
+		"config.yaml":       true,
+		".paper.env":        true,
+		".env":              true,
+		"README":            true,
+		"eula.txt":          true,
+		"ops.json":          true,
+		"bukkit.yml":        true,
+		"server.properties": true,
+		"split-utf8.yaml":   true,
+		"level.dat":         false,
+		"icon.png":          false,
+		"huge.log":          false,
+	} {
+		if got := editableByName[name]; got != want {
+			t.Errorf("ListDir %s Editable = %v, want %v", name, got, want)
+		}
+	}
+
+	// CreateFile, ReadEditableFile, SaveEditableFile on .env and .yaml
+	for _, name := range []string{"notes.txt", ".rcon-cli.yaml", ".custom.env"} {
+		if err := CreateFile(rootDir, ".", name); err != nil {
+			t.Fatalf("CreateFile(%s) failed: %v", name, err)
+		}
+		if err := SaveEditableFile(rootDir, name, "hello=world\n", 1024); err != nil {
+			t.Fatalf("SaveEditableFile(%s) failed: %v", name, err)
+		}
+		gotContent, err := ReadEditableFile(rootDir, name, 1024)
+		if err != nil || gotContent != "hello=world\n" {
+			t.Fatalf("ReadEditableFile(%s) got (%q, %v)", name, gotContent, err)
+		}
 	}
 	if err := CreateFile(rootDir, ".", "notes.txt"); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("expected ErrAlreadyExists on duplicate file, got %v", err)
 	}
-	if err := SaveEditableFile(rootDir, "notes.txt", "hello world\n", 1024); err != nil {
-		t.Fatalf("SaveEditableFile failed: %v", err)
-	}
-	content, err := ReadEditableFile(rootDir, "notes.txt", 1024)
-	if err != nil || content != "hello world\n" {
-		t.Fatalf("ReadEditableFile got (%q, %v)", content, err)
-	}
 
-	// Non-editable and size limits
+	// Binary extensions and oversized files are rejected
 	if err := CreateFile(rootDir, ".", "server.jar"); err != nil {
 		t.Fatalf("CreateFile jar failed: %v", err)
 	}
-	if _, err := ReadEditableFile(rootDir, "server.jar", 1024); !errors.Is(err, ErrNotEditable) {
-		t.Errorf("expected ErrNotEditable reading jar, got %v", err)
+	if _, err := ReadEditableFile(rootDir, "server.jar", 1024); !errors.Is(err, ErrBinaryFile) {
+		t.Errorf("expected ErrBinaryFile reading jar, got %v", err)
 	}
-	if err := SaveEditableFile(rootDir, "server.jar", "bad", 1024); !errors.Is(err, ErrNotEditable) {
-		t.Errorf("expected ErrNotEditable saving jar, got %v", err)
+	if err := SaveEditableFile(rootDir, "server.jar", "bad", 1024); !errors.Is(err, ErrBinaryFile) {
+		t.Errorf("expected ErrBinaryFile saving jar, got %v", err)
+	}
+	if _, err := ReadEditableFile(rootDir, "huge.log", MaxEditableFileBytes); !errors.Is(err, ErrFileTooLarge) {
+		t.Errorf("expected ErrFileTooLarge reading huge.log, got %v", err)
 	}
 	if err := SaveEditableFile(rootDir, "notes.txt", strings.Repeat("a", 50), 10); !errors.Is(err, ErrFileTooLarge) {
 		t.Errorf("expected ErrFileTooLarge saving oversized text, got %v", err)
 	}
+	if err := SaveEditableFile(rootDir, "notes.txt", "abc\x00def", 1024); !errors.Is(err, ErrBinaryFile) {
+		t.Errorf("expected ErrBinaryFile saving NUL byte content, got %v", err)
+	}
 
-	// Binary check on .txt
+	// Binary check on .txt (both early and past the 4KB sniff boundary)
 	if err := os.WriteFile(filepath.Join(rootDir, "bin.txt"), []byte{0x00, 0x01, 0x02}, 0644); err != nil {
 		t.Fatalf("write bin.txt: %v", err)
 	}
 	if _, err := ReadEditableFile(rootDir, "bin.txt", 1024); !errors.Is(err, ErrBinaryFile) {
 		t.Errorf("expected ErrBinaryFile for NUL byte file, got %v", err)
+	}
+	lateBin := append(bytes.Repeat([]byte("a"), 5000), 0x00, 0x01)
+	if err := os.WriteFile(filepath.Join(rootDir, "late-bin.txt"), lateBin, 0644); err != nil {
+		t.Fatalf("write late-bin.txt: %v", err)
+	}
+	if _, err := ReadEditableFile(rootDir, "late-bin.txt", MaxEditableFileBytes); !errors.Is(err, ErrBinaryFile) {
+		t.Errorf("expected ErrBinaryFile for NUL byte after 4KB, got %v", err)
 	}
 
 	// Zip folder with nested file, empty subfolder, and external symlink (must be skipped)

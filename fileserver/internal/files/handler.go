@@ -23,7 +23,7 @@ const SessionCookieName = "fs_session"
 
 const (
 	sessionCookieMaxAgeSeconds = 3600 * 24
-	maxEditableFileBytes       = 2 * 1024 * 1024
+	maxEditableFileBytes       = MaxEditableFileBytes
 )
 
 //go:embed templates/*

@@ -2,7 +2,6 @@ package files
 
 import (
 	"archive/zip"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -11,23 +10,82 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
-
-// EditableExtension represents a file extension editable in the web modal editor.
-type EditableExtension string
 
 const (
-	ExtTXT        EditableExtension = ".txt"
-	ExtJSON       EditableExtension = ".json"
-	ExtYML        EditableExtension = ".yml"
-	ExtProperties EditableExtension = ".properties"
+	// MaxEditableFileBytes limits text files eligible for web modal editing.
+	MaxEditableFileBytes int64 = 2 * 1024 * 1024
+	textSniffBytes             = 4096
 )
 
-var allowedEditableExtensions = map[EditableExtension]bool{
-	ExtTXT:        true,
-	ExtJSON:       true,
-	ExtYML:        true,
-	ExtProperties: true,
+// BinaryExtension represents a known non-text file extension disallowed by the web editor.
+type BinaryExtension string
+
+const (
+	binExtJAR     BinaryExtension = ".jar"
+	binExtZIP     BinaryExtension = ".zip"
+	binExtGZ      BinaryExtension = ".gz"
+	binExtTAR     BinaryExtension = ".tar"
+	binExtTGZ     BinaryExtension = ".tgz"
+	binExtBZ2     BinaryExtension = ".bz2"
+	binExtXZ      BinaryExtension = ".xz"
+	binExt7Z      BinaryExtension = ".7z"
+	binExtRAR     BinaryExtension = ".rar"
+	binExtMCA     BinaryExtension = ".mca"
+	binExtMCR     BinaryExtension = ".mcr"
+	binExtNBT     BinaryExtension = ".nbt"
+	binExtPNG     BinaryExtension = ".png"
+	binExtJPG     BinaryExtension = ".jpg"
+	binExtJPEG    BinaryExtension = ".jpeg"
+	binExtGIF     BinaryExtension = ".gif"
+	binExtWEBP    BinaryExtension = ".webp"
+	binExtICO     BinaryExtension = ".ico"
+	binExtClass   BinaryExtension = ".class"
+	binExtEXE     BinaryExtension = ".exe"
+	binExtDLL     BinaryExtension = ".dll"
+	binExtSO      BinaryExtension = ".so"
+	binExtDylib   BinaryExtension = ".dylib"
+	binExtDB      BinaryExtension = ".db"
+	binExtSQLite  BinaryExtension = ".sqlite"
+	binExtSQLite3 BinaryExtension = ".sqlite3"
+	binExtPDF     BinaryExtension = ".pdf"
+	binExtOGG     BinaryExtension = ".ogg"
+	binExtMP3     BinaryExtension = ".mp3"
+	binExtWAV     BinaryExtension = ".wav"
+)
+
+var knownBinaryExtensions = map[BinaryExtension]bool{
+	binExtJAR:     true,
+	binExtZIP:     true,
+	binExtGZ:      true,
+	binExtTAR:     true,
+	binExtTGZ:     true,
+	binExtBZ2:     true,
+	binExtXZ:      true,
+	binExt7Z:      true,
+	binExtRAR:     true,
+	binExtMCA:     true,
+	binExtMCR:     true,
+	binExtNBT:     true,
+	binExtPNG:     true,
+	binExtJPG:     true,
+	binExtJPEG:    true,
+	binExtGIF:     true,
+	binExtWEBP:    true,
+	binExtICO:     true,
+	binExtClass:   true,
+	binExtEXE:     true,
+	binExtDLL:     true,
+	binExtSO:      true,
+	binExtDylib:   true,
+	binExtDB:      true,
+	binExtSQLite:  true,
+	binExtSQLite3: true,
+	binExtPDF:     true,
+	binExtOGG:     true,
+	binExtMP3:     true,
+	binExtWAV:     true,
 }
 
 var (
@@ -39,13 +97,13 @@ var (
 	ErrIsDirectory = errors.New("requested path is a directory")
 	// ErrNotDirectory indicates a directory operation was requested on a non-directory.
 	ErrNotDirectory = errors.New("requested path is not a directory")
-	// ErrNotEditable indicates the file extension is not supported by the web editor.
-	ErrNotEditable = errors.New("only .txt, .json, .yml, and .properties files can be edited")
+	// ErrNotEditable indicates the target file cannot be edited in the web editor.
+	ErrNotEditable = errors.New("file cannot be edited on the web")
 	// ErrFileTooLarge indicates the file exceeds the maximum editable size.
 	ErrFileTooLarge = errors.New("file is too large to edit on the web")
 	// ErrAlreadyExists indicates a target file already exists.
 	ErrAlreadyExists = errors.New("file already exists")
-	// ErrBinaryFile indicates a file appears to contain binary NUL bytes.
+	// ErrBinaryFile indicates a file appears to contain binary data.
 	ErrBinaryFile = errors.New("binary files cannot be edited as text")
 )
 
@@ -59,17 +117,45 @@ type Entry struct {
 	ModTime  time.Time
 }
 
-// IsEditableFile reports whether filename has an extension supported by the web editor.
+func isKnownBinaryExtension(name string) bool {
+	ext := BinaryExtension(strings.ToLower(filepath.Ext(strings.TrimSpace(name))))
+	return knownBinaryExtensions[ext]
+}
+
+// IsTextContent reports whether data contains valid UTF-8 text without binary control characters.
 //
 // Arguments:
-//   - name: File name or path whose extension is checked case-insensitively.
+//   - data: File bytes or prefix sample to inspect.
+//   - truncated: True when data is a fixed-size prefix that may end mid-rune.
 //
 // Example usage:
 //
-//	if files.IsEditableFile("server.properties") { ... }
-func IsEditableFile(name string) bool {
-	ext := EditableExtension(strings.ToLower(filepath.Ext(strings.TrimSpace(name))))
-	return allowedEditableExtensions[ext]
+//	ok := files.IsTextContent(buf, len(buf) == 4096)
+func IsTextContent(data []byte, truncated bool) bool {
+	if len(data) == 0 {
+		return true
+	}
+
+	check := data
+	if truncated {
+		for trim := 0; trim < 3 && len(check) > 0; trim++ {
+			if utf8.Valid(check) {
+				break
+			}
+			check = check[:len(check)-1]
+		}
+	}
+
+	if !utf8.Valid(check) {
+		return false
+	}
+
+	for _, b := range check {
+		if b == 0 || b == 0x7f || (b < 0x20 && b != '\t' && b != '\n' && b != '\r' && b != '\f' && b != '\x1b') {
+			return false
+		}
+	}
+	return true
 }
 
 // validateSingleName ensures name is a single safe path segment without traversal or separators.
@@ -137,12 +223,19 @@ func ListDir(rootDir, relPath string) ([]Entry, error) {
 			modTime = entryInfo.ModTime()
 		}
 
-		absPath := filepath.Join(rootDir, joinRel(relPath, de.Name()))
+		entryRel := joinRel(relPath, de.Name())
+		absPath := filepath.Join(rootDir, entryRel)
+		editable := false
+		if !de.IsDir() && !isKnownBinaryExtension(de.Name()) && (!de.Type().IsRegular() || size <= MaxEditableFileBytes) {
+			_, checkErr := checkEditableTarget(root, entryRel, MaxEditableFileBytes, false)
+			editable = checkErr == nil
+		}
+
 		entries = append(entries, Entry{
 			Name:     de.Name(),
 			AbsPath:  absPath,
 			IsDir:    de.IsDir(),
-			Editable: !de.IsDir() && IsEditableFile(de.Name()),
+			Editable: editable,
 			Size:     size,
 			ModTime:  modTime,
 		})
@@ -359,17 +452,57 @@ func CreateFile(rootDir, dirRel, fileName string) error {
 	return dst.Close()
 }
 
-func validateEditableTarget(entryRel string) error {
+func checkEditableTarget(root *os.Root, entryRel string, maxBytes int64, readFull bool) ([]byte, error) {
 	if entryRel == "" || entryRel == "." {
-		return ErrCannotModifyRoot
+		return nil, ErrCannotModifyRoot
 	}
-	if !IsEditableFile(entryRel) {
-		return ErrNotEditable
+	if isKnownBinaryExtension(entryRel) {
+		return nil, ErrBinaryFile
 	}
-	return nil
+
+	f, err := root.Open(entryRel)
+	if err != nil {
+		return nil, fmt.Errorf("failed opening file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed stating file: %w", err)
+	}
+	if info.IsDir() {
+		return nil, ErrIsDirectory
+	}
+	if info.Size() > maxBytes {
+		return nil, ErrFileTooLarge
+	}
+
+	limit := int64(textSniffBytes)
+	if readFull {
+		limit = maxBytes
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed reading file: %w", err)
+	}
+
+	truncated := false
+	if readFull {
+		if int64(len(data)) > maxBytes {
+			return nil, ErrFileTooLarge
+		}
+	} else if int64(len(data)) > int64(textSniffBytes) {
+		data = data[:textSniffBytes]
+		truncated = true
+	}
+
+	if !IsTextContent(data, truncated) {
+		return nil, ErrBinaryFile
+	}
+	return data, nil
 }
 
-// ReadEditableFile reads a supported text config file within rootDir up to maxBytes.
+// ReadEditableFile reads a UTF-8 text file within rootDir up to maxBytes, rejecting binary and oversized files.
 //
 // Arguments:
 //   - rootDir: Absolute root directory granted to the user.
@@ -378,49 +511,22 @@ func validateEditableTarget(entryRel string) error {
 //
 // Example usage:
 //
-//	content, err := ReadEditableFile(perm.DirPath, "server.properties", 2<<20)
+//	content, err := ReadEditableFile(perm.DirPath, "server.properties", MaxEditableFileBytes)
 func ReadEditableFile(rootDir, entryRel string, maxBytes int64) (string, error) {
-	if err := validateEditableTarget(entryRel); err != nil {
-		return "", err
-	}
-
 	root, err := os.OpenRoot(rootDir)
 	if err != nil {
 		return "", fmt.Errorf("failed opening mount root: %w", err)
 	}
 	defer func() { _ = root.Close() }()
 
-	f, err := root.Open(entryRel)
+	data, err := checkEditableTarget(root, entryRel, maxBytes, true)
 	if err != nil {
-		return "", fmt.Errorf("failed opening file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return "", fmt.Errorf("failed stating file: %w", err)
-	}
-	if info.IsDir() {
-		return "", ErrIsDirectory
-	}
-	if info.Size() > maxBytes {
-		return "", ErrFileTooLarge
-	}
-
-	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
-	if err != nil {
-		return "", fmt.Errorf("failed reading file: %w", err)
-	}
-	if int64(len(data)) > maxBytes {
-		return "", ErrFileTooLarge
-	}
-	if bytes.IndexByte(data, 0) >= 0 {
-		return "", ErrBinaryFile
+		return "", err
 	}
 	return string(data), nil
 }
 
-// SaveEditableFile overwrites an existing supported text config file inside rootDir.
+// SaveEditableFile overwrites an existing text file inside rootDir after verifying text content and size limits.
 //
 // Arguments:
 //   - rootDir: Absolute root directory granted to the user.
@@ -430,13 +536,13 @@ func ReadEditableFile(rootDir, entryRel string, maxBytes int64) (string, error) 
 //
 // Example usage:
 //
-//	err := SaveEditableFile(perm.DirPath, "server.properties", updatedText, 2<<20)
+//	err := SaveEditableFile(perm.DirPath, "server.properties", updatedText, MaxEditableFileBytes)
 func SaveEditableFile(rootDir, entryRel, content string, maxBytes int64) error {
-	if err := validateEditableTarget(entryRel); err != nil {
-		return err
-	}
 	if int64(len(content)) > maxBytes {
 		return ErrFileTooLarge
+	}
+	if !IsTextContent([]byte(content), false) {
+		return ErrBinaryFile
 	}
 
 	root, err := os.OpenRoot(rootDir)
@@ -445,12 +551,8 @@ func SaveEditableFile(rootDir, entryRel, content string, maxBytes int64) error {
 	}
 	defer func() { _ = root.Close() }()
 
-	info, err := root.Stat(entryRel)
-	if err != nil {
-		return fmt.Errorf("failed stating file: %w", err)
-	}
-	if info.IsDir() {
-		return ErrIsDirectory
+	if _, err := checkEditableTarget(root, entryRel, maxBytes, false); err != nil {
+		return err
 	}
 
 	dst, err := root.OpenFile(entryRel, os.O_WRONLY|os.O_TRUNC, 0644)

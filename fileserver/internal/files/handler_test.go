@@ -258,6 +258,15 @@ func TestToolbarModalsWebEditAndZipDownload(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(serverDir, "config", "paper.yml"), []byte("verbose: false\n"), 0644); err != nil {
 		t.Fatalf("write paper.yml: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(serverDir, ".rcon-cli.yaml"), []byte("host: localhost\n"), 0644); err != nil {
+		t.Fatalf("write .rcon-cli.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serverDir, ".paper.env"), []byte("EULA=TRUE\n"), 0644); err != nil {
+		t.Fatalf("write .paper.env: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serverDir, "binary.dat"), []byte{0x00, 0x1f, 0x8b}, 0644); err != nil {
+		t.Fatalf("write binary.dat: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(serverDir, "server.jar"), []byte("jar-bytes"), 0644); err != nil {
 		t.Fatalf("write server.jar: %v", err)
 	}
@@ -311,8 +320,34 @@ func TestToolbarModalsWebEditAndZipDownload(t *testing.T) {
 	if !strings.Contains(html, `data-bs-target="#editFileModal" data-path="`+filepath.Join(serverDir, "eula.txt")) {
 		t.Errorf("expected Edit modal trigger for eula.txt")
 	}
+	if !strings.Contains(html, `data-bs-target="#editFileModal" data-path="`+filepath.Join(serverDir, ".rcon-cli.yaml")) {
+		t.Errorf("expected Edit modal trigger for .rcon-cli.yaml")
+	}
+	if !strings.Contains(html, `data-bs-target="#editFileModal" data-path="`+filepath.Join(serverDir, ".paper.env")) {
+		t.Errorf("expected Edit modal trigger for .paper.env")
+	}
+	if strings.Contains(html, `data-bs-target="#editFileModal" data-path="`+filepath.Join(serverDir, "binary.dat")) {
+		t.Errorf("binary.dat must not show an Edit button")
+	}
 	if strings.Contains(html, `data-bs-target="#editFileModal" data-path="`+filepath.Join(serverDir, "server.jar")) {
 		t.Errorf("server.jar must not show an Edit button")
+	}
+
+	// Open .rcon-cli.yaml and .paper.env via GET /file-content
+	for _, tc := range []struct {
+		rel  string
+		want string
+	}{
+		{".rcon-cli.yaml", "host: localhost\n"},
+		{".paper.env", "EULA=TRUE\n"},
+	} {
+		wText := httptest.NewRecorder()
+		reqText, _ := http.NewRequest(http.MethodGet, "/file-content?path="+url.QueryEscape(filepath.Join(serverDir, tc.rel)), nil)
+		reqText.AddCookie(cookie)
+		r.ServeHTTP(wText, reqText)
+		if wText.Code != http.StatusOK {
+			t.Fatalf("expected 200 on /file-content for %s, got %d (%s)", tc.rel, wText.Code, wText.Body.String())
+		}
 	}
 
 	// 3. GET /file-content & POST /edit on editable file

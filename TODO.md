@@ -50,9 +50,9 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] remove rename input text. rename button should open popup to rename.
 
-- [ ] BUG: can't open .yaml, .env file
+- [x] BUG: can't open .yaml, .env file
 
-- [ ] determine if file is text file. and allow open to edit. disallow edit binary file or large file.
+- [x] determine if file is text file. and allow open to edit. disallow edit binary file or large file.
 
 ---
 
