@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -39,7 +38,7 @@ func NewHandler(st *store.Store, jwtSecret string, loginTokenTTL time.Duration) 
 	}
 }
 
-// EnsureUser idempotently creates or retrieves a fileserver user record.
+// RegisterUser idempotently creates or retrieves a fileserver user record.
 //
 // Arguments:
 //   - c: Active Gin request context containing client.EnsureUserRequest JSON.
@@ -47,7 +46,7 @@ func NewHandler(st *store.Store, jwtSecret string, loginTokenTTL time.Duration) 
 // Example usage:
 //
 //	PUT /api/v1/users
-func (h *Handler) EnsureUser(c *gin.Context) {
+func (h *Handler) RegisterUser(c *gin.Context) {
 	var req client.EnsureUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user payload: " + err.Error()})
@@ -197,18 +196,10 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, apiKey string) {
 	v1 := r.Group("/api/v1")
 	v1.Use(APIKeyMiddleware(apiKey))
 	{
-		v1.PUT("/users", h.EnsureUser)
+		v1.PUT("/users", h.RegisterUser)
 		v1.PUT("/permissions", h.AllowPermission)
 		v1.DELETE("/permissions", h.DisallowPermission)
 		v1.DELETE("/servers/:server_id/permissions", h.RevokeServerPermissions)
 		v1.POST("/users/:id/login-token", h.CreateLoginToken)
 	}
-}
-
-func parseUintParam(c *gin.Context, name string) (uint, error) {
-	val, err := strconv.ParseUint(c.Param(name), 10, 64)
-	if err != nil || val == 0 {
-		return 0, errors.New("invalid uint parameter")
-	}
-	return uint(val), nil
 }
