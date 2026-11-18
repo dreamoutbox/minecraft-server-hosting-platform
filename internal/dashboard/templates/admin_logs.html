@@ -1,0 +1,64 @@
+{{define "title"}}Admin - Operation Logs{{end}}
+{{define "content"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-0">Server Operation Logs</h2>
+        <p class="text-muted mb-0">Cluster-wide audit trail of server lifecycle and console operations</p>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body">
+        {{template "admin_search" .}}
+
+        {{if .Logs}}
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                    <tr class="text-muted small">
+                        <th>Log ID</th>
+                        <th>Server</th>
+                        <th>User</th>
+                        <th>Operation</th>
+                        <th>Status</th>
+                        <th>Message</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Logs}}
+                    <tr>
+                        <td class="text-muted small">#{{.ID}}</td>
+                        <td class="small">
+                            {{$srvName := index $.ServerNames .ServerID}}
+                            <a href="/dashboard/servers/{{.ServerID}}/logs" class="text-decoration-none">
+                                #{{.ServerID}}{{if $srvName}} ({{$srvName}}){{end}}
+                            </a>
+                        </td>
+                        <td class="small">
+                            {{$email := index $.UserEmails .UserID}}
+                            {{if $email}}{{$email}}{{else if eq .UserID 0}}System{{else}}User #{{.UserID}}{{end}}
+                        </td>
+                        <td class="fw-semibold small">{{.Operation}}</td>
+                        <td>
+                            {{if eq .Status "success"}}
+                            <span class="badge bg-success">success</span>
+                            {{else}}
+                            <span class="badge bg-danger">error</span>
+                            {{end}}
+                        </td>
+                        <td class="small text-muted text-break">{{.Message}}</td>
+                        <td class="small text-muted text-nowrap">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <p class="text-muted small mb-0 py-3 text-center">No operation logs found.</p>
+        {{end}}
+
+        {{template "admin_pagination" .}}
+    </div>
+</div>
+{{end}}

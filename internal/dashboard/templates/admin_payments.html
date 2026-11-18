@@ -1,0 +1,63 @@
+{{define "title"}}Admin - Payment Records{{end}}
+{{define "content"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-0">Payment Records</h2>
+        <p class="text-muted mb-0">Historical transaction ledger across all customer accounts</p>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body">
+        {{template "admin_search" .}}
+
+        {{if .Payments}}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr class="text-muted small">
+                        <th>Payment ID</th>
+                        <th>User</th>
+                        <th>Order</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Provider Tx ID</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Payments}}
+                    <tr>
+                        <td class="fw-semibold">#{{.ID}}</td>
+                        <td class="small text-break">
+                            {{$email := index $.UserEmails .UserID}}
+                            {{if $email}}{{$email}}{{else}}User #{{.UserID}}{{end}}
+                        </td>
+                        <td class="small">{{if .OrderID}}#{{.OrderID}}{{else}}-{{end}}</td>
+                        <td class="fw-semibold">{{formatUSD .AmountCents}}</td>
+                        <td>
+                            {{if eq .Status "succeeded"}}
+                            <span class="badge bg-success">succeeded</span>
+                            {{else if eq .Status "pending"}}
+                            <span class="badge bg-warning text-dark">pending</span>
+                            {{else if eq .Status "failed"}}
+                            <span class="badge bg-danger">failed</span>
+                            {{else}}
+                            <span class="badge bg-secondary">{{.Status}}</span>
+                            {{end}}
+                        </td>
+                        <td class="small text-break"><code class="text-break">{{.ProviderTxID}}</code></td>
+                        <td class="small text-muted text-nowrap">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <p class="text-muted small mb-0 py-3 text-center">No payment records found.</p>
+        {{end}}
+
+        {{template "admin_pagination" .}}
+    </div>
+</div>
+{{end}}

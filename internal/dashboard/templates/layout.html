@@ -9,22 +9,41 @@
 </head>
 <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-        <div class="container">
+        <div class="container-fluid px-4">
             <a class="navbar-brand fw-bold" href="/dashboard">MC Platform</a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbars">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbars">
-                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0 align-items-lg-center">
                     <li class="nav-item">
-                        <a class="nav-link" href="/dashboard">Servers</a>
+                        <a class="nav-link text-nowrap" href="/dashboard">Servers</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/dashboard/billing">Billing</a>
+                        <a class="nav-link text-nowrap" href="/dashboard/billing">Billing</a>
                     </li>
                     {{if .IsAdmin}}
+                    <li class="nav-item d-none d-lg-flex align-items-center px-2 text-white-50" aria-hidden="true">|</li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/dashboard/users">Users</a>
+                        <a class="nav-link text-nowrap" href="/dashboard/users">Users</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-nowrap" href="/dashboard/admin/servers">All Servers</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-nowrap" href="/dashboard/admin/orders">Orders</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-nowrap" href="/dashboard/admin/payments">Payments</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-nowrap" href="/dashboard/admin/jobs">Jobs</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-nowrap" href="/dashboard/admin/logs">Logs</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-nowrap" href="/dashboard/admin/plans">Plans</a>
                     </li>
                     {{end}}
                 </ul>
@@ -49,7 +68,7 @@
         </div>
     </nav>
 
-    <main class="container">
+    <main class="{{if .FullWidth}}container-fluid px-4{{else}}container{{end}}">
         {{if .FlashSuccess}}
         <div class="alert alert-success alert-dismissible fade show" role="alert">
             {{.FlashSuccess}}

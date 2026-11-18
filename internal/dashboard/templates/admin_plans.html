@@ -1,0 +1,172 @@
+{{define "title"}}Admin - Plans{{end}}
+{{define "content"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-0">Plans</h2>
+        <p class="text-muted mb-0">Create, edit, and remove server hardware pricing tiers</p>
+    </div>
+    <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createPlanModal">
+        + New Plan
+    </button>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body">
+        {{template "admin_search" .}}
+
+        {{if .Plans}}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr class="text-muted small">
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>CPU Cores</th>
+                        <th>Memory (MB)</th>
+                        <th>Disk (GB)</th>
+                        <th>Price</th>
+                        <th>Created</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Plans}}
+                    <tr>
+                        <td class="text-muted small">#{{.ID}}</td>
+                        <td class="fw-semibold">{{.Name}}</td>
+                        <td>{{.CPULimit}}</td>
+                        <td>{{.MemLimitMB}} MB</td>
+                        <td>{{.DiskLimitGB}} GB</td>
+                        <td>
+                            <span class="fw-semibold">{{formatUSD .PriceCents}}</span>
+                            <span class="text-muted small">({{.PriceCents}} cents)</span>
+                        </td>
+                        <td class="small text-muted text-nowrap">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+                        <td class="text-end text-nowrap">
+                            <button type="button" class="btn btn-sm btn-outline-primary me-1" data-bs-toggle="modal" data-bs-target="#editPlanModal-{{.ID}}">
+                                Edit
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deletePlanModal-{{.ID}}">
+                                Delete
+                            </button>
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <p class="text-muted small mb-0 py-3 text-center">No plans found.</p>
+        {{end}}
+
+        {{template "admin_pagination" .}}
+    </div>
+</div>
+
+<!-- Create Plan Modal -->
+<div class="modal fade" id="createPlanModal" tabindex="-1" aria-labelledby="createPlanModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="/dashboard/admin/plans">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold" id="createPlanModalLabel">Create Plan</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="createPlanName" class="form-label fw-semibold">Name</label>
+                        <input type="text" class="form-control" id="createPlanName" name="name" maxlength="100" required>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="createPlanCPU" class="form-label fw-semibold">CPU Cores</label>
+                            <input type="number" class="form-control" id="createPlanCPU" name="cpu_limit" min="1" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="createPlanMem" class="form-label fw-semibold">Memory (MB)</label>
+                            <input type="number" class="form-control" id="createPlanMem" name="mem_limit_mb" min="1" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="createPlanDisk" class="form-label fw-semibold">Disk (GB)</label>
+                            <input type="number" class="form-control" id="createPlanDisk" name="disk_limit_gb" min="1" required>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <label for="createPlanPrice" class="form-label fw-semibold">Price (cents)</label>
+                        <input type="number" class="form-control" id="createPlanPrice" name="price_cents" min="0" required>
+                        <div class="form-text">Example: 500 = $5.00 per 30 days.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Plan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit and Delete Modals -->
+{{range .Plans}}
+<div class="modal fade" id="editPlanModal-{{.ID}}" tabindex="-1" aria-labelledby="editPlanModalLabel-{{.ID}}" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="/dashboard/admin/plans/{{.ID}}">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold" id="editPlanModalLabel-{{.ID}}">Edit Plan: {{.Name}}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="editPlanName-{{.ID}}" class="form-label fw-semibold">Name</label>
+                        <input type="text" class="form-control" id="editPlanName-{{.ID}}" name="name" value="{{.Name}}" maxlength="100" required>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="editPlanCPU-{{.ID}}" class="form-label fw-semibold">CPU Cores</label>
+                            <input type="number" class="form-control" id="editPlanCPU-{{.ID}}" name="cpu_limit" value="{{.CPULimit}}" min="1" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="editPlanMem-{{.ID}}" class="form-label fw-semibold">Memory (MB)</label>
+                            <input type="number" class="form-control" id="editPlanMem-{{.ID}}" name="mem_limit_mb" value="{{.MemLimitMB}}" min="1" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="editPlanDisk-{{.ID}}" class="form-label fw-semibold">Disk (GB)</label>
+                            <input type="number" class="form-control" id="editPlanDisk-{{.ID}}" name="disk_limit_gb" value="{{.DiskLimitGB}}" min="1" required>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <label for="editPlanPrice-{{.ID}}" class="form-label fw-semibold">Price (cents)</label>
+                        <input type="number" class="form-control" id="editPlanPrice-{{.ID}}" name="price_cents" value="{{.PriceCents}}" min="0" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="deletePlanModal-{{.ID}}" tabindex="-1" aria-labelledby="deletePlanModalLabel-{{.ID}}" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="/dashboard/admin/plans/{{.ID}}/delete">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold text-danger" id="deletePlanModalLabel-{{.ID}}">Delete Plan</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    Are you sure you want to delete plan <strong>{{.Name}}</strong> (#{{.ID}})? Plans referenced by existing servers or orders cannot be deleted.
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">Delete Plan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{{end}}
+{{end}}

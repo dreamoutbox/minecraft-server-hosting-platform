@@ -85,6 +85,7 @@ func (s *Service) loadTemplates() {
 		"formatUSD": func(cents int64) string {
 			return fmt.Sprintf("$%.2f", float64(cents)/100.0)
 		},
+		"pageURL": adminPageURL,
 	}
 
 	pages := []string{
@@ -103,6 +104,12 @@ func (s *Service) loadTemplates() {
 		"users.html",
 		"billing.html",
 		"forbidden.html",
+		"admin_servers.html",
+		"admin_orders.html",
+		"admin_payments.html",
+		"admin_jobs.html",
+		"admin_logs.html",
+		"admin_plans.html",
 	}
 
 	for _, page := range pages {
@@ -110,6 +117,7 @@ func (s *Service) loadTemplates() {
 			templateFS,
 			"templates/layout.html",
 			"templates/server_subnav.html",
+			"templates/admin_controls.html",
 			"templates/"+page,
 		))
 		s.tmpl[page] = tmpl
@@ -379,7 +387,7 @@ func (s *Service) ExtendServerDuration(c *gin.Context) {
 
 // ShowServerDetail renders the server overview page.
 func (s *Service) ShowServerDetail(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -411,7 +419,7 @@ func (s *Service) ShowServerDetail(c *gin.Context) {
 //
 //	GET /dashboard/servers/:id/console?tail=200
 func (s *Service) ShowServerConsole(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -460,7 +468,7 @@ func (s *Service) ShowServerConsole(c *gin.Context) {
 //
 //	GET /dashboard/servers/:id/console/logs?tail=200
 func (s *Service) GetServerConsoleLogsJSON(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID"})
@@ -564,7 +572,7 @@ func (s *Service) SendConsoleCommand(c *gin.Context) {
 //
 //	GET /dashboard/servers/:id/logs
 func (s *Service) ShowServerLogs(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -633,7 +641,7 @@ func (s *Service) ShowServerJobs(c *gin.Context) {
 //
 //	GET /dashboard/servers/:id/backups
 func (s *Service) ShowServerBackups(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -674,7 +682,7 @@ func (s *Service) ShowServerBackups(c *gin.Context) {
 //
 //	GET /dashboard/servers/:id/settings
 func (s *Service) ShowServerSettings(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -969,7 +977,7 @@ func (s *Service) ListUsers(c *gin.Context) {
 	var users []domain.User
 	_ = s.db.WithContext(c.Request.Context()).Order("id asc").Find(&users).Error
 
-	s.renderView(c, "users.html", map[string]interface{}{
+	s.renderAdminView(c, "users.html", map[string]interface{}{
 		"Users": users,
 		"Roles": []domain.UserRole{domain.UserRoleUser, domain.UserRoleStaff, domain.UserRoleAdmin},
 	})
@@ -1067,6 +1075,19 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 
 		dash.GET("/users", s.ListUsers)
 		dash.POST("/users/:id/role", s.UpdateUserRole)
+
+		admin := dash.Group("/admin")
+		{
+			admin.GET("/servers", s.AdminListServers)
+			admin.GET("/orders", s.AdminListOrders)
+			admin.GET("/payments", s.AdminListPayments)
+			admin.GET("/jobs", s.AdminListJobs)
+			admin.GET("/logs", s.AdminListLogs)
+			admin.GET("/plans", s.AdminListPlans)
+			admin.POST("/plans", s.AdminCreatePlan)
+			admin.POST("/plans/:id", s.AdminUpdatePlan)
+			admin.POST("/plans/:id/delete", s.AdminDeletePlan)
+		}
 	}
 
 	// Redirect root to /dashboard
