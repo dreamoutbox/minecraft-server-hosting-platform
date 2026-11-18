@@ -433,3 +433,95 @@ func TestToolbarModalsWebEditAndZipDownload(t *testing.T) {
 		t.Fatalf("unexpected zipped content: %q", string(zippedBody))
 	}
 }
+
+func TestStreamingUploadConcurrencyAndOutOfOrderFields(t *testing.T) {
+	r, _, secret, serverDir, _ := setupFilesTestRouter(t)
+	h := r // setupFilesTestRouter uses 10MB limit
+
+	loginTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
+	if err != nil {
+		t.Fatalf("GenerateLoginToken: %v", err)
+	}
+	wLogin := httptest.NewRecorder()
+	reqLogin, _ := http.NewRequest(http.MethodGet, "/login?token="+url.QueryEscape(loginTok), nil)
+	r.ServeHTTP(wLogin, reqLogin)
+	cookie := extractSessionCookie(wLogin.Result())
+	if cookie == nil {
+		t.Fatal("expected session cookie")
+	}
+
+	// 1. Out-of-order multipart upload ('file' before 'path') still succeeds
+	var oooBuf bytes.Buffer
+	mw := multipart.NewWriter(&oooBuf)
+	part, _ := mw.CreateFormFile("file", "reverse-order.txt")
+	_, _ = part.Write([]byte("reverse-ok"))
+	_ = mw.WriteField("path", serverDir)
+	_ = mw.Close()
+
+	wOOO := httptest.NewRecorder()
+	reqOOO, _ := http.NewRequest(http.MethodPost, "/upload", &oooBuf)
+	reqOOO.Header.Set("Content-Type", mw.FormDataContentType())
+	reqOOO.AddCookie(cookie)
+	h.ServeHTTP(wOOO, reqOOO)
+	if wOOO.Code != http.StatusFound || !strings.Contains(wOOO.Header().Get("Location"), "success=") {
+		t.Fatalf("expected out-of-order upload success redirect, got code=%d loc=%s", wOOO.Code, wOOO.Header().Get("Location"))
+	}
+	got, err := os.ReadFile(filepath.Join(serverDir, "reverse-order.txt"))
+	if err != nil || string(got) != "reverse-ok" {
+		t.Fatalf("unexpected reverse-order.txt contents: %q (err=%v)", string(got), err)
+	}
+
+	// 2. Concurrent GET /files completes immediately while a slow streaming upload is in progress
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	pr, pw := io.Pipe()
+	mwStream := multipart.NewWriter(pw)
+	uploadDone := make(chan int, 1)
+	go func() {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/upload", pr)
+		req.Header.Set("Content-Type", mwStream.FormDataContentType())
+		req.AddCookie(cookie)
+		client := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			uploadDone <- 0
+			return
+		}
+		_ = resp.Body.Close()
+		uploadDone <- resp.StatusCode
+	}()
+
+	// Write path + start file part, then pause before closing the stream
+	_ = mwStream.WriteField("path", serverDir)
+	streamPart, _ := mwStream.CreateFormFile("file", "slow-stream.txt")
+	_, _ = streamPart.Write([]byte("first-chunk-"))
+
+	browseClient := &http.Client{Timeout: 2 * time.Second}
+	browseReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/files?path="+url.QueryEscape(serverDir), nil)
+	browseReq.AddCookie(cookie)
+	browseResp, err := browseClient.Do(browseReq)
+	if err != nil {
+		t.Fatalf("concurrent browse blocked while slow upload was open: %v", err)
+	}
+	_ = browseResp.Body.Close()
+	if browseResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on concurrent browse, got %d", browseResp.StatusCode)
+	}
+
+	_, _ = streamPart.Write([]byte("second-chunk"))
+	_ = mwStream.Close()
+	_ = pw.Close()
+
+	if code := <-uploadDone; code != http.StatusFound {
+		t.Fatalf("expected streaming upload to finish with 302, got %d", code)
+	}
+	streamed, err := os.ReadFile(filepath.Join(serverDir, "slow-stream.txt"))
+	if err != nil || string(streamed) != "first-chunk-second-chunk" {
+		t.Fatalf("unexpected slow-stream.txt contents: %q (err=%v)", string(streamed), err)
+	}
+}

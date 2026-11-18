@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -24,6 +25,7 @@ const SessionCookieName = "fs_session"
 const (
 	sessionCookieMaxAgeSeconds = 3600 * 24
 	maxEditableFileBytes       = MaxEditableFileBytes
+	maxUploadPathFieldBytes    = 4096
 )
 
 //go:embed templates/*
@@ -310,7 +312,8 @@ func (h *Handler) DownloadZip(c *gin.Context) {
 	}
 }
 
-// Upload stores an uploaded multipart file inside the authorized target directory.
+// Upload streams an uploaded multipart file directly into the authorized target directory
+// without buffering the entire payload to /tmp first when the 'path' field precedes 'file'.
 //
 // Arguments:
 //   - c: Active Gin request context with form field 'path' and multipart file 'file'.
@@ -327,31 +330,127 @@ func (h *Handler) Upload(c *gin.Context) {
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, h.maxUploadBytes)
 
-	dirPath := strings.TrimSpace(c.PostForm("path"))
-	perm, rel, err := h.authorizePath(c, userID, dirPath)
+	mr, err := c.Request.MultipartReader()
 	if err != nil {
+		redirectWithMessage(c, "", "", "Invalid upload request")
 		return
 	}
 
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
+	var (
+		dirPath     string
+		sawPath     bool
+		uploaded    bool
+		tmpFile     *os.File
+		tmpFilePath string
+		tmpFilename string
+	)
+	defer func() {
+		if tmpFile != nil {
+			_ = tmpFile.Close()
+		}
+		if tmpFilePath != "" {
+			_ = os.Remove(tmpFilePath)
+		}
+	}()
+
+	for {
+		part, nextErr := mr.NextPart()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			redirectUploadError(c, dirPath, nextErr)
+			return
+		}
+
+		switch part.FormName() {
+		case "path":
+			raw, readErr := io.ReadAll(io.LimitReader(part, maxUploadPathFieldBytes))
+			_ = part.Close()
+			if readErr != nil {
+				redirectUploadError(c, dirPath, readErr)
+				return
+			}
+			dirPath = strings.TrimSpace(string(raw))
+			sawPath = true
+
+		case "file":
+			filename := part.FileName()
+			if filename == "" {
+				_ = part.Close()
+				continue
+			}
+			if sawPath {
+				perm, rel, authErr := h.authorizePath(c, userID, dirPath)
+				if authErr != nil {
+					_ = part.Close()
+					return
+				}
+				saveErr := SaveUploadedFile(perm.DirPath, rel, filename, part)
+				_ = part.Close()
+				if saveErr != nil {
+					redirectUploadError(c, dirPath, saveErr)
+					return
+				}
+				uploaded = true
+			} else {
+				// Fallback if client sent 'file' before 'path' in multipart body.
+				tmpFile, err = os.CreateTemp("", "fileserver-upload-*")
+				if err != nil {
+					_ = part.Close()
+					redirectWithMessage(c, dirPath, "", "Failed preparing upload buffer")
+					return
+				}
+				tmpFilePath = tmpFile.Name()
+				tmpFilename = filename
+				if _, copyErr := io.Copy(tmpFile, part); copyErr != nil {
+					_ = part.Close()
+					redirectUploadError(c, dirPath, copyErr)
+					return
+				}
+				_ = part.Close()
+			}
+
+		default:
+			_ = part.Close()
+		}
+
+		if uploaded {
+			break
+		}
+	}
+
+	if !uploaded && tmpFile != nil {
+		perm, rel, authErr := h.authorizePath(c, userID, dirPath)
+		if authErr != nil {
+			return
+		}
+		if _, seekErr := tmpFile.Seek(0, io.SeekStart); seekErr != nil {
+			redirectWithMessage(c, dirPath, "", "Failed reading buffered upload")
+			return
+		}
+		if saveErr := SaveUploadedFile(perm.DirPath, rel, tmpFilename, tmpFile); saveErr != nil {
+			redirectUploadError(c, dirPath, saveErr)
+			return
+		}
+		uploaded = true
+	}
+
+	if !uploaded {
 		redirectWithMessage(c, dirPath, "", "No file selected or upload exceeded limit")
 		return
 	}
 
-	f, err := fileHeader.Open()
-	if err != nil {
-		redirectWithMessage(c, dirPath, "", "Failed opening uploaded file")
-		return
-	}
-	defer func() { _ = f.Close() }()
-
-	if err := SaveUploadedFile(perm.DirPath, rel, fileHeader.Filename, f); err != nil {
-		redirectWithMessage(c, dirPath, "", err.Error())
-		return
-	}
-
 	redirectWithMessage(c, dirPath, "File uploaded successfully", "")
+}
+
+func redirectUploadError(c *gin.Context, dirPath string, err error) {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		redirectWithMessage(c, dirPath, "", "No file selected or upload exceeded limit")
+		return
+	}
+	redirectWithMessage(c, dirPath, "", err.Error())
 }
 
 // MakeDir creates a new subdirectory under the authorized target directory.
