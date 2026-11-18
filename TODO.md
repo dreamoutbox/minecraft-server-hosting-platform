@@ -94,16 +94,24 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] show server connect domain on web dashboard. add field public_domain, public_ip to node host tables in postgres
 
-- [ ] add server expire datetime. user can extend with payment.
-- [ ] prevent user from starting server if server is expired
-- [ ] data retention 7 days after server expired
-- [ ] allow extend server duration if within 7 days after server expired
+- [x] add server expire datetime. user can extend with payment.
+- [x] prevent user from starting server if server is expired
+- [x] data retention 7 days after server expired
+- [x] allow extend server duration if within 7 days after server expired
 
-- [ ] move server create form panel to only admin/staff
-- [ ] add stripe webhooks to handle user payment
-- [ ] create server after purchase. place order create server in queue postgres table. and wait for worker to pick up and create server
+- [x] move server create form panel to only admin/staff
+- [x] add stripe webhooks to handle user payment
+- [x] create server after purchase. place order create server in queue postgres table. and wait for worker to pick up and create server
 
-- [ ] new CRON worker to create server from queue, stop expired server, delete server data after passed retention days
+- [x] new background worker to create server from queue, stop expired server, delete server data after passed retention days
+
+- [ ] add button to kill server. for unresponsive mc server.
+
+- [x] change "Create Your First Server" to "Buy Server" if user is not admin/staff
+
+---
+
+- [ ] restore from backup failed: failed importing volume contents on worker: import volume failed with code 500: {"error":"failed creating file /var/lib/mc-platform/mounts/1/.install-vanilla.env: open /var/lib/mc-platform/mounts/1/.install-vanilla.env: permission denied"}
 
 ---
 

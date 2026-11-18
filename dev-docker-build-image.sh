@@ -23,6 +23,7 @@ set -euo pipefail
 APISERVER_IMAGE="${APISERVER_IMAGE:-dreamoutbox/minecraft-hosting-apiserver:latest}"
 WORKER_IMAGE="${WORKER_IMAGE:-dreamoutbox/minecraft-hosting-worker:latest}"
 FILESERVER_IMAGE="${FILESERVER_IMAGE:-dreamoutbox/minecraft-hosting-fileserver:latest}"
+JOBWORKER_IMAGE="${JOBWORKER_IMAGE:-dreamoutbox/minecraft-hosting-jobworker:latest}"
 
 # build_apiserver_image compiles and packages the orchestrator binary into an Alpine container image.
 #
@@ -63,6 +64,19 @@ build_fileserver_image() {
 	echo "Fileserver image built successfully: ${FILESERVER_IMAGE}"
 }
 
+# build_jobworker_image compiles and packages the background jobworker binary into an Alpine container image.
+#
+# Arguments:
+#   $@: Extra arguments passed to docker build.
+#
+# Example usage:
+#   build_jobworker_image --no-cache
+build_jobworker_image() {
+	echo "Building jobworker image: ${JOBWORKER_IMAGE}..."
+	docker build -t "${JOBWORKER_IMAGE}" -f Dockerfile.jobworker . "$@"
+	echo "Jobworker image built successfully: ${JOBWORKER_IMAGE}"
+}
+
 # main orchestrates building all platform images.
 #
 # Arguments:
@@ -75,10 +89,12 @@ main() {
 	echo "  API server tag: ${APISERVER_IMAGE}"
 	echo "  Worker tag: ${WORKER_IMAGE}"
 	echo "  Fileserver tag: ${FILESERVER_IMAGE}"
+	echo "  Jobworker tag: ${JOBWORKER_IMAGE}"
 
 	build_apiserver_image "$@"
 	build_worker_image "$@"
 	build_fileserver_image "$@"
+	build_jobworker_image "$@"
 
 	echo "All platform images built successfully."
 }

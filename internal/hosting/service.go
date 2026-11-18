@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/google/uuid"
@@ -422,6 +423,9 @@ func (s *Service) StartServer(ctx context.Context, userID uint, serverID uint) (
 
 	if server.Status == domain.ServerStatusMigrating {
 		return nil, ErrServerMigrating
+	}
+	if server.IsExpired(time.Now()) {
+		return nil, errors.New("server has expired; please extend your subscription before starting")
 	}
 
 	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)

@@ -3,6 +3,9 @@ package billing
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +16,7 @@ import (
 
 	"github.com/dreamoutbox/authkit"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 )
@@ -262,4 +266,131 @@ func TestBillingHTTPRoutes(t *testing.T) {
 	if wList.Code != http.StatusOK {
 		t.Fatalf("list subscriptions failed: %d", wList.Code)
 	}
+}
+
+type mockCheckoutJobQueue struct {
+	db     *gorm.DB
+	hostID uint
+	calls  int
+}
+
+func (m *mockCheckoutJobQueue) EnqueueCreateServerWithExpiry(ctx context.Context, userID uint, name string, planID uint, serverType domain.ServerType, serverVersion string, expiresAt *time.Time) (*domain.Server, *domain.ServerJob, error) {
+	m.calls++
+	srv := domain.Server{
+		UserID:        userID,
+		PlanID:        planID,
+		HostID:        m.hostID,
+		Name:          name,
+		Port:          int(25800 + time.Now().UnixNano()%1000),
+		Status:        domain.ServerStatusPending,
+		ServerType:    serverType,
+		ServerVersion: serverVersion,
+		ExpiresAt:     expiresAt,
+	}
+	if err := m.db.WithContext(ctx).Create(&srv).Error; err != nil {
+		return nil, nil, err
+	}
+	return &srv, &domain.ServerJob{ID: uint(m.calls)}, nil
+}
+
+func signMockStripePayload(payload []byte, secret string) string {
+	ts := time.Now().Unix()
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = fmt.Fprintf(mac, "%d.%s", ts, string(payload))
+	return fmt.Sprintf("t=%d,v1=%s", ts, hex.EncodeToString(mac.Sum(nil)))
+}
+
+func TestCheckoutWebhookCreateAndExtendServer(t *testing.T) {
+	svc, _, _, user, srv, plan, _ := setupBillingTestEnv(t)
+	if svc == nil {
+		return
+	}
+	ctx := context.Background()
+
+	jq := &mockCheckoutJobQueue{db: svc.db, hostID: srv.HostID}
+	svc.SetJobQueue(jq)
+	svc.SetRetentionDays(7)
+
+	// 1. Create server checkout order
+	cs, order, err := svc.CreateServerCheckout(ctx, user.ID, plan.ID, "PaidWorld", domain.ServerTypePaper, "1.21.4")
+	if err != nil {
+		t.Fatalf("CreateServerCheckout failed: %v", err)
+	}
+	if cs.SessionID == "" || order.Status != domain.OrderStatusPending {
+		t.Fatalf("unexpected checkout result: session=%s status=%s", cs.SessionID, order.Status)
+	}
+
+	// 2. Simulate checkout.session.completed webhook
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": "checkout.session.completed",
+		"data": map[string]interface{}{
+			"object": map[string]interface{}{
+				"id":             cs.SessionID,
+				"payment_intent": fmt.Sprintf("pi_test_%d", time.Now().UnixNano()),
+				"amount_total":   plan.PriceCents,
+				"metadata": map[string]string{
+					"order_id": fmt.Sprintf("%d", order.ID),
+				},
+			},
+		},
+	})
+	sig := signMockStripePayload(payload, svc.webhookSecret)
+	if err := svc.HandleWebhook(ctx, payload, sig); err != nil {
+		t.Fatalf("HandleWebhook failed: %v", err)
+	}
+	// Idempotent duplicate delivery should not enqueue a second server
+	if err := svc.HandleWebhook(ctx, payload, sig); err != nil {
+		t.Fatalf("duplicate HandleWebhook failed: %v", err)
+	}
+	if jq.calls != 1 {
+		t.Fatalf("expected 1 enqueued server creation, got %d", jq.calls)
+	}
+
+	var fulfilledOrder domain.Order
+	_ = svc.db.First(&fulfilledOrder, order.ID)
+	if fulfilledOrder.Status != domain.OrderStatusFulfilled || fulfilledOrder.ServerID == nil {
+		t.Fatalf("expected order fulfilled with server_id, got status=%s server_id=%v", fulfilledOrder.Status, fulfilledOrder.ServerID)
+	}
+
+	var createdSrv domain.Server
+	_ = svc.db.First(&createdSrv, *fulfilledOrder.ServerID)
+	if createdSrv.ExpiresAt == nil || createdSrv.ExpiresAt.Before(time.Now().Add(29*24*time.Hour)) {
+		t.Fatalf("expected purchased server ExpiresAt ~30 days in future, got %v", createdSrv.ExpiresAt)
+	}
+
+	// 3. Extend server duration via checkout webhook
+	prevExp := *createdSrv.ExpiresAt
+	extCS, extOrder, err := svc.CreateExtendCheckout(ctx, user.ID, createdSrv.ID)
+	if err != nil {
+		t.Fatalf("CreateExtendCheckout failed: %v", err)
+	}
+	extPayload, _ := json.Marshal(map[string]interface{}{
+		"type": "checkout.session.completed",
+		"data": map[string]interface{}{
+			"object": map[string]interface{}{
+				"id":             extCS.SessionID,
+				"payment_intent": fmt.Sprintf("pi_ext_%d", time.Now().UnixNano()),
+				"amount_total":   plan.PriceCents,
+				"metadata": map[string]string{
+					"order_id": fmt.Sprintf("%d", extOrder.ID),
+				},
+			},
+		},
+	})
+	if err := svc.HandleWebhook(ctx, extPayload, signMockStripePayload(extPayload, svc.webhookSecret)); err != nil {
+		t.Fatalf("extension HandleWebhook failed: %v", err)
+	}
+	_ = svc.db.First(&createdSrv, createdSrv.ID)
+	if !createdSrv.ExpiresAt.After(prevExp.Add(29 * 24 * time.Hour)) {
+		t.Fatalf("expected extended ExpiresAt (+30d from %v), got %v", prevExp, createdSrv.ExpiresAt)
+	}
+
+	// 4. Reject extension if server is past 7-day retention
+	pastRetention := time.Now().Add(-8 * 24 * time.Hour)
+	_ = svc.db.Model(&createdSrv).Update("expires_at", pastRetention).Error
+	if _, _, err := svc.CreateExtendCheckout(ctx, user.ID, createdSrv.ID); err == nil {
+		t.Fatal("expected error extending server past 7-day retention")
+	}
+
+	_ = svc.db.Delete(&createdSrv).Error
 }

@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v81"
+	"github.com/stripe/stripe-go/v81/checkout/session"
 	"github.com/stripe/stripe-go/v81/paymentintent"
 	"github.com/stripe/stripe-go/v81/paymentmethod"
 	"github.com/stripe/stripe-go/v81/refund"
@@ -34,10 +36,29 @@ type PaymentResult struct {
 type WebhookEvent struct {
 	Type         string               `json:"type"`
 	PaymentID    string               `json:"payment_id"`
+	SessionID    string               `json:"session_id,omitempty"`
+	OrderID      uint                 `json:"order_id,omitempty"`
 	AmountCents  int64                `json:"amount_cents"`
 	CustomerID   string               `json:"customer_id"`
 	Status       domain.PaymentStatus `json:"status"`
 	SignatureKey string               `json:"-"`
+}
+
+// CheckoutSessionRequest holds parameters for creating a hosted Stripe Checkout session.
+type CheckoutSessionRequest struct {
+	OrderID     uint
+	UserEmail   string
+	ProductName string
+	Description string
+	AmountCents int64
+	SuccessURL  string
+	CancelURL   string
+}
+
+// CheckoutSessionResult holds the created hosted checkout session ID and redirect URL.
+type CheckoutSessionResult struct {
+	SessionID   string `json:"session_id"`
+	CheckoutURL string `json:"checkout_url"`
 }
 
 // PaymentProvider defines payment operations for moving money and verifying webhook notifications.
@@ -48,6 +69,7 @@ type PaymentProvider interface {
 	Refund(ctx context.Context, paymentID string) error
 	SavePaymentMethod(ctx context.Context, customerID string, paymentMethodID string) error
 	ChargeSavedPaymentMethod(ctx context.Context, customerID string, paymentMethodID string, amountCents int64, description string) (*PaymentResult, error)
+	CreateCheckoutSession(ctx context.Context, req CheckoutSessionRequest) (*CheckoutSessionResult, error)
 	VerifyWebhookSignature(payload []byte, signatureHeader string, secret string) (*WebhookEvent, error)
 }
 
@@ -211,10 +233,13 @@ func (m *MockPaymentProvider) VerifyWebhookSignature(payload []byte, signatureHe
 		Type string `json:"type"`
 		Data struct {
 			Object struct {
-				ID       string `json:"id"`
-				Amount   int64  `json:"amount"`
-				Customer string `json:"customer"`
-				Status   string `json:"status"`
+				ID            string            `json:"id"`
+				Amount        int64             `json:"amount"`
+				AmountTotal   int64             `json:"amount_total"`
+				Customer      string            `json:"customer"`
+				PaymentIntent string            `json:"payment_intent"`
+				Status        string            `json:"status"`
+				Metadata      map[string]string `json:"metadata"`
 			} `json:"object"`
 		} `json:"data"`
 	}
@@ -228,12 +253,43 @@ func (m *MockPaymentProvider) VerifyWebhookSignature(payload []byte, signatureHe
 		status = domain.PaymentStatusFailed
 	}
 
+	paymentID := root.Data.Object.ID
+	amountCents := root.Data.Object.Amount
+	var sessionID string
+	var orderID uint
+
+	if root.Type == "checkout.session.completed" {
+		sessionID = root.Data.Object.ID
+		if root.Data.Object.PaymentIntent != "" {
+			paymentID = root.Data.Object.PaymentIntent
+		}
+		if root.Data.Object.AmountTotal > 0 {
+			amountCents = root.Data.Object.AmountTotal
+		}
+		if rawOrderID := root.Data.Object.Metadata["order_id"]; rawOrderID != "" {
+			if parsed, convErr := strconv.ParseUint(rawOrderID, 10, 64); convErr == nil {
+				orderID = uint(parsed)
+			}
+		}
+	}
+
 	return &WebhookEvent{
 		Type:        root.Type,
-		PaymentID:   root.Data.Object.ID,
-		AmountCents: root.Data.Object.Amount,
+		PaymentID:   paymentID,
+		SessionID:   sessionID,
+		OrderID:     orderID,
+		AmountCents: amountCents,
 		CustomerID:  root.Data.Object.Customer,
 		Status:      status,
+	}, nil
+}
+
+// CreateCheckoutSession returns a simulated hosted checkout session for local development and tests.
+func (m *MockPaymentProvider) CreateCheckoutSession(ctx context.Context, req CheckoutSessionRequest) (*CheckoutSessionResult, error) {
+	sessionID := fmt.Sprintf("mock_cs_%s", uuid.New().String())
+	return &CheckoutSessionResult{
+		SessionID:   sessionID,
+		CheckoutURL: req.SuccessURL,
 	}, nil
 }
 
@@ -330,18 +386,83 @@ func (s *StripePaymentProvider) ChargeSavedPaymentMethod(ctx context.Context, cu
 	}, nil
 }
 
+// CreateCheckoutSession creates a hosted Stripe Checkout session for a server purchase or extension.
+func (s *StripePaymentProvider) CreateCheckoutSession(ctx context.Context, req CheckoutSessionRequest) (*CheckoutSessionResult, error) {
+	orderIDStr := strconv.FormatUint(uint64(req.OrderID), 10)
+	params := &stripe.CheckoutSessionParams{
+		Mode:              stripe.String(string(stripe.CheckoutSessionModePayment)),
+		SuccessURL:        stripe.String(req.SuccessURL),
+		CancelURL:         stripe.String(req.CancelURL),
+		ClientReferenceID: stripe.String(orderIDStr),
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				Quantity: stripe.Int64(1),
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency:   stripe.String(string(stripe.CurrencyUSD)),
+					UnitAmount: stripe.Int64(req.AmountCents),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name:        stripe.String(req.ProductName),
+						Description: stripe.String(req.Description),
+					},
+				},
+			},
+		},
+		Metadata: map[string]string{
+			"order_id": orderIDStr,
+		},
+	}
+	if req.UserEmail != "" {
+		params.CustomerEmail = stripe.String(req.UserEmail)
+	}
+
+	cs, err := session.New(params)
+	if err != nil {
+		return nil, fmt.Errorf("stripe checkout session creation failed: %w", err)
+	}
+
+	return &CheckoutSessionResult{
+		SessionID:   cs.ID,
+		CheckoutURL: cs.URL,
+	}, nil
+}
+
 func (s *StripePaymentProvider) VerifyWebhookSignature(payload []byte, signatureHeader string, secret string) (*WebhookEvent, error) {
-	event, err := webhook.ConstructEvent(payload, signatureHeader, secret)
+	event, err := webhook.ConstructEventWithOptions(payload, signatureHeader, secret, webhook.ConstructEventOptions{
+		IgnoreAPIVersionMismatch: true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("stripe signature verification failed: %w", err)
 	}
 
 	var status domain.PaymentStatus
 	var paymentID string
+	var sessionID string
+	var orderID uint
 	var amount int64
 	var customerID string
 
 	switch event.Type {
+	case "checkout.session.completed":
+		status = domain.PaymentStatusSucceeded
+		if sid, ok := event.Data.Object["id"].(string); ok {
+			sessionID = sid
+		}
+		if pi, ok := event.Data.Object["payment_intent"].(string); ok {
+			paymentID = pi
+		}
+		if amt, ok := event.Data.Object["amount_total"].(float64); ok {
+			amount = int64(amt)
+		}
+		if cust, ok := event.Data.Object["customer"].(string); ok {
+			customerID = cust
+		}
+		if meta, ok := event.Data.Object["metadata"].(map[string]interface{}); ok {
+			if rawOrderID, ok := meta["order_id"].(string); ok {
+				if parsed, convErr := strconv.ParseUint(rawOrderID, 10, 64); convErr == nil {
+					orderID = uint(parsed)
+				}
+			}
+		}
 	case "payment_intent.succeeded":
 		status = domain.PaymentStatusSucceeded
 		if pi, ok := event.Data.Object["id"].(string); ok {
@@ -368,6 +489,8 @@ func (s *StripePaymentProvider) VerifyWebhookSignature(payload []byte, signature
 	return &WebhookEvent{
 		Type:        string(event.Type),
 		PaymentID:   paymentID,
+		SessionID:   sessionID,
+		OrderID:     orderID,
 		AmountCents: amount,
 		CustomerID:  customerID,
 		Status:      status,

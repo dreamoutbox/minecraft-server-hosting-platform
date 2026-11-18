@@ -6,7 +6,7 @@ services:
     container_name: docker-stripe
     environment:
       - STRIPE_API_KEY=${STRIPE_SECRET_KEY:-NOT_SET}
-      - FORWARD_TO=http://host.docker.internal:8080/stripe
+      - FORWARD_TO=http://host.docker.internal:8080/api/v1/billing/webhook
     networks:
       - mc_platform_net
     # restart: always

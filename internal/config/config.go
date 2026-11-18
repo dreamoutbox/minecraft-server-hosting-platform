@@ -13,6 +13,8 @@ type Config struct {
 	PortRangeMin                 int
 	PortRangeMax                 int
 	JWTSecret                    string
+	AppBaseURL                   string
+	RetentionDays                int
 	BillingProvider              string
 	StripeSecretKey              string
 	StripeWebhookSecret          string
@@ -47,8 +49,20 @@ func LoadFromEnv() (*Config, error) {
 	dbName := getEnv("DB_NAME", "minecraft_hosting")
 	dbSSL := getEnv("DB_SSLMODE", "disable")
 	jwtSecret := getEnv("JWT_SECRET", "dev-platform-jwt-secret-key-change-in-prod")
-	billingProvider := getEnv("BILLING_PROVIDER", "mock")
+	appBaseURL := getEnv("APP_BASE_URL", "http://localhost:8080")
+	retentionDays, err := parseEnvInt("RETENTION_DAYS", 7)
+	if err != nil || retentionDays <= 0 {
+		retentionDays = 7
+	}
+	billingProvider := getEnv("BILLING_PROVIDER", "")
 	stripeSecretKey := getEnv("STRIPE_SECRET_KEY", "")
+	if billingProvider == "" {
+		if stripeSecretKey != "" {
+			billingProvider = "stripe"
+		} else {
+			billingProvider = "mock"
+		}
+	}
 	stripeWebhookSecret := getEnv("STRIPE_WEBHOOK_SECRET", "whsec_dev_mock_key")
 	defaultWorkerURL := getEnv("DEFAULT_WORKER_URL", "")
 	defaultWorkerKey := getEnv("DEFAULT_WORKER_KEY", "dev-worker-key")
@@ -87,6 +101,8 @@ func LoadFromEnv() (*Config, error) {
 		PortRangeMin:                 minPort,
 		PortRangeMax:                 maxPort,
 		JWTSecret:                    jwtSecret,
+		AppBaseURL:                   appBaseURL,
+		RetentionDays:                retentionDays,
 		BillingProvider:              billingProvider,
 		StripeSecretKey:              stripeSecretKey,
 		StripeWebhookSecret:          stripeWebhookSecret,

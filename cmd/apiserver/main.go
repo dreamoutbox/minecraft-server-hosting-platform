@@ -4,9 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/dreamoutbox/authkit"
 	fsclient "github.com/dreamoutbox/fileserver/client"
@@ -119,6 +117,9 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 		paymentProvider = billing.NewMockPaymentProvider()
 	}
 	billingService := billing.NewService(db, paymentProvider, hostingService, cfg.StripeWebhookSecret)
+	billingService.SetJobQueue(jobService)
+	billingService.SetAppBaseURL(cfg.AppBaseURL)
+	billingService.SetRetentionDays(cfg.RetentionDays)
 	billingHandler := billing.NewHandler(billingService)
 	billingHandler.RegisterRoutes(r, cfg.JWTSecret)
 
@@ -168,12 +169,7 @@ func main() {
 		log.Printf("[WARN] failed seeding default worker host: %v", err)
 	}
 
-	r, jobService := buildRouter(db, cfg)
-
-	sigCtx, stopSig := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stopSig()
-	stopQueue := jobService.Start(sigCtx)
-	defer stopQueue()
+	r, _ := buildRouter(db, cfg)
 
 	log.Printf("Server listening on port %s (Port Range: %d-%d)", cfg.ServerPort, cfg.PortRangeMin, cfg.PortRangeMax)
 	if err := r.Run(":" + cfg.ServerPort); err != nil {

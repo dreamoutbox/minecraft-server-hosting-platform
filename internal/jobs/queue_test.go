@@ -328,3 +328,113 @@ func TestAsyncQueueRetryAndOperationLogs(t *testing.T) {
 		}
 	}
 }
+
+func TestLifecycleExpirationAndRetentionSweep(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_DSN")
+	if dsn == "" {
+		dsn = "host=localhost user=postgres password=postgrespassword dbname=minecraft_hosting port=5432 sslmode=disable"
+	}
+	db, err := domain.InitDB(dsn)
+	if err != nil {
+		t.Skipf("skipping test: database unreachable: %v", err)
+		return
+	}
+	_ = domain.AutoMigrate(db)
+	_ = domain.SeedPlans(db)
+
+	host := domain.Host{
+		Hostname:      fmt.Sprintf("lifecycle-host-%d", time.Now().UnixNano()),
+		WorkerBaseURL: "http://lifecycle-host:9090",
+		APIKey:        "k",
+		APIKeyHash:    fmt.Sprintf("h-life-%d", time.Now().UnixNano()),
+		MaxServers:    20,
+		Status:        domain.HostStatusActive,
+	}
+	_ = db.Create(&host).Error
+
+	user := domain.User{
+		Email:        fmt.Sprintf("lifecycle-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hashed",
+		Role:         domain.UserRoleUser,
+	}
+	_ = db.Create(&user).Error
+
+	var plan domain.Plan
+	_ = db.First(&plan)
+
+	tw := &queueTestWorker{}
+	workerFactory := func(baseURL string, apiKey string) worker.Client { return tw }
+	scheduler := hosting.NewLeastLoadedScheduler(db)
+	portAlloc := hosting.NewPortAllocator(db, 26700, 26800)
+	hostingSvc := hosting.NewService(db, scheduler, portAlloc, workerFactory)
+	backupSvc := backup.NewService(db, storage.NewMemoryStorageProvider(), workerFactory)
+	jobSvc := NewService(db, hostingSvc, backupSvc)
+
+	ctx := context.Background()
+	now := time.Now()
+
+	// 1. Server expired 1 hour ago (still running, within 7-day retention) -> should be stopped, NOT deleted
+	expRecent := now.Add(-1 * time.Hour)
+	srvRecent := domain.Server{
+		UserID:      user.ID,
+		PlanID:      plan.ID,
+		HostID:      host.ID,
+		Name:        "ExpiredRecent",
+		Port:        int(26700 + now.UnixNano()%50),
+		Status:      domain.ServerStatusRunning,
+		ContainerID: "ctr-expired-recent",
+		ExpiresAt:   &expRecent,
+	}
+	if err := db.Create(&srvRecent).Error; err != nil {
+		t.Fatalf("failed creating expired running server: %v", err)
+	}
+
+	// 2. Server expired 8 days ago (past 7-day retention) -> should be deleted
+	expOld := now.Add(-8 * 24 * time.Hour)
+	srvOld := domain.Server{
+		UserID:      user.ID,
+		PlanID:      plan.ID,
+		HostID:      host.ID,
+		Name:        "ExpiredOld",
+		Port:        int(26751 + now.UnixNano()%49),
+		Status:      domain.ServerStatusStopped,
+		ContainerID: "ctr-expired-old",
+		ExpiresAt:   &expOld,
+	}
+	if err := db.Create(&srvOld).Error; err != nil {
+		t.Fatalf("failed creating retention-expired server: %v", err)
+	}
+
+	stopped, err := jobSvc.ProcessExpiredServers(ctx, now)
+	if err != nil {
+		t.Fatalf("ProcessExpiredServers failed: %v", err)
+	}
+	if stopped < 1 {
+		t.Errorf("expected at least 1 stopped server, got %d", stopped)
+	}
+	var reloadedRecent domain.Server
+	_ = db.First(&reloadedRecent, srvRecent.ID)
+	if reloadedRecent.Status != domain.ServerStatusStopped {
+		t.Errorf("expected ExpiredRecent status stopped, got %s", reloadedRecent.Status)
+	}
+
+	deleted, err := jobSvc.CleanupRetentionServers(ctx, now, 7)
+	if err != nil {
+		t.Fatalf("CleanupRetentionServers failed: %v", err)
+	}
+	if deleted < 1 {
+		t.Errorf("expected at least 1 deleted server, got %d", deleted)
+	}
+	var countOld int64
+	_ = db.Model(&domain.Server{}).Where("id = ?", srvOld.ID).Count(&countOld)
+	if countOld != 0 {
+		t.Errorf("expected ExpiredOld server %d to be deleted, still exists", srvOld.ID)
+	}
+	var countRecent int64
+	_ = db.Model(&domain.Server{}).Where("id = ?", srvRecent.ID).Count(&countRecent)
+	if countRecent != 1 {
+		t.Errorf("expected ExpiredRecent server %d to remain during 7-day retention", srvRecent.ID)
+	}
+
+	_ = db.Delete(&reloadedRecent).Error
+}

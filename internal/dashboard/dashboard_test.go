@@ -248,31 +248,69 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 		t.Fatalf("save payment method failed: %d", wPM.Code)
 	}
 
-	// 4. View /dashboard/servers/new
-	wNewSrv := httptest.NewRecorder()
-	reqNewSrv, _ := http.NewRequest(http.MethodGet, "/dashboard/servers/new", nil)
-	reqNewSrv.AddCookie(authCookie)
-	r.ServeHTTP(wNewSrv, reqNewSrv)
-	if wNewSrv.Code != http.StatusOK || !strings.Contains(wNewSrv.Body.String(), "Create Minecraft Server") {
-		t.Fatalf("create server page failed: %d", wNewSrv.Code)
+	// 4. Regular user cannot access /dashboard/servers/new (staff/admin only), but can access /dashboard/servers/buy
+	wNewForbidden := httptest.NewRecorder()
+	reqNewForbidden, _ := http.NewRequest(http.MethodGet, "/dashboard/servers/new", nil)
+	reqNewForbidden.AddCookie(authCookie)
+	r.ServeHTTP(wNewForbidden, reqNewForbidden)
+	if wNewForbidden.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on /dashboard/servers/new for regular user, got %d", wNewForbidden.Code)
 	}
 
-	// 5. Create Server: POST /dashboard/servers/new returns immediately with queued pending server
+	wBuyPage := httptest.NewRecorder()
+	reqBuyPage, _ := http.NewRequest(http.MethodGet, "/dashboard/servers/buy", nil)
+	reqBuyPage.AddCookie(authCookie)
+	r.ServeHTTP(wBuyPage, reqBuyPage)
+	if wBuyPage.Code != http.StatusOK || !strings.Contains(wBuyPage.Body.String(), "Purchase Minecraft Server") {
+		t.Fatalf("buy server page failed: %d", wBuyPage.Code)
+	}
+
 	var plan domain.Plan
 	_ = dashSvc.db.First(&plan)
 
-	srvName := fmt.Sprintf("DashboardSurvival-%d", time.Now().UnixNano())
-	formSrv := url.Values{}
-	formSrv.Set("name", srvName)
-	formSrv.Set("plan_id", fmt.Sprintf("%d", plan.ID))
-	wCreateSrv := httptest.NewRecorder()
-	reqCreateSrv, _ := http.NewRequest(http.MethodPost, "/dashboard/servers/new", strings.NewReader(formSrv.Encode()))
-	reqCreateSrv.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	reqCreateSrv.AddCookie(authCookie)
-	r.ServeHTTP(wCreateSrv, reqCreateSrv)
+	buySrvName := fmt.Sprintf("BoughtWorld-%d", time.Now().UnixNano())
+	buyForm := url.Values{}
+	buyForm.Set("name", buySrvName)
+	buyForm.Set("plan_id", fmt.Sprintf("%d", plan.ID))
+	buyForm.Set("server_type", "VANILLA")
+	buyForm.Set("server_version", "LATEST")
+	wBuyPost := httptest.NewRecorder()
+	reqBuyPost, _ := http.NewRequest(http.MethodPost, "/dashboard/servers/buy", strings.NewReader(buyForm.Encode()))
+	reqBuyPost.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqBuyPost.AddCookie(authCookie)
+	r.ServeHTTP(wBuyPost, reqBuyPost)
+	if wBuyPost.Code != http.StatusSeeOther || wBuyPost.Header().Get("Location") == "" {
+		t.Fatalf("buy server post failed: code=%d location=%s", wBuyPost.Code, wBuyPost.Header().Get("Location"))
+	}
 
-	if wCreateSrv.Code != http.StatusFound {
-		t.Fatalf("create server post failed: %d, body: %s", wCreateSrv.Code, wCreateSrv.Body.String())
+	// 5. Staff/Admin can access /dashboard/servers/new and queue direct server creation
+	staffCreateTokens, _ := authkit.GenerateTokenPair(999999, "staff@example.com", domain.UserRoleStaff, dashSvc.jwtSecret)
+	staffCreateCookie := &http.Cookie{Name: "token", Value: staffCreateTokens.AccessToken}
+
+	wNewSrv := httptest.NewRecorder()
+	reqNewSrv, _ := http.NewRequest(http.MethodGet, "/dashboard/servers/new", nil)
+	reqNewSrv.AddCookie(staffCreateCookie)
+	r.ServeHTTP(wNewSrv, reqNewSrv)
+	if wNewSrv.Code != http.StatusOK || !strings.Contains(wNewSrv.Body.String(), "Create Minecraft Server") {
+		t.Fatalf("create server page failed for staff: %d", wNewSrv.Code)
+	}
+
+	// Create Server for test user via EnqueueCreateServer (simulating webhook fulfillment)
+	srvName := fmt.Sprintf("DashboardSurvival-%d", time.Now().UnixNano())
+	var userRecord domain.User
+	_ = dashSvc.db.Where("email = ?", uniqueEmail).First(&userRecord)
+	exp := time.Now().Add(30 * 24 * time.Hour)
+	createdSrv, _, createErr := dashSvc.jobSvc.EnqueueCreateServerWithExpiry(
+		context.Background(),
+		userRecord.ID,
+		srvName,
+		plan.ID,
+		domain.ServerTypeVanilla,
+		domain.DefaultServerVersion,
+		&exp,
+	)
+	if createErr != nil || createdSrv == nil {
+		t.Fatalf("failed queueing test server: %v", createErr)
 	}
 
 	// Verify server was queued with pending status before job runs

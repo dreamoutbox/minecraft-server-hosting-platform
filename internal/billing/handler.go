@@ -2,6 +2,7 @@ package billing
 
 import (
 	"io"
+	"log"
 	"net/http"
 
 	"github.com/dreamoutbox/authkit"
@@ -143,6 +144,7 @@ func (h *Handler) Webhook(c *gin.Context) {
 	}
 
 	if err := h.service.HandleWebhook(c.Request.Context(), payload, sigHeader); err != nil {
+		log.Printf("[WARN] billing webhook failed: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

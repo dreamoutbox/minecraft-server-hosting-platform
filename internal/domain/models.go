@@ -158,12 +158,14 @@ func ValidateServerVersion(raw string) (string, error) {
 type ServerOperationType string
 
 const (
-	ServerOpCreate         ServerOperationType = "create"
-	ServerOpStop           ServerOperationType = "stop"
-	ServerOpDelete         ServerOperationType = "delete"
-	ServerOpBackup         ServerOperationType = "backup"
-	ServerOpRestore        ServerOperationType = "restore"
-	ServerOpConsoleCommand ServerOperationType = "console_command"
+	ServerOpCreate          ServerOperationType = "create"
+	ServerOpStop            ServerOperationType = "stop"
+	ServerOpDelete          ServerOperationType = "delete"
+	ServerOpBackup          ServerOperationType = "backup"
+	ServerOpRestore         ServerOperationType = "restore"
+	ServerOpConsoleCommand  ServerOperationType = "console_command"
+	ServerOpExpireStop      ServerOperationType = "expire_stop"
+	ServerOpRetentionDelete ServerOperationType = "retention_delete"
 )
 
 // ServerLogStatus represents the final outcome of an audited server operation.
@@ -240,6 +242,7 @@ type Server struct {
 	MountPath     string       `gorm:"type:varchar(255)" json:"mount_path"`
 	ServerType    ServerType   `gorm:"type:varchar(32);not null;default:'VANILLA'" json:"server_type"`
 	ServerVersion string       `gorm:"type:varchar(32);not null;default:'LATEST'" json:"server_version"`
+	ExpiresAt     *time.Time   `gorm:"index" json:"expires_at,omitempty"`
 	CreatedAt     time.Time    `json:"created_at"`
 	UpdatedAt     time.Time    `json:"updated_at"`
 
@@ -283,6 +286,77 @@ func (s Server) ConnectIPAddress() string {
 		return ""
 	}
 	return fmt.Sprintf("%s:%d", s.Host.PublicIP, s.Port)
+}
+
+// IsExpired reports whether the server has an expiration timestamp in the past.
+// Servers with nil ExpiresAt (e.g. admin-provisioned) do not expire automatically.
+//
+// Arguments:
+//   - now: Current timestamp to compare against.
+//
+// Example usage:
+//
+//	if server.IsExpired(time.Now()) { ... }
+func (s Server) IsExpired(now time.Time) bool {
+	if s.ExpiresAt == nil {
+		return false
+	}
+	return !s.ExpiresAt.After(now)
+}
+
+// IsWithinRetention reports whether an expired server is still within the grace retention window.
+// Non-expired servers return true.
+//
+// Arguments:
+//   - now: Current timestamp.
+//   - retentionDays: Grace period in days after ExpiresAt before permanent deletion.
+//
+// Example usage:
+//
+//	if server.IsWithinRetention(time.Now(), 7) { ... }
+func (s Server) IsWithinRetention(now time.Time, retentionDays int) bool {
+	if s.ExpiresAt == nil {
+		return true
+	}
+	cutoff := s.ExpiresAt.Add(time.Duration(retentionDays) * 24 * time.Hour)
+	return now.Before(cutoff)
+}
+
+// OrderType identifies the purpose of a Stripe Checkout order.
+type OrderType string
+
+const (
+	OrderTypeCreateServer OrderType = "create_server"
+	OrderTypeExtendServer OrderType = "extend_server"
+)
+
+// OrderStatus tracks payment and fulfillment state for a checkout order.
+type OrderStatus string
+
+const (
+	OrderStatusPending   OrderStatus = "pending"
+	OrderStatusPaid      OrderStatus = "paid"
+	OrderStatusFulfilled OrderStatus = "fulfilled"
+	OrderStatusExpired   OrderStatus = "expired"
+	OrderStatusFailed    OrderStatus = "failed"
+)
+
+// Order records a pending or completed Stripe Checkout purchase before and after fulfillment.
+type Order struct {
+	ID              uint        `gorm:"primaryKey" json:"id"`
+	UserID          uint        `gorm:"index;not null" json:"user_id"`
+	PlanID          uint        `gorm:"not null" json:"plan_id"`
+	ServerID        *uint       `gorm:"index" json:"server_id,omitempty"`
+	OrderType       OrderType   `gorm:"type:varchar(32);not null" json:"order_type"`
+	ServerName      string      `gorm:"type:varchar(128);not null;default:''" json:"server_name"`
+	ServerType      ServerType  `gorm:"type:varchar(32);not null;default:'VANILLA'" json:"server_type"`
+	ServerVersion   string      `gorm:"type:varchar(32);not null;default:'LATEST'" json:"server_version"`
+	DurationDays    int         `gorm:"not null;default:30" json:"duration_days"`
+	StripeSessionID string      `gorm:"type:varchar(255);uniqueIndex" json:"stripe_session_id"`
+	AmountCents     int64       `gorm:"not null" json:"amount_cents"`
+	Status          OrderStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
 }
 
 // Subscription tracks recurring billing state managed by platform cron.

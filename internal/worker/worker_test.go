@@ -70,7 +70,7 @@ func (m *mockContainerManager) GetLogs(ctx context.Context, containerID string, 
 	}, nil
 }
 
-func (m *mockContainerManager) ExecCommand(ctx context.Context, containerID string, command string) (*ExecCommandResponse, error) {
+func (m *mockContainerManager) ExecCommand(ctx context.Context, containerID string, user string, command string) (*ExecCommandResponse, error) {
 	return &ExecCommandResponse{
 		ContainerID: containerID,
 		Command:     command,

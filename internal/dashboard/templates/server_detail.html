@@ -50,13 +50,28 @@
         </div>
 
         <div class="d-flex flex-wrap gap-2 mt-4">
-            {{if eq .Server.Status "running"}}
+            {{if .IsExpired}}
+            <div class="alert alert-danger py-2 px-3 mb-2 w-100 small">
+                This server has expired.{{if .CanExtend}} Extend within the 7-day retention window to restore access before data is permanently deleted.{{end}}
+            </div>
+            {{else if .Server.ExpiresAt}}
+            <div class="text-muted small w-100 mb-1">
+                Expires: <strong>{{.Server.ExpiresAt.Format "2006-01-02 15:04"}}</strong>
+            </div>
+            {{end}}
+
+            {{if and (eq .Server.Status "running") (not .IsExpired)}}
             <form method="POST" action="/dashboard/servers/{{.Server.ID}}/stop">
                 <button type="submit" class="btn btn-warning">Stop Server</button>
             </form>
-            {{else if eq .Server.Status "stopped"}}
+            {{else if and (eq .Server.Status "stopped") (not .IsExpired)}}
             <form method="POST" action="/dashboard/servers/{{.Server.ID}}/start">
                 <button type="submit" class="btn btn-success">Start Server</button>
+            </form>
+            {{end}}
+            {{if .CanExtend}}
+            <form method="POST" action="/dashboard/servers/{{.Server.ID}}/extend">
+                <button type="submit" class="btn btn-outline-success">Extend 30 Days</button>
             </form>
             {{end}}
             <a href="/dashboard/servers/{{.Server.ID}}/files/open" target="_blank" rel="noopener" class="btn btn-outline-primary">Manage Files</a>

@@ -87,9 +87,36 @@ func (s *Service) SetTimings(pollInterval, retryBackoff time.Duration) {
 //
 //	srv, job, err := jobSvc.EnqueueCreateServer(ctx, user.ID, "MyWorld", plan.ID, domain.ServerTypeVanilla, "LATEST")
 func (s *Service) EnqueueCreateServer(ctx context.Context, userID uint, name string, planID uint, serverType domain.ServerType, serverVersion string) (*domain.Server, *domain.ServerJob, error) {
+	return s.EnqueueCreateServerWithExpiry(ctx, userID, name, planID, serverType, serverVersion, nil)
+}
+
+// EnqueueCreateServerWithExpiry creates a pending server record with an optional expiration timestamp
+// and queues async provisioning so callers do not block.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Server owner ID.
+//   - name: Desired server display name.
+//   - planID: Hardware plan tier ID.
+//   - serverType: Minecraft server jar type (defaults to VANILLA).
+//   - serverVersion: Minecraft version tag (defaults to LATEST).
+//   - expiresAt: Optional expiration timestamp (nil for non-expiring admin servers).
+//
+// Example usage:
+//
+//	exp := time.Now().AddDate(0, 0, 30)
+//	srv, job, err := jobSvc.EnqueueCreateServerWithExpiry(ctx, user.ID, "MyWorld", plan.ID, domain.ServerTypeVanilla, "LATEST", &exp)
+func (s *Service) EnqueueCreateServerWithExpiry(ctx context.Context, userID uint, name string, planID uint, serverType domain.ServerType, serverVersion string, expiresAt *time.Time) (*domain.Server, *domain.ServerJob, error) {
 	server, err := s.hostingSvc.PreparePendingServer(ctx, userID, name, planID, serverType, serverVersion)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	if expiresAt != nil {
+		if err := s.db.WithContext(ctx).Model(server).Update("expires_at", expiresAt).Error; err != nil {
+			return nil, nil, fmt.Errorf("failed setting server expiration: %w", err)
+		}
+		server.ExpiresAt = expiresAt
 	}
 
 	job, err := s.createJob(ctx, domain.ServerJob{
@@ -353,18 +380,19 @@ func (s *Service) ListServerJobs(ctx context.Context, serverID uint, limit int) 
 //
 //	processed, err := jobSvc.ProcessNext(ctx)
 func (s *Service) ProcessNext(ctx context.Context) (bool, error) {
-	var candidate domain.ServerJob
+	var candidates []domain.ServerJob
 	now := time.Now()
-	err := s.db.WithContext(ctx).
+	if err := s.db.WithContext(ctx).
 		Where("status = ? AND next_run_at <= ?", domain.JobStatusPending, now).
 		Order("next_run_at asc, id asc").
-		First(&candidate).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, nil
-		}
+		Limit(1).
+		Find(&candidates).Error; err != nil {
 		return false, err
 	}
+	if len(candidates) == 0 {
+		return false, nil
+	}
+	candidate := candidates[0]
 
 	claimRes := s.db.WithContext(ctx).Model(&domain.ServerJob{}).
 		Where("id = ? AND status = ?", candidate.ID, domain.JobStatusPending).
@@ -384,8 +412,11 @@ func (s *Service) ProcessNext(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
+	log.Printf("[INFO] processing job id=%d type=%s server_id=%d attempt=%d/%d", candidate.ID, candidate.Type, candidate.ServerID, candidate.Attempts, candidate.MaxAttempts)
+
 	execErr := s.executeJob(ctx, &candidate)
 	if execErr != nil {
+		log.Printf("[WARN] job failed id=%d type=%s server_id=%d attempt=%d/%d err=%v", candidate.ID, candidate.Type, candidate.ServerID, candidate.Attempts, candidate.MaxAttempts, execErr)
 		s.handleJobFailure(ctx, &candidate, execErr)
 		return true, execErr
 	}
@@ -396,6 +427,7 @@ func (s *Service) ProcessNext(ctx context.Context) (bool, error) {
 		"last_error":  "",
 		"finished_at": &finished,
 	}).Error
+	log.Printf("[INFO] completed job id=%d type=%s server_id=%d attempt=%d/%d", candidate.ID, candidate.Type, candidate.ServerID, candidate.Attempts, candidate.MaxAttempts)
 	return true, nil
 }
 
@@ -510,5 +542,126 @@ func (s *Service) handleJobFailure(ctx context.Context, job *domain.ServerJob, e
 		_ = s.db.WithContext(ctx).Model(&domain.Server{}).
 			Where("id = ?", job.ServerID).
 			Update("status", domain.ServerStatusError).Error
+	}
+}
+
+// ProcessExpiredServers stops any running servers whose ExpiresAt timestamp has passed.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - now: Reference timestamp for expiration checks.
+//
+// Example usage:
+//
+//	stopped, err := jobSvc.ProcessExpiredServers(ctx, time.Now())
+func (s *Service) ProcessExpiredServers(ctx context.Context, now time.Time) (int, error) {
+	var expired []domain.Server
+	if err := s.db.WithContext(ctx).
+		Where("status = ? AND expires_at IS NOT NULL AND expires_at <= ?", domain.ServerStatusRunning, now).
+		Find(&expired).Error; err != nil {
+		return 0, fmt.Errorf("failed querying expired servers: %w", err)
+	}
+
+	stoppedCount := 0
+	for _, srv := range expired {
+		if ctx.Err() != nil {
+			break
+		}
+		if _, err := s.hostingSvc.StopServer(ctx, srv.UserID, srv.ID); err != nil {
+			domain.RecordServerLog(ctx, s.db, srv.ID, 0, domain.ServerOpExpireStop, domain.ServerLogStatusError, fmt.Sprintf("failed stopping expired server: %v", err))
+			continue
+		}
+		domain.RecordServerLog(ctx, s.db, srv.ID, 0, domain.ServerOpExpireStop, domain.ServerLogStatusSuccess, "stopped expired server")
+		stoppedCount++
+	}
+	return stoppedCount, nil
+}
+
+// CleanupRetentionServers permanently deletes servers that have passed the post-expiration retention window.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - now: Reference timestamp.
+//   - retentionDays: Grace period in days after ExpiresAt before deletion.
+//
+// Example usage:
+//
+//	deleted, err := jobSvc.CleanupRetentionServers(ctx, time.Now(), 7)
+func (s *Service) CleanupRetentionServers(ctx context.Context, now time.Time, retentionDays int) (int, error) {
+	if retentionDays <= 0 {
+		retentionDays = 7
+	}
+	cutoff := now.Add(-time.Duration(retentionDays) * 24 * time.Hour)
+
+	var candidates []domain.Server
+	if err := s.db.WithContext(ctx).
+		Where("expires_at IS NOT NULL AND expires_at <= ?", cutoff).
+		Find(&candidates).Error; err != nil {
+		return 0, fmt.Errorf("failed querying retention-expired servers: %w", err)
+	}
+
+	deletedCount := 0
+	for _, srv := range candidates {
+		if ctx.Err() != nil {
+			break
+		}
+		if err := s.hostingSvc.DeleteServer(ctx, srv.UserID, srv.ID); err != nil {
+			domain.RecordServerLog(ctx, s.db, srv.ID, 0, domain.ServerOpRetentionDelete, domain.ServerLogStatusError, fmt.Sprintf("failed deleting server after retention: %v", err))
+			continue
+		}
+		domain.RecordServerLog(ctx, s.db, srv.ID, 0, domain.ServerOpRetentionDelete, domain.ServerLogStatusSuccess, fmt.Sprintf("deleted server after %d-day retention", retentionDays))
+		deletedCount++
+	}
+	return deletedCount, nil
+}
+
+// StartLifecycleCron launches a background ticker that stops expired servers and cleans up
+// servers past the retention window until ctx is canceled.
+//
+// Arguments:
+//   - ctx: Cancellation context.
+//   - interval: Sweep interval (defaults to 1 minute if <= 0).
+//   - retentionDays: Grace period in days after expiration.
+//
+// Example usage:
+//
+//	stopCron := jobSvc.StartLifecycleCron(sigCtx, time.Minute, 7)
+//	defer stopCron()
+func (s *Service) StartLifecycleCron(ctx context.Context, interval time.Duration, retentionDays int) func() {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				now := time.Now()
+				if stopped, err := s.ProcessExpiredServers(runCtx, now); err != nil {
+					log.Printf("[WARN] expired server sweep error: %v", err)
+				} else if stopped > 0 {
+					log.Printf("[INFO] stopped %d expired server(s)", stopped)
+				}
+				if deleted, err := s.CleanupRetentionServers(runCtx, now, retentionDays); err != nil {
+					log.Printf("[WARN] retention cleanup sweep error: %v", err)
+				} else if deleted > 0 {
+					log.Printf("[INFO] deleted %d server(s) past %d-day retention", deleted, retentionDays)
+				}
+			}
+		}
+	}()
+
+	return func() {
+		cancel()
+		wg.Wait()
 	}
 }

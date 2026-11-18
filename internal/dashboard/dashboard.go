@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dreamoutbox/authkit"
 	"github.com/gin-gonic/gin"
@@ -88,6 +89,7 @@ func (s *Service) loadTemplates() {
 		"register.html",
 		"servers_list.html",
 		"server_create.html",
+		"server_buy.html",
 		"server_detail.html",
 		"server_console.html",
 		"server_backups.html",
@@ -241,8 +243,15 @@ func (s *Service) ListServers(c *gin.Context) {
 	})
 }
 
-// ShowCreateServer displays plan selection and server configuration form.
+// ShowCreateServer displays plan selection and direct server creation form (staff/admin only).
 func (s *Service) ShowCreateServer(c *gin.Context) {
+	if !authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
+			"ErrorMessage": "Direct server creation is restricted to staff and admin accounts. Please purchase a server via Checkout.",
+		})
+		return
+	}
+
 	var plans []domain.Plan
 	_ = s.db.Find(&plans)
 
@@ -251,8 +260,15 @@ func (s *Service) ShowCreateServer(c *gin.Context) {
 	})
 }
 
-// ProcessCreateServer queues a new Minecraft game server so the user does not wait for container provisioning.
+// ProcessCreateServer queues a new Minecraft game server directly (staff/admin only).
 func (s *Service) ProcessCreateServer(c *gin.Context) {
+	if !authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
+			"ErrorMessage": "Direct server creation is restricted to staff and admin accounts.",
+		})
+		return
+	}
+
 	userID, _ := authkit.GetUserIDFromContext(c)
 	name := strings.TrimSpace(c.PostForm("name"))
 	planIDVal, _ := strconv.ParseUint(c.PostForm("plan_id"), 10, 64)
@@ -278,6 +294,86 @@ func (s *Service) ProcessCreateServer(c *gin.Context) {
 	c.Redirect(http.StatusFound, serverRedirectURL(server.ID, "", "success", "Server creation queued!"))
 }
 
+// ShowBuyServer displays the Stripe Checkout server purchase page for users.
+//
+// Arguments:
+//   - c: Active Gin request context.
+//
+// Example usage:
+//
+//	GET /dashboard/servers/buy
+func (s *Service) ShowBuyServer(c *gin.Context) {
+	var plans []domain.Plan
+	_ = s.db.Find(&plans)
+
+	s.renderView(c, "server_buy.html", map[string]interface{}{
+		"Plans":       plans,
+		"ServerTypes": domain.AllServerTypes(),
+	})
+}
+
+// ProcessBuyServer creates a Stripe Checkout session for a new server and redirects the user to Stripe.
+//
+// Arguments:
+//   - c: Active Gin request context with form fields name, plan_id, server_type, server_version.
+//
+// Example usage:
+//
+//	POST /dashboard/servers/buy
+func (s *Service) ProcessBuyServer(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	name := strings.TrimSpace(c.PostForm("name"))
+	planIDVal, _ := strconv.ParseUint(c.PostForm("plan_id"), 10, 64)
+	serverType := domain.ServerType(strings.ToUpper(strings.TrimSpace(c.PostForm("server_type"))))
+	serverVersion := strings.TrimSpace(c.PostForm("server_version"))
+
+	cs, _, err := s.billingSvc.CreateServerCheckout(
+		c.Request.Context(),
+		userID,
+		uint(planIDVal),
+		name,
+		serverType,
+		serverVersion,
+	)
+	if err != nil {
+		var plans []domain.Plan
+		_ = s.db.Find(&plans)
+		s.renderView(c, "server_buy.html", map[string]interface{}{
+			"Plans":       plans,
+			"ServerTypes": domain.AllServerTypes(),
+			"FlashError":  "Failed initiating checkout: " + err.Error(),
+		})
+		return
+	}
+
+	c.Redirect(http.StatusSeeOther, cs.CheckoutURL)
+}
+
+// ExtendServerDuration creates a Stripe Checkout session to extend a server by 30 days.
+//
+// Arguments:
+//   - c: Active Gin request context with URL parameter 'id'.
+//
+// Example usage:
+//
+//	POST /dashboard/servers/:id/extend
+func (s *Service) ExtendServerDuration(c *gin.Context) {
+	userID, _ := authkit.GetUserIDFromContext(c)
+	serverIDVal, ok := parseIDParam(c, "id")
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
+		return
+	}
+
+	cs, _, err := s.billingSvc.CreateExtendCheckout(c.Request.Context(), userID, serverIDVal)
+	if err != nil {
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "", "error", err.Error()))
+		return
+	}
+
+	c.Redirect(http.StatusSeeOther, cs.CheckoutURL)
+}
+
 // ShowServerDetail renders the server overview page.
 func (s *Service) ShowServerDetail(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
@@ -293,10 +389,13 @@ func (s *Service) ShowServerDetail(c *gin.Context) {
 		return
 	}
 
+	now := time.Now()
 	s.renderView(c, "server_detail.html", map[string]interface{}{
 		"ActiveTab":  "overview",
 		"Server":     server,
 		"LiveStatus": liveStatus,
+		"IsExpired":  server.IsExpired(now),
+		"CanExtend":  server.ExpiresAt != nil && server.IsWithinRetention(now, 7),
 	})
 }
 
@@ -952,7 +1051,10 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 		dash.GET("", s.ListServers)
 		dash.GET("/servers/new", s.ShowCreateServer)
 		dash.POST("/servers/new", s.ProcessCreateServer)
+		dash.GET("/servers/buy", s.ShowBuyServer)
+		dash.POST("/servers/buy", s.ProcessBuyServer)
 		dash.GET("/servers/:id", s.ShowServerDetail)
+		dash.POST("/servers/:id/extend", s.ExtendServerDuration)
 		dash.GET("/servers/:id/console", s.ShowServerConsole)
 		dash.GET("/servers/:id/console/logs", s.GetServerConsoleLogsJSON)
 		dash.POST("/servers/:id/console/command", s.SendConsoleCommand)

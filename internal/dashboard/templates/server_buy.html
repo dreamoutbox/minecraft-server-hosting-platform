@@ -1,0 +1,67 @@
+{{define "title"}}Buy Server{{end}}
+{{define "content"}}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm border-0">
+            <div class="card-body p-4">
+                <h3 class="card-title fw-bold mb-1">Purchase Minecraft Server</h3>
+                <p class="text-muted small mb-4">Complete payment via Stripe Checkout. Your server will be queued and provisioned automatically once payment succeeds.</p>
+
+                <form method="POST" action="/dashboard/servers/buy">
+                    <div class="mb-3">
+                        <label for="name" class="form-label fw-semibold">Server Name</label>
+                        <input type="text" class="form-control" id="name" name="name" placeholder="My Survival World" minlength="3" maxlength="64" required autofocus>
+                    </div>
+
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label for="server_type" class="form-label fw-semibold">Server Jar Type</label>
+                            <select class="form-select" id="server_type" name="server_type" required>
+                                {{range .ServerTypes}}
+                                <option value="{{.}}">{{.}}</option>
+                                {{end}}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="server_version" class="form-label fw-semibold">Minecraft Version</label>
+                            <input type="text" class="form-control" id="server_version" name="server_version" value="LATEST" maxlength="32" required>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-semibold">Select Hardware Plan Tier (30 Days)</label>
+                        <div class="row g-3">
+                            {{range .Plans}}
+                            <div class="col-md-4">
+                                <div class="card h-100 border p-3 text-center">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="radio" name="plan_id" id="buy_plan_{{.ID}}" value="{{.ID}}" required>
+                                        <label class="form-check-label fw-bold" for="buy_plan_{{.ID}}">
+                                            {{.Name}}
+                                        </label>
+                                    </div>
+                                    <div class="my-2">
+                                        <span class="fs-4 fw-bold">${{div .PriceCents 100}}</span>
+                                        <span class="text-muted small">/30d</span>
+                                    </div>
+                                    <ul class="list-unstyled small text-muted mb-0">
+                                        <li>{{.CPULimit}} CPU Core{{if gt .CPULimit 1}}s{{end}}</li>
+                                        <li>{{.MemLimitMB}} MB RAM</li>
+                                        <li>{{.DiskLimitGB}} GB NVMe Disk</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center mt-4">
+                        <a href="/dashboard" class="btn btn-outline-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-primary px-4 py-2">Checkout with Stripe</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}
