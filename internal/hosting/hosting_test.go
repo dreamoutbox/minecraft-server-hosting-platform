@@ -540,4 +540,3 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 	db.Delete(&host)
 	db.Delete(&user)
 }
-

@@ -22,7 +22,8 @@ const ContextRequestIDKey = "request_id"
 //   - None.
 //
 // Example usage:
-//   router.Use(middleware.RequestIDMiddleware())
+//
+//	router.Use(middleware.RequestIDMiddleware())
 func RequestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		reqID := c.GetHeader(RequestIDHeader)
@@ -57,7 +58,8 @@ type IPRateLimiter struct {
 //   - b: Burst capacity ceiling.
 //
 // Example usage:
-//   limiter := middleware.NewIPRateLimiter(5, 10)
+//
+//	limiter := middleware.NewIPRateLimiter(5, 10)
 func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
 	limiter := &IPRateLimiter{
 		clients: make(map[string]*clientLimiter),
@@ -105,7 +107,8 @@ func (i *IPRateLimiter) getLimiter(ip string) *rate.Limiter {
 //   - b: Burst ceiling.
 //
 // Example usage:
-//   sensitiveRoutes.Use(middleware.RateLimitMiddleware(5, 10))
+//
+//	sensitiveRoutes.Use(middleware.RateLimitMiddleware(5, 10))
 func RateLimitMiddleware(r rate.Limit, b int) gin.HandlerFunc {
 	limiter := NewIPRateLimiter(r, b)
 

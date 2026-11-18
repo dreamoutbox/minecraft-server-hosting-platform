@@ -29,7 +29,8 @@ type Handler struct {
 //   - service: Domain backup service.
 //
 // Example usage:
-//   h := backup.NewHandler(svc)
+//
+//	h := backup.NewHandler(svc)
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
@@ -52,7 +53,8 @@ func (h *Handler) SetJobQueue(q BackupJobQueue) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   POST /api/v1/servers/:id/backups
+//
+//	POST /api/v1/servers/:id/backups
 func (h *Handler) CreateBackup(c *gin.Context) {
 	serverID, err := parseIDParam(c, "id")
 	if err != nil {
@@ -90,7 +92,8 @@ func (h *Handler) CreateBackup(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   GET /api/v1/servers/:id/backups
+//
+//	GET /api/v1/servers/:id/backups
 func (h *Handler) ListBackups(c *gin.Context) {
 	serverID, err := parseIDParam(c, "id")
 	if err != nil {
@@ -113,7 +116,8 @@ func (h *Handler) ListBackups(c *gin.Context) {
 //   - c: Active Gin request context with URL params 'id' and 'backup_id'.
 //
 // Example usage:
-//   POST /api/v1/servers/:id/backups/:backup_id/restore
+//
+//	POST /api/v1/servers/:id/backups/:backup_id/restore
 func (h *Handler) RestoreBackup(c *gin.Context) {
 	serverID, err := parseIDParam(c, "id")
 	if err != nil {
@@ -166,7 +170,8 @@ func parseIDParam(c *gin.Context, paramName string) (uint, error) {
 //   - jwtSecret: Secret key to configure AuthMiddleware.
 //
 // Example usage:
-//   backupHandler.RegisterRoutes(router, cfg.JWTSecret)
+//
+//	backupHandler.RegisterRoutes(router, cfg.JWTSecret)
 func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 	backups := r.Group("/api/v1/servers/:id/backups")
 	backups.Use(authkit.AuthMiddleware(jwtSecret))

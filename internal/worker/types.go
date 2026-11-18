@@ -67,9 +67,9 @@ type CreateVolumeResponse struct {
 
 // HostStatusResponse communicates local capacity metrics from the host node.
 type HostStatusResponse struct {
-	Hostname            string `json:"hostname"`
-	ActiveContainers    int    `json:"active_containers"`
-	MaxServers          int    `json:"max_servers"`
-	FreeDiskBytes       uint64 `json:"free_disk_bytes"`
-	TotalDiskBytes      uint64 `json:"total_disk_bytes"`
+	Hostname         string `json:"hostname"`
+	ActiveContainers int    `json:"active_containers"`
+	MaxServers       int    `json:"max_servers"`
+	FreeDiskBytes    uint64 `json:"free_disk_bytes"`
+	TotalDiskBytes   uint64 `json:"total_disk_bytes"`
 }

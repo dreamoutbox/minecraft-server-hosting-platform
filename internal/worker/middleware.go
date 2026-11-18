@@ -18,7 +18,8 @@ const APIKeyHeader = "X-Worker-API-Key"
 //   - expectedKey: Host secret configured at worker deployment.
 //
 // Example usage:
-//   r.Use(worker.APIKeyMiddleware("node-secret-key"))
+//
+//	r.Use(worker.APIKeyMiddleware("node-secret-key"))
 func APIKeyMiddleware(expectedKey string) gin.HandlerFunc {
 	expectedBytes := []byte(expectedKey)
 

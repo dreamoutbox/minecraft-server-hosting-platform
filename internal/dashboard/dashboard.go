@@ -47,7 +47,8 @@ type Service struct {
 //   - jwtSecret: Secret key to verify and issue session tokens.
 //
 // Example usage:
-//   dash := dashboard.NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, "jwt-secret")
+//
+//	dash := dashboard.NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, "jwt-secret")
 func NewService(
 	db *gorm.DB,
 	hostingSvc *hosting.Service,
@@ -934,7 +935,8 @@ func (s *Service) UpdateUserRole(c *gin.Context) {
 //   - r: Gin engine.
 //
 // Example usage:
-//   dashService.RegisterRoutes(router)
+//
+//	dashService.RegisterRoutes(router)
 func (s *Service) RegisterRoutes(r *gin.Engine) {
 	// Public auth pages
 	r.GET("/login", s.ShowLogin)

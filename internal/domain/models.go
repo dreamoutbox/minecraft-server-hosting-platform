@@ -158,9 +158,9 @@ func ValidateServerVersion(raw string) (string, error) {
 type ServerOperationType string
 
 const (
-	ServerOpCreate  ServerOperationType = "create"
-	ServerOpStop    ServerOperationType = "stop"
-	ServerOpDelete  ServerOperationType = "delete"
+	ServerOpCreate         ServerOperationType = "create"
+	ServerOpStop           ServerOperationType = "stop"
+	ServerOpDelete         ServerOperationType = "delete"
 	ServerOpBackup         ServerOperationType = "backup"
 	ServerOpRestore        ServerOperationType = "restore"
 	ServerOpConsoleCommand ServerOperationType = "console_command"
@@ -200,14 +200,14 @@ type User = authkit.User
 // Plan defines hardware resource limits and monthly cost for a Minecraft server tier.
 // Note: Intentionally decoupled from Stripe plan or price identifiers.
 type Plan struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	Name       string    `gorm:"uniqueIndex;not null" json:"name"`
-	CPULimit   int       `gorm:"not null" json:"cpu_limit"`   // number of CPU cores allocated
-	MemLimitMB int       `gorm:"not null" json:"mem_limit_mb"` // memory allocation in megabytes
-	DiskLimitGB int      `gorm:"not null" json:"disk_limit_gb"` // disk quota in gigabytes
-	PriceCents int64     `gorm:"not null" json:"price_cents"` // price in cents per billing cycle
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"uniqueIndex;not null" json:"name"`
+	CPULimit    int       `gorm:"not null" json:"cpu_limit"`     // number of CPU cores allocated
+	MemLimitMB  int       `gorm:"not null" json:"mem_limit_mb"`  // memory allocation in megabytes
+	DiskLimitGB int       `gorm:"not null" json:"disk_limit_gb"` // disk quota in gigabytes
+	PriceCents  int64     `gorm:"not null" json:"price_cents"`   // price in cents per billing cycle
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Host represents a dedicated server node executing the worker daemon.
@@ -229,10 +229,10 @@ type Host struct {
 // Server represents a provisioned Minecraft game server container.
 // The port field is globally unique cluster-wide to preserve routing across migration.
 type Server struct {
-	ID          uint         `gorm:"primaryKey" json:"id"`
-	UserID      uint         `gorm:"index;not null" json:"user_id"`
-	PlanID      uint         `gorm:"not null" json:"plan_id"`
-	HostID      uint         `gorm:"index;not null" json:"host_id"`
+	ID            uint         `gorm:"primaryKey" json:"id"`
+	UserID        uint         `gorm:"index;not null" json:"user_id"`
+	PlanID        uint         `gorm:"not null" json:"plan_id"`
+	HostID        uint         `gorm:"index;not null" json:"host_id"`
 	Name          string       `gorm:"not null" json:"name"`
 	Status        ServerStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
 	Port          int          `gorm:"uniqueIndex;not null" json:"port"`
@@ -241,7 +241,7 @@ type Server struct {
 	ServerType    ServerType   `gorm:"type:varchar(32);not null;default:'VANILLA'" json:"server_type"`
 	ServerVersion string       `gorm:"type:varchar(32);not null;default:'LATEST'" json:"server_version"`
 	CreatedAt     time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
+	UpdatedAt     time.Time    `json:"updated_at"`
 
 	Plan Plan `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
 	Host Host `gorm:"foreignKey:HostID" json:"host,omitempty"`

@@ -40,7 +40,8 @@ type hostCandidate struct {
 //   - db: Active database handle.
 //
 // Example usage:
-//   scheduler := hosting.NewLeastLoadedScheduler(db)
+//
+//	scheduler := hosting.NewLeastLoadedScheduler(db)
 func NewLeastLoadedScheduler(db *gorm.DB) *LeastLoadedScheduler {
 	return &LeastLoadedScheduler{db: db}
 }
@@ -51,7 +52,8 @@ func NewLeastLoadedScheduler(db *gorm.DB) *LeastLoadedScheduler {
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
-//   candidates, err := scheduler.SelectCandidates(ctx)
+//
+//	candidates, err := scheduler.SelectCandidates(ctx)
 func (s *LeastLoadedScheduler) SelectCandidates(ctx context.Context) ([]domain.Host, error) {
 	var hosts []domain.Host
 	if err := s.db.WithContext(ctx).Where("status = ?", domain.HostStatusActive).Find(&hosts).Error; err != nil {
@@ -109,10 +111,11 @@ func (s *LeastLoadedScheduler) SelectCandidates(ctx context.Context) ([]domain.H
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
-//   host, err := scheduler.SelectHost(ctx)
-//   if err != nil {
-//       return nil, err
-//   }
+//
+//	host, err := scheduler.SelectHost(ctx)
+//	if err != nil {
+//	    return nil, err
+//	}
 func (s *LeastLoadedScheduler) SelectHost(ctx context.Context) (*domain.Host, error) {
 	candidates, err := s.SelectCandidates(ctx)
 	if err != nil {

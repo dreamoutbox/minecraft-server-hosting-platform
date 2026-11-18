@@ -18,12 +18,12 @@ import (
 
 // multiHostWorkerClient simulates worker operations on a specific host node.
 type multiHostWorkerClient struct {
-	mu           sync.Mutex
-	hostname     string
-	volumes      map[string][]byte
-	containers   map[string]worker.CreateContainerRequest
-	failHealth   bool
-	failVolume   bool
+	mu         sync.Mutex
+	hostname   string
+	volumes    map[string][]byte
+	containers map[string]worker.CreateContainerRequest
+	failHealth bool
+	failVolume bool
 }
 
 func newMultiHostWorkerClient(hostname string) *multiHostWorkerClient {

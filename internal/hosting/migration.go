@@ -40,7 +40,8 @@ type MigrationService struct {
 //   - factory: Worker client factory; defaults to hostingSvc factory if nil.
 //
 // Example usage:
-//   ms := hosting.NewMigrationService(hostingSvc, backupSvc, storageProvider, nil)
+//
+//	ms := hosting.NewMigrationService(hostingSvc, backupSvc, storageProvider, nil)
 func NewMigrationService(hostingSvc *Service, backupSvc *backup.Service, storage storage.StorageProvider, factory WorkerClientFactory) *MigrationService {
 	if factory == nil {
 		factory = hostingSvc.workerClientFactory
@@ -62,7 +63,8 @@ func NewMigrationService(hostingSvc *Service, backupSvc *backup.Service, storage
 //   - targetHostID: Explicit destination host ID (or 0 to let the scheduler choose).
 //
 // Example usage:
-//   err := ms.MigrateServer(ctx, user.ID, 42, 0)
+//
+//	err := ms.MigrateServer(ctx, user.ID, 42, 0)
 func (m *MigrationService) MigrateServer(ctx context.Context, userID uint, serverID uint, targetHostID uint) error {
 	server, sourceHost, err := m.hostingSvc.getServerAndHost(ctx, userID, serverID)
 	if err != nil {

@@ -40,7 +40,8 @@ type HTTPClient struct {
 //   - apiKey: Worker authentication key for the targeted host.
 //
 // Example usage:
-//   client := worker.NewClient("http://node-1:9090", "host-secret")
+//
+//	client := worker.NewClient("http://node-1:9090", "host-secret")
 func NewClient(baseURL string, apiKey string) *HTTPClient {
 	return &HTTPClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -82,7 +83,8 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body io
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
-//   status, err := client.GetStatus(ctx)
+//
+//	status, err := client.GetStatus(ctx)
 func (c *HTTPClient) GetStatus(ctx context.Context) (*HostStatusResponse, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/status", nil, "")
 	if err != nil {
@@ -110,7 +112,8 @@ func (c *HTTPClient) GetStatus(ctx context.Context) (*HostStatusResponse, error)
 //   - diskLimitGB: Size ceiling in gigabytes.
 //
 // Example usage:
-//   vol, err := client.CreateVolume(ctx, 42, 20)
+//
+//	vol, err := client.CreateVolume(ctx, 42, 20)
 func (c *HTTPClient) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*CreateVolumeResponse, error) {
 	payload, err := json.Marshal(CreateVolumeRequest{
 		ServerID:    serverID,
@@ -145,7 +148,8 @@ func (c *HTTPClient) CreateVolume(ctx context.Context, serverID uint, diskLimitG
 //   - volumeID: Identifier of volume to destroy.
 //
 // Example usage:
-//   err := client.DeleteVolume(ctx, "42")
+//
+//	err := client.DeleteVolume(ctx, "42")
 func (c *HTTPClient) DeleteVolume(ctx context.Context, volumeID string) error {
 	resp, err := c.doRequest(ctx, http.MethodDelete, fmt.Sprintf("/volumes/%s", volumeID), nil, "")
 	if err != nil {
@@ -168,7 +172,8 @@ func (c *HTTPClient) DeleteVolume(ctx context.Context, volumeID string) error {
 //   - volumeID: Identifier of volume to archive.
 //
 // Example usage:
-//   stream, err := client.ExportVolume(ctx, "42")
+//
+//	stream, err := client.ExportVolume(ctx, "42")
 func (c *HTTPClient) ExportVolume(ctx context.Context, volumeID string) (io.ReadCloser, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/volumes/%s/export", volumeID), nil, "")
 	if err != nil {
@@ -192,7 +197,8 @@ func (c *HTTPClient) ExportVolume(ctx context.Context, volumeID string) (io.Read
 //   - r: Reader containing the tar stream archive.
 //
 // Example usage:
-//   err := client.ImportVolume(ctx, "42", tarStream)
+//
+//	err := client.ImportVolume(ctx, "42", tarStream)
 func (c *HTTPClient) ImportVolume(ctx context.Context, volumeID string, r io.Reader) error {
 	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/volumes/%s/import", volumeID), r, "application/x-tar")
 	if err != nil {
@@ -214,7 +220,8 @@ func (c *HTTPClient) ImportVolume(ctx context.Context, volumeID string, r io.Rea
 //   - req: Container specifications.
 //
 // Example usage:
-//   ctr, err := client.CreateContainer(ctx, req)
+//
+//	ctr, err := client.CreateContainer(ctx, req)
 func (c *HTTPClient) CreateContainer(ctx context.Context, req CreateContainerRequest) (*CreateContainerResponse, error) {
 	payload, err := json.Marshal(req)
 	if err != nil {
@@ -246,7 +253,8 @@ func (c *HTTPClient) CreateContainer(ctx context.Context, req CreateContainerReq
 //   - containerID: Target Docker container ID.
 //
 // Example usage:
-//   err := client.StopContainer(ctx, "ctr-123")
+//
+//	err := client.StopContainer(ctx, "ctr-123")
 func (c *HTTPClient) StopContainer(ctx context.Context, containerID string) error {
 	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/containers/%s/stop", containerID), nil, "")
 	if err != nil {
@@ -268,7 +276,8 @@ func (c *HTTPClient) StopContainer(ctx context.Context, containerID string) erro
 //   - containerID: Target Docker container ID.
 //
 // Example usage:
-//   err := client.DeleteContainer(ctx, "ctr-123")
+//
+//	err := client.DeleteContainer(ctx, "ctr-123")
 func (c *HTTPClient) DeleteContainer(ctx context.Context, containerID string) error {
 	resp, err := c.doRequest(ctx, http.MethodDelete, fmt.Sprintf("/containers/%s", containerID), nil, "")
 	if err != nil {
@@ -290,7 +299,8 @@ func (c *HTTPClient) DeleteContainer(ctx context.Context, containerID string) er
 //   - containerID: Target Docker container ID.
 //
 // Example usage:
-//   status, err := client.GetContainerStatus(ctx, "ctr-123")
+//
+//	status, err := client.GetContainerStatus(ctx, "ctr-123")
 func (c *HTTPClient) GetContainerStatus(ctx context.Context, containerID string) (*ContainerStatusResponse, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/containers/%s/status", containerID), nil, "")
 	if err != nil {
@@ -318,7 +328,8 @@ func (c *HTTPClient) GetContainerStatus(ctx context.Context, containerID string)
 //   - tail: Maximum number of trailing lines to return.
 //
 // Example usage:
-//   logs, err := client.GetContainerLogs(ctx, "ctr-123", 200)
+//
+//	logs, err := client.GetContainerLogs(ctx, "ctr-123", 200)
 func (c *HTTPClient) GetContainerLogs(ctx context.Context, containerID string, tail int) (*ContainerLogsResponse, error) {
 	path := fmt.Sprintf("/containers/%s/logs?tail=%d", containerID, tail)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, "")
@@ -347,7 +358,8 @@ func (c *HTTPClient) GetContainerLogs(ctx context.Context, containerID string, t
 //   - command: Minecraft console command to execute.
 //
 // Example usage:
-//   res, err := client.ExecContainerCommand(ctx, "ctr-123", "list")
+//
+//	res, err := client.ExecContainerCommand(ctx, "ctr-123", "list")
 func (c *HTTPClient) ExecContainerCommand(ctx context.Context, containerID string, command string) (*ExecCommandResponse, error) {
 	payload, err := json.Marshal(ExecCommandRequest{Command: command})
 	if err != nil {

@@ -37,7 +37,8 @@ type Service struct {
 //   - factory: Worker client factory; defaults to HTTP worker client if nil.
 //
 // Example usage:
-//   svc := backup.NewService(db, storageProvider, nil)
+//
+//	svc := backup.NewService(db, storageProvider, nil)
 func NewService(db *gorm.DB, storage storage.StorageProvider, factory WorkerClientFactory) *Service {
 	if factory == nil {
 		factory = func(baseURL string, apiKey string) worker.Client {
@@ -283,7 +284,8 @@ func (s *Service) RestoreServer(ctx context.Context, serverID uint, backupRecord
 //   - serverID: Target game server ID.
 //
 // Example usage:
-//   backups, err := svc.ListBackups(ctx, 42)
+//
+//	backups, err := svc.ListBackups(ctx, 42)
 func (s *Service) ListBackups(ctx context.Context, serverID uint) ([]domain.BackupRecord, error) {
 	var records []domain.BackupRecord
 	err := s.db.WithContext(ctx).
@@ -302,7 +304,8 @@ func (s *Service) ListBackups(ctx context.Context, serverID uint) ([]domain.Back
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
-//   err := svc.SweepAndBackupAllActive(ctx)
+//
+//	err := svc.SweepAndBackupAllActive(ctx)
 func (s *Service) SweepAndBackupAllActive(ctx context.Context) error {
 	var activeServers []domain.Server
 	err := s.db.WithContext(ctx).
@@ -328,7 +331,8 @@ func (s *Service) SweepAndBackupAllActive(ctx context.Context) error {
 //   - cronSpec: Standard cron schedule string (e.g. "@daily" or "0 2 * * *").
 //
 // Example usage:
-//   err := svc.ScheduleBackups("@daily")
+//
+//	err := svc.ScheduleBackups("@daily")
 func (s *Service) ScheduleBackups(cronSpec string) error {
 	_, err := s.cronRunner.AddFunc(cronSpec, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -351,7 +355,8 @@ func (s *Service) ScheduleBackups(cronSpec string) error {
 //   - None.
 //
 // Example usage:
-//   svc.StopCron()
+//
+//	svc.StopCron()
 func (s *Service) StopCron() {
 	if s.cronRunner != nil {
 		s.cronRunner.Stop()

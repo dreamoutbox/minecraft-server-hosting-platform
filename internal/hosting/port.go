@@ -33,7 +33,8 @@ type PortAllocator struct {
 //   - maxPort: Upper port bound (inclusive).
 //
 // Example usage:
-//   allocator := hosting.NewPortAllocator(db, 25565, 25600)
+//
+//	allocator := hosting.NewPortAllocator(db, 25565, 25600)
 func NewPortAllocator(db *gorm.DB, minPort, maxPort int) *PortAllocator {
 	return &PortAllocator{
 		db:      db,
@@ -48,7 +49,8 @@ func NewPortAllocator(db *gorm.DB, minPort, maxPort int) *PortAllocator {
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
-//   port, err := allocator.AllocateNextPort(ctx)
+//
+//	port, err := allocator.AllocateNextPort(ctx)
 func (p *PortAllocator) AllocateNextPort(ctx context.Context) (int, error) {
 	var usedPorts []int
 	err := p.db.WithContext(ctx).Model(&domain.Server{}).
@@ -80,9 +82,10 @@ func (p *PortAllocator) AllocateNextPort(ctx context.Context) (int, error) {
 //   - createFunc: Callback that attempts to persist the server given an allocated port.
 //
 // Example usage:
-//   port, err := allocator.AllocateWithRetry(ctx, 5, func(port int) error {
-//       return db.Create(&domain.Server{Port: port}).Error
-//   })
+//
+//	port, err := allocator.AllocateWithRetry(ctx, 5, func(port int) error {
+//	    return db.Create(&domain.Server{Port: port}).Error
+//	})
 func (p *PortAllocator) AllocateWithRetry(ctx context.Context, maxRetries int, createFunc func(port int) error) (int, error) {
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		port, err := p.AllocateNextPort(ctx)

@@ -30,7 +30,8 @@ type Handler struct {
 //   - service: Hosting domain service.
 //
 // Example usage:
-//   h := hosting.NewHandler(svc)
+//
+//	h := hosting.NewHandler(svc)
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
@@ -91,7 +92,8 @@ type ConsoleCommandRequest struct {
 //   - c: Active Gin request context containing RegisterHostRequest JSON.
 //
 // Example usage:
-//   POST /api/v1/hosts
+//
+//	POST /api/v1/hosts
 func (h *Handler) RegisterHost(c *gin.Context) {
 	var req RegisterHostRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -118,7 +120,8 @@ func (h *Handler) RegisterHost(c *gin.Context) {
 //   - c: Active Gin request context.
 //
 // Example usage:
-//   GET /api/v1/hosts
+//
+//	GET /api/v1/hosts
 func (h *Handler) ListHosts(c *gin.Context) {
 	hosts, err := h.service.ListHosts(c.Request.Context())
 	if err != nil {
@@ -134,7 +137,8 @@ func (h *Handler) ListHosts(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   POST /api/v1/hosts/:id/rotate-key
+//
+//	POST /api/v1/hosts/:id/rotate-key
 func (h *Handler) RotateHostKey(c *gin.Context) {
 	hostID, err := parseIDParam(c, "id")
 	if err != nil {
@@ -161,7 +165,8 @@ func (h *Handler) RotateHostKey(c *gin.Context) {
 //   - c: Active Gin request context containing CreateServerRequest JSON.
 //
 // Example usage:
-//   POST /api/v1/servers
+//
+//	POST /api/v1/servers
 func (h *Handler) CreateServer(c *gin.Context) {
 	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
@@ -204,7 +209,8 @@ func (h *Handler) CreateServer(c *gin.Context) {
 //   - c: Active Gin request context.
 //
 // Example usage:
-//   GET /api/v1/servers
+//
+//	GET /api/v1/servers
 func (h *Handler) ListServers(c *gin.Context) {
 	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
@@ -227,7 +233,8 @@ func (h *Handler) ListServers(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   GET /api/v1/servers/:id
+//
+//	GET /api/v1/servers/:id
 func (h *Handler) GetServer(c *gin.Context) {
 	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
@@ -259,7 +266,8 @@ func (h *Handler) GetServer(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   POST /api/v1/servers/:id/start
+//
+//	POST /api/v1/servers/:id/start
 func (h *Handler) StartServer(c *gin.Context) {
 	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
@@ -288,7 +296,8 @@ func (h *Handler) StartServer(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   POST /api/v1/servers/:id/stop
+//
+//	POST /api/v1/servers/:id/stop
 func (h *Handler) StopServer(c *gin.Context) {
 	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
@@ -317,7 +326,8 @@ func (h *Handler) StopServer(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id'.
 //
 // Example usage:
-//   DELETE /api/v1/servers/:id
+//
+//	DELETE /api/v1/servers/:id
 func (h *Handler) DeleteServer(c *gin.Context) {
 	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
@@ -395,7 +405,8 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 //   - c: Active Gin request context with URL param 'id' and optional destination JSON.
 //
 // Example usage:
-//   POST /api/v1/servers/:id/migrate
+//
+//	POST /api/v1/servers/:id/migrate
 func (h *Handler) MigrateServer(c *gin.Context) {
 	if h.migrationSvc == nil {
 		c.JSON(http.StatusNotImplemented, gin.H{"error": "migration service not configured"})
@@ -438,7 +449,8 @@ func (h *Handler) MigrateServer(c *gin.Context) {
 //   - c: Active Gin request context with URL parameter 'id' and optional query param 'tail'.
 //
 // Example usage:
-//   GET /api/v1/servers/:id/console/logs?tail=200
+//
+//	GET /api/v1/servers/:id/console/logs?tail=200
 func (h *Handler) GetConsoleLogs(c *gin.Context) {
 	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
@@ -474,7 +486,8 @@ func (h *Handler) GetConsoleLogs(c *gin.Context) {
 //   - c: Active Gin request context with URL parameter 'id' and ConsoleCommandRequest JSON body.
 //
 // Example usage:
-//   POST /api/v1/servers/:id/console/command
+//
+//	POST /api/v1/servers/:id/console/command
 func (h *Handler) SendConsoleCommand(c *gin.Context) {
 	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
@@ -520,7 +533,8 @@ func parseIDParam(c *gin.Context, paramName string) (uint, error) {
 //   - jwtSecret: Secret key to configure AuthMiddleware.
 //
 // Example usage:
-//   hostingHandler.RegisterRoutes(router, cfg.JWTSecret)
+//
+//	hostingHandler.RegisterRoutes(router, cfg.JWTSecret)
 func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 	api := r.Group("/api/v1")
 
