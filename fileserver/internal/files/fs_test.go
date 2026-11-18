@@ -284,3 +284,26 @@ func TestCreateEditAndZipOperations(t *testing.T) {
 		t.Errorf("expected ErrNotDirectory for file zip request, got %v", err)
 	}
 }
+
+type failingReader struct {
+	sent bool
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if !r.sent {
+		r.sent = true
+		n := copy(p, "partial-data")
+		return n, nil
+	}
+	return 0, errors.New("simulated no space left on device")
+}
+
+func TestSaveUploadedFileRemovesPartialOnError(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := SaveUploadedFile(rootDir, ".", "huge.bin", &failingReader{}); err == nil {
+		t.Fatal("expected SaveUploadedFile error on failing stream")
+	}
+	if _, err := os.Stat(filepath.Join(rootDir, "huge.bin")); !os.IsNotExist(err) {
+		t.Fatalf("expected partial huge.bin to be removed after write error, stat err=%v", err)
+	}
+}

@@ -19,8 +19,8 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 	if cfg.LoginTokenTTL != 60*time.Second {
 		t.Errorf("expected 60s login token ttl, got %v", cfg.LoginTokenTTL)
 	}
-	if cfg.MaxUploadBytes != 100*1024*1024 {
-		t.Errorf("expected 100MB upload limit, got %d", cfg.MaxUploadBytes)
+	if cfg.MaxUploadBytes != 2048*1024*1024 {
+		t.Errorf("expected 2048MB upload limit, got %d", cfg.MaxUploadBytes)
 	}
 }
 

@@ -280,10 +280,15 @@ func SaveUploadedFile(rootDir, dirRel, rawFilename string, src io.Reader) error 
 	if err != nil {
 		return fmt.Errorf("failed creating file: %w", err)
 	}
-	defer func() { _ = dst.Close() }()
 
 	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		_ = root.Remove(targetRel)
 		return fmt.Errorf("failed writing uploaded file: %w", err)
+	}
+	if err := dst.Close(); err != nil {
+		_ = root.Remove(targetRel)
+		return fmt.Errorf("failed closing uploaded file: %w", err)
 	}
 	return nil
 }

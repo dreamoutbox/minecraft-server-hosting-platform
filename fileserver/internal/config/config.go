@@ -13,7 +13,7 @@ const (
 	defaultMountsDir     = "/var/lib/mc-platform/mounts"
 	defaultAPIKey        = "dev-worker-key"
 	defaultJWTSecret     = "dev-fileserver-jwt-secret-change-in-prod"
-	defaultMaxUploadMB   = 100
+	defaultMaxUploadMB   = 2048
 	defaultLoginTokenTTL = 60 * time.Second
 )
 
