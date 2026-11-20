@@ -523,3 +523,52 @@ func TestExportAndImportSkipLostAndFoundAndCheckCleanup(t *testing.T) {
 		t.Fatalf("expected lost+found directory to be preserved, stat err=%v", err)
 	}
 }
+
+func TestParseLoopDeviceIndex(t *testing.T) {
+	tests := []struct {
+		devPath string
+		wantIdx int
+		wantOK  bool
+	}{
+		{devPath: "/dev/loop0", wantIdx: 0, wantOK: true},
+		{devPath: "/dev/loop14", wantIdx: 14, wantOK: true},
+		{devPath: "/dev/loop-control", wantIdx: 0, wantOK: false},
+		{devPath: "/dev/loop", wantIdx: 0, wantOK: false},
+		{devPath: "/dev/loop9p1", wantIdx: 0, wantOK: false},
+		{devPath: "/dev/sda1", wantIdx: 0, wantOK: false},
+	}
+
+	for _, tc := range tests {
+		gotIdx, gotOK := parseLoopDeviceIndex(tc.devPath)
+		if gotOK != tc.wantOK || gotIdx != tc.wantIdx {
+			t.Errorf("parseLoopDeviceIndex(%q) = (%d, %v), want (%d, %v)", tc.devPath, gotIdx, gotOK, tc.wantIdx, tc.wantOK)
+		}
+	}
+}
+
+func TestParseMountInfoLine(t *testing.T) {
+	line := `412 105 7:14 / /var/lib/mc-platform/mounts/14 rw,relatime shared:348 master:1 - ext4 /dev/loop14 rw`
+	entry, ok := parseMountInfoLine(line)
+	if !ok {
+		t.Fatal("expected valid mountinfo line to parse")
+	}
+	if entry.mountPoint != "/var/lib/mc-platform/mounts/14" {
+		t.Errorf("mountPoint = %q, want %q", entry.mountPoint, "/var/lib/mc-platform/mounts/14")
+	}
+	if entry.source != "/dev/loop14" {
+		t.Errorf("source = %q, want %q", entry.source, "/dev/loop14")
+	}
+
+	escapedLine := `10 1 7:2 / /mnt/my\040dir rw - ext4 /dev/loop2 rw`
+	escapedEntry, ok := parseMountInfoLine(escapedLine)
+	if !ok {
+		t.Fatal("expected escaped mountinfo line to parse")
+	}
+	if escapedEntry.mountPoint != "/mnt/my dir" || escapedEntry.source != "/dev/loop2" {
+		t.Errorf("got %+v, want mountPoint=/mnt/my dir source=/dev/loop2", escapedEntry)
+	}
+
+	if _, ok := parseMountInfoLine("short line"); ok {
+		t.Error("expected malformed mountinfo line to be rejected")
+	}
+}

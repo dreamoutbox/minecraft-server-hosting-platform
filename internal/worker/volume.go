@@ -10,14 +10,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	unmountMaxAttempts = 5
-	unmountRetryDelay  = 200 * time.Millisecond
+	unmountMaxAttempts   = 5
+	unmountRetryDelay    = 200 * time.Millisecond
+	loopMountMaxAttempts = 5
+	loopMountRetryDelay  = 50 * time.Millisecond
+	loopDevicePathPrefix = "/dev/loop"
 )
 
 // VolumeManager abstracts loop-mounted block storage lifecycle and tar streaming.
@@ -508,15 +512,63 @@ func (m *LocalVolumeManager) resolvePathsLocked(volumeID string) (string, string
 	return mountDir, imagePath
 }
 
+// mountLoopImage allocates a free loop device, ensures its /dev/loopN node exists, and mounts imagePath onto mountDir.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - imagePath: Path to the ext4 sparse image file.
+//   - mountDir: Target directory where the image will be mounted.
+//
+// Example usage:
+//
+//	err := mountLoopImage(ctx, "/var/lib/mc-platform/images/1.img", "/var/lib/mc-platform/mounts/1")
 func mountLoopImage(ctx context.Context, imagePath, mountDir string) error {
-	mountCmd := exec.CommandContext(ctx, "mount", "-o", "loop", imagePath, mountDir)
-	if output, err := mountCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("mount -o loop failed (%s): %w", string(output), err)
+	var lastDev, lastOut string
+	var lastErr error
+
+	for attempt := 0; attempt < loopMountMaxAttempts; attempt++ {
+		idx, err := allocateFreeLoopIndex()
+		if err != nil {
+			return fmt.Errorf("failed allocating loop device: %w", err)
+		}
+		loopDev, err := ensureLoopDeviceNode(idx)
+		if err != nil {
+			return err
+		}
+
+		// Explicit loop=/dev/loopN binds the allocated node directly with autoclear enabled.
+		mountCmd := exec.CommandContext(ctx, "mount", "-o", "loop="+loopDev, imagePath, mountDir)
+		output, err := mountCmd.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+
+		lastDev = loopDev
+		lastOut = strings.TrimSpace(string(output))
+		lastErr = err
+
+		// Retry in case another host process claimed the loop index between allocation and mount.
+		if attempt < loopMountMaxAttempts-1 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(loopMountRetryDelay):
+			}
+		}
 	}
-	return nil
+
+	return fmt.Errorf("mount -o loop=%s failed (%s): %w", lastDev, lastOut, lastErr)
 }
 
 // detachLoopDevices detaches any active kernel loop devices backed by imagePath.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - imagePath: Path to the sparse image file whose loop bindings should be detached.
+//
+// Example usage:
+//
+//	detachLoopDevices(ctx, "/var/lib/mc-platform/images/1.img")
 func detachLoopDevices(ctx context.Context, imagePath string) {
 	if _, err := os.Stat(imagePath); err != nil {
 		return
@@ -527,20 +579,26 @@ func detachLoopDevices(ctx context.Context, imagePath string) {
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		dev := strings.TrimSpace(line)
-		if dev != "" {
-			_ = exec.CommandContext(ctx, "losetup", "-d", dev).Run()
+		if dev == "" {
+			continue
 		}
+		// Ensure node exists in container /dev so detaching still works after container restarts.
+		_ = ensureLoopDeviceNodeForPath(dev)
+		_ = exec.CommandContext(ctx, "losetup", "-d", dev).Run()
 	}
 }
 
 func unmountDir(ctx context.Context, mountDir string) error {
-	mounted, err := isMountPoint(mountDir)
+	source, mounted, err := findMountSource(mountDir)
 	if err != nil {
 		return fmt.Errorf("failed checking mount state for %s: %w", mountDir, err)
 	}
 	if !mounted {
 		return nil
 	}
+
+	// Ensure the backing /dev/loopN node exists before umount -d attempts to detach it.
+	_ = ensureLoopDeviceNodeForPath(source)
 
 	var lastOut string
 	var lastErr error
@@ -574,7 +632,17 @@ func unmountDir(ctx context.Context, mountDir string) error {
 	return fmt.Errorf("umount -d %s failed (%s): %w", mountDir, lastOut, lastErr)
 }
 
+type mountInfoEntry struct {
+	mountPoint string
+	source     string
+}
+
 func isMountPoint(target string) (bool, error) {
+	_, mounted, err := findMountSource(target)
+	return mounted, err
+}
+
+func findMountSource(target string) (string, bool, error) {
 	absTarget, err := filepath.Abs(target)
 	if err != nil {
 		absTarget = filepath.Clean(target)
@@ -584,20 +652,32 @@ func isMountPoint(target string) (bool, error) {
 		resolvedTarget = eval
 	}
 
-	mounts, err := readMountPoints()
+	entries, err := readMountInfo()
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
-	for _, mp := range mounts {
-		cleanMP := filepath.Clean(mp)
+	for _, entry := range entries {
+		cleanMP := filepath.Clean(entry.mountPoint)
 		if cleanMP == absTarget || cleanMP == resolvedTarget {
-			return true, nil
+			return entry.source, true, nil
 		}
 	}
-	return false, nil
+	return "", false, nil
 }
 
 func readMountPoints() ([]string, error) {
+	entries, err := readMountInfo()
+	if err != nil {
+		return nil, err
+	}
+	mounts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		mounts = append(mounts, entry.mountPoint)
+	}
+	return mounts, nil
+}
+
+func readMountInfo() ([]mountInfoEntry, error) {
 	f, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -607,18 +687,66 @@ func readMountPoints() ([]string, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	var mounts []string
+	var entries []mountInfoEntry
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 5 {
-			mounts = append(mounts, unescapeMountInfoPath(fields[4]))
+		if entry, ok := parseMountInfoLine(scanner.Text()); ok {
+			entries = append(entries, entry)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	return mounts, nil
+	return entries, nil
+}
+
+// parseMountInfoLine extracts the mount point and mount source from a single /proc/self/mountinfo line.
+//
+// Arguments:
+//   - line: Raw line from /proc/self/mountinfo.
+//
+// Example usage:
+//
+//	entry, ok := parseMountInfoLine("412 105 7:9 / /var/lib/mc-platform/mounts/9 rw - ext4 /dev/loop9 rw")
+func parseMountInfoLine(line string) (mountInfoEntry, bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 5 {
+		return mountInfoEntry{}, false
+	}
+
+	entry := mountInfoEntry{
+		mountPoint: unescapeMountInfoPath(fields[4]),
+	}
+	for i := 6; i < len(fields); i++ {
+		if fields[i] == "-" && i+2 < len(fields) {
+			entry.source = unescapeMountInfoPath(fields[i+2])
+			break
+		}
+	}
+	return entry, true
+}
+
+// parseLoopDeviceIndex extracts the numeric loop minor index from a /dev/loopN path.
+//
+// Arguments:
+//   - devPath: Device path string such as "/dev/loop12".
+//
+// Example usage:
+//
+//	idx, ok := parseLoopDeviceIndex("/dev/loop12")
+func parseLoopDeviceIndex(devPath string) (int, bool) {
+	if !strings.HasPrefix(devPath, loopDevicePathPrefix) {
+		return 0, false
+	}
+	suffix := strings.TrimPrefix(devPath, loopDevicePathPrefix)
+	if suffix == "" {
+		return 0, false
+	}
+	idx, err := strconv.Atoi(suffix)
+	if err != nil || idx < 0 {
+		return 0, false
+	}
+	return idx, true
 }
 
 func unescapeMountInfoPath(p string) string {

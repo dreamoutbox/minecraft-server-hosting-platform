@@ -53,32 +53,30 @@ services:
       WORKER_PORT: "9090"
       WORKER_API_KEY: dev-worker-key
       WORKER_BASE_DIR: /var/lib/mc-platform
-      WORKER_MAX_SERVERS: "8"
+      WORKER_MAX_SERVERS: "${WORKER_MAX_SERVERS:-20}"
       WORKER_LOOP_DEVICE_ENABLED: "true"
     cap_drop:
       - ALL
     cap_add:
       - SYS_ADMIN
+      - MKNOD
       - DAC_OVERRIDE
       - CHOWN
       - FOWNER
-    # Allow allocating and mounting loop devices (block major 7)
-    # without full privileged mode. Docker does not dynamically create
-    # /dev/loopN nodes inside non-privileged containers, so loop0-loop7
-    # must be mapped explicitly for `mount -o loop` to succeed.
-    # Note: >8 concurrent loop mounts will fail unless more /dev/loopN
-    # nodes are pre-created and mapped, or the worker runs on the host / privileged.
+    # Allow allocating and mounting any loop device (block major 7) without full
+    # privileged mode. The worker allocates free indices via /dev/loop-control and
+    # creates /dev/loopN nodes on demand using CAP_MKNOD, while device_cgroup_rules
+    # restricts block device creation and access strictly to loop devices (7:*).
     devices:
       - /dev/loop-control:/dev/loop-control
-      - /dev/loop0:/dev/loop0
-      - /dev/loop1:/dev/loop1
-      - /dev/loop2:/dev/loop2
-      - /dev/loop3:/dev/loop3
-      - /dev/loop4:/dev/loop4
-      - /dev/loop5:/dev/loop5
-      - /dev/loop6:/dev/loop6
-      - /dev/loop7:/dev/loop7
     device_cgroup_rules:
+      # Cgroup device allowlist rule: "<type> <major>:<minor> <permissions>"
+      #   b   = block device (vs. c for character device)
+      #   7   = Linux major number for loop devices (/dev/loop*)
+      #   *   = any minor number (allows loop0, loop1, ..., loopN dynamically)
+      #   rmw = permit read (r), mknod node creation (m), and write (w)
+      # Lets mc_worker create and mount any /dev/loopN without granting access
+      # to other host block devices (such as /dev/sda or /dev/nvme*).
       - "b 7:* rmw"
     ports:
       - "9090:9090"

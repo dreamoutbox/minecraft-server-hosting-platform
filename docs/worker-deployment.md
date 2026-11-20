@@ -6,13 +6,13 @@ The worker daemon (`cmd/worker`) executes directly on each physical or virtual h
 
 To support disk quotas via loop-mounted sparse ext4 files, the worker daemon requires Linux loop device access and administrative mounting privileges.
 
-### 1. Loop-Mount Capability (`--cap-add=SYS_ADMIN`)
-The worker daemon or its container **must** run with `CAP_SYS_ADMIN`. This is a hard requirement, not optional. Without this capability, the worker cannot execute `mount -o loop` or manage ext4 filesystem mounts.
+### 1. Loop-Mount Capabilities (`--cap-add=SYS_ADMIN --cap-add=MKNOD`)
+The worker daemon or its container **must** run with `CAP_SYS_ADMIN` (for `mount`/`umount`) and `CAP_MKNOD` (to create `/dev/loopN` nodes dynamically inside a non-privileged container). These are hard requirements, not optional.
 
 ### 2. Device Access
-The worker must have direct read/write access to loop control and loop block devices:
+The worker must have access to loop control and loop block devices (block major 7):
 - `/dev/loop-control`
-- `/dev/loop*` (e.g., `/dev/loop0` through `/dev/loop7` or dynamic loop devices)
+- Device cgroup rule `b 7:* rmw` (allows creating and using any `/dev/loopN` node dynamically without pre-mapping `/dev/loop0`..`/dev/loop7`)
 
 ### 3. Docker Socket Access
 The worker communicates with the host Docker engine via the local UNIX socket:
@@ -26,9 +26,14 @@ When deploying the worker inside a Docker container:
 docker run -d \
   --name mc-worker \
   --restart unless-stopped \
+  --cap-drop=ALL \
   --cap-add=SYS_ADMIN \
+  --cap-add=MKNOD \
+  --cap-add=DAC_OVERRIDE \
+  --cap-add=CHOWN \
+  --cap-add=FOWNER \
   --device /dev/loop-control:/dev/loop-control \
-  --device /dev/loop0:/dev/loop0 \
+  --device-cgroup-rule='b 7:* rmw' \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /var/lib/mc-platform:/var/lib/mc-platform:rshared \
   -e WORKER_PORT=9090 \
