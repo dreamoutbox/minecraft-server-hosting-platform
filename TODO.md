@@ -107,6 +107,14 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
+### 11/20/2026
+
+- [x] change all env in compose to use `${VAR:-default}` (VAR or default) syntax
+
+- [ ] test deploy in real VPS.
+
+---
+
 # BACKLOG
 
 - [ ] connect to cloudflare API for minecraft server custom subdomain.

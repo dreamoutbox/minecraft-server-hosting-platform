@@ -5,3 +5,6 @@
 data/
 
 .env
+dev-vps-info.txt
+mc-platform-images.tar.gz
+dev-vps.env
