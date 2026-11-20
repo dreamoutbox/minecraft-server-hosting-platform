@@ -207,3 +207,42 @@ func TestServerConnectAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestSeedDefaultHostUpdatesExistingHost(t *testing.T) {
+	dsn := getTestDSN()
+	db, err := InitDB(dsn)
+	if err != nil {
+		t.Skipf("skipping postgres test (database unreachable: %v)", err)
+		return
+	}
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("AutoMigrate failed: %v", err)
+	}
+
+	hostname := "test-seed-worker-update"
+	db.Where("hostname = ?", hostname).Delete(&Host{})
+	t.Cleanup(func() {
+		db.Where("hostname = ?", hostname).Delete(&Host{})
+	})
+
+	if err := SeedDefaultHost(db, hostname, "http://worker-old:9090", "http://fs-old:9100", "old.example.com", "10.0.0.1", "old-key", 10); err != nil {
+		t.Fatalf("initial SeedDefaultHost failed: %v", err)
+	}
+
+	if err := SeedDefaultHost(db, hostname, "http://worker-new:9090", "http://fs-new:9100", "new.example.com", "10.0.0.2", "new-key", 35); err != nil {
+		t.Fatalf("update SeedDefaultHost failed: %v", err)
+	}
+
+	var updated Host
+	if err := db.Where("hostname = ?", hostname).First(&updated).Error; err != nil {
+		t.Fatalf("failed reloading updated host: %v", err)
+	}
+	if updated.WorkerBaseURL != "http://worker-new:9090" ||
+		updated.FileServerBaseURL != "http://fs-new:9100" ||
+		updated.PublicDomain != "new.example.com" ||
+		updated.PublicIP != "10.0.0.2" ||
+		updated.APIKey != "new-key" ||
+		updated.MaxServers != 35 {
+		t.Errorf("SeedDefaultHost did not update all fields: %+v", updated)
+	}
+}

@@ -867,17 +867,24 @@ func (s *Service) RetryJob(c *gin.Context) {
 		return
 	}
 
-	subpath := "/jobs"
-	if strings.HasPrefix(c.PostForm("return_to"), fmt.Sprintf("/dashboard/servers/%d/backups", serverIDVal)) {
-		subpath = "/backups"
+	returnTo := c.PostForm("return_to")
+	redirectFor := func(kind string, msg string) string {
+		if returnTo == "/dashboard/admin/jobs" && role.IsAdmin() {
+			return fmt.Sprintf("/dashboard/admin/jobs?%s=%s", kind, url.QueryEscape(msg))
+		}
+		subpath := "/jobs"
+		if strings.HasPrefix(returnTo, fmt.Sprintf("/dashboard/servers/%d/backups", serverIDVal)) {
+			subpath = "/backups"
+		}
+		return serverRedirectURL(serverIDVal, subpath, kind, msg)
 	}
 
 	if _, err := s.jobSvc.RetryJob(c.Request.Context(), userID, role.IsStaffOrAdmin(), jobIDVal); err != nil {
-		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, subpath, "error", err.Error()))
+		c.Redirect(http.StatusFound, redirectFor("error", err.Error()))
 		return
 	}
 
-	c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, subpath, "success", "Job re-queued"))
+	c.Redirect(http.StatusFound, redirectFor("success", "Job re-queued"))
 }
 
 // TriggerMigration moves the server to a different host. Restricted to staff and admin roles.

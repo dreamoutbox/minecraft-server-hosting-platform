@@ -107,6 +107,7 @@ func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateC
 		"EULA=TRUE",
 		"ONLINE_MODE=FALSE",
 		"CREATE_CONSOLE_IN_PIPE=true",
+		"USE_MEOWICE_FLAGS=TRUE",
 	}
 	if req.ServerType != "" {
 		envVars = append(envVars, "TYPE="+strings.ToUpper(req.ServerType))

@@ -23,6 +23,7 @@ type Config struct {
 	DefaultWorkerName            string
 	DefaultWorkerPublicDomain    string
 	DefaultWorkerPublicIP        string
+	DefaultWorkerMaxServers      int
 	DefaultFileServerURL         string
 	DefaultFileServerInternalURL string
 }
@@ -69,6 +70,19 @@ func LoadFromEnv() (*Config, error) {
 	defaultWorkerName := getEnv("DEFAULT_WORKER_NAME", "worker1")
 	defaultWorkerPublicDomain := getEnv("DEFAULT_WORKER_PUBLIC_DOMAIN", "")
 	defaultWorkerPublicIP := getEnv("DEFAULT_WORKER_PUBLIC_IP", "")
+	defaultWorkerMaxServers, err := parseEnvInt("DEFAULT_WORKER_MAX_SERVERS", 0)
+	if err != nil {
+		return nil, fmt.Errorf("invalid DEFAULT_WORKER_MAX_SERVERS: %w", err)
+	}
+	if defaultWorkerMaxServers <= 0 {
+		defaultWorkerMaxServers, err = parseEnvInt("WORKER_MAX_SERVERS", 20)
+		if err != nil {
+			return nil, fmt.Errorf("invalid WORKER_MAX_SERVERS: %w", err)
+		}
+		if defaultWorkerMaxServers <= 0 {
+			defaultWorkerMaxServers = 20
+		}
+	}
 	defaultFileServerURL := getEnv("DEFAULT_FILESERVER_URL", "")
 	defaultFileServerInternalURL := getEnv("DEFAULT_FILESERVER_INTERNAL_URL", "")
 
@@ -111,6 +125,7 @@ func LoadFromEnv() (*Config, error) {
 		DefaultWorkerName:            defaultWorkerName,
 		DefaultWorkerPublicDomain:    defaultWorkerPublicDomain,
 		DefaultWorkerPublicIP:        defaultWorkerPublicIP,
+		DefaultWorkerMaxServers:      defaultWorkerMaxServers,
 		DefaultFileServerURL:         defaultFileServerURL,
 		DefaultFileServerInternalURL: defaultFileServerInternalURL,
 	}, nil

@@ -136,7 +136,13 @@ func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, fileServerBaseURL, pu
 	hashHex := hex.EncodeToString(hashBytes[:])
 
 	var host Host
-	err := db.Where("worker_base_url = ?", workerBaseURL).First(&host).Error
+	err := gorm.ErrRecordNotFound
+	if hostname != "" {
+		err = db.Where("hostname = ?", hostname).First(&host).Error
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = db.Where("worker_base_url = ?", workerBaseURL).First(&host).Error
+	}
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			host = Host{
@@ -156,6 +162,10 @@ func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, fileServerBaseURL, pu
 	}
 
 	host.Status = HostStatusActive
+	if hostname != "" {
+		host.Hostname = hostname
+	}
+	host.WorkerBaseURL = workerBaseURL
 	host.APIKey = apiKey
 	host.APIKeyHash = hashHex
 	if fileServerBaseURL != "" {
@@ -166,6 +176,9 @@ func SeedDefaultHost(db *gorm.DB, hostname, workerBaseURL, fileServerBaseURL, pu
 	}
 	if publicIP != "" {
 		host.PublicIP = publicIP
+	}
+	if maxServers > 0 {
+		host.MaxServers = maxServers
 	}
 	return db.Save(&host).Error
 }

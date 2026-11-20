@@ -111,13 +111,15 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] change all env in compose to use `${VAR:-default}` (VAR or default) syntax
 
-- [ ] test deploy in real VPS.
+- [x] test deploy in real VPS.
 
-- [ ] make worker update `hostname` `public_domain` `public_ip` `worker_base_url` `file_server_base_url` `api_key` `max_servers` when env change.
+- [x] make worker update `hostname` `public_domain` `public_ip` `worker_base_url` `file_server_base_url` `api_key` `max_servers` when env change.
 
-- [ ] add button to manually retry failed server_jobs
+- [x] add button to manually retry failed server_jobs
 
-- [ ] add copy address to "Connect Address" and "Connect IP Address"
+- [x] add copy address to "Connect Address" and "Connect IP Address"
+
+- [x] use `USE_MEOWICE_FLAGS` for mc container
 
 ---
 

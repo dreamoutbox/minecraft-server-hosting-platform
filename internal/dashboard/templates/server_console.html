@@ -7,7 +7,7 @@
         class="card-header bg-white border-0 pt-4 pb-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
         <div>
             <h5 class="fw-bold mb-0">Server Console</h5>
-            <p class="text-muted small mb-0">Live container stdout/stderr logs and console command execution.</p>
+            <!-- <p class="text-muted small mb-0">Live container stdout/stderr logs and console command execution.</p> -->
         </div>
         <form method="GET" action="/dashboard/servers/{{.Server.ID}}/console" class="d-flex align-items-center gap-2">
             <label for="tail" class="form-label small text-muted mb-0">Lines:</label>
@@ -23,10 +23,19 @@
 
     <div class="card-body">
         <div id="console-logs-error" class="alert alert-warning small py-2 {{if not .LogsError}}d-none{{end}}">
-            {{.LogsError}}</div>
+            {{.LogsError}}
+        </div>
 
         <pre id="console-output" class="bg-dark text-light p-3 rounded small mb-3"
-            style="height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">{{if ne .Server.Status "running"}}Server is offline.{{else if .ConsoleLogs}}{{.ConsoleLogs}}{{else}}No console output available.{{end}}</pre>
+            style="height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">
+{{if ne .Server.Status "running"}}
+Server is offline.
+{{else if .ConsoleLogs}}
+{{.ConsoleLogs}}
+{{else}}
+No console output available.
+{{end}}
+        </pre>
 
         <div id="console-command-error" class="alert alert-danger small py-2 d-none"></div>
 

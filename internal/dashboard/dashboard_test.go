@@ -369,6 +369,9 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	if !strings.Contains(detailHTML, loadedServer.ConnectAddress()) {
 		t.Errorf("expected connect address %q on overview page", loadedServer.ConnectAddress())
 	}
+	if !strings.Contains(detailHTML, "copyConnectAddress(this,") {
+		t.Errorf("expected copy address button on overview page")
+	}
 
 	// 6b. Dedicated Backups & Logs Pages
 	wBackupsPage := httptest.NewRecorder()

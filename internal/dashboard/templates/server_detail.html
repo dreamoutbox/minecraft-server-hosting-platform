@@ -26,19 +26,34 @@
             <div class="col-sm-6 col-lg-3">
                 <div class="p-3 bg-light rounded">
                     <span class="text-muted small">Connect Address</span>
-                    <div class="fw-bold fs-5"><code>{{.Server.ConnectAddress}}</code></div>
+                    <div class="d-flex align-items-center justify-content-between gap-2">
+                        <div class="fw-bold fs-5 text-truncate"><code>{{.Server.ConnectAddress}}</code></div>
+                        {{if .Server.ConnectAddress}}
+                        <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                            onclick="copyConnectAddress(this, '{{.Server.ConnectAddress}}')">Copy</button>
+                        {{end}}
+                    </div>
                 </div>
             </div>
             <div class="col-sm-6 col-lg-3">
                 <div class="p-3 bg-light rounded">
                     <span class="text-muted small">Connect IP Address</span>
-                    <div class="fw-bold fs-5">{{if .Server.ConnectIPAddress}}<code>{{.Server.ConnectIPAddress}}</code>{{else}}<span class="text-muted">Not set</span>{{end}}</div>
+                    <div class="d-flex align-items-center justify-content-between gap-2">
+                        <div class="fw-bold fs-5 text-truncate">{{if
+                            .Server.ConnectIPAddress}}<code>{{.Server.ConnectIPAddress}}</code>{{else}}<span
+                                class="text-muted">Not set</span>{{end}}</div>
+                        {{if .Server.ConnectIPAddress}}
+                        <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                            onclick="copyConnectAddress(this, '{{.Server.ConnectIPAddress}}')">Copy</button>
+                        {{end}}
+                    </div>
                 </div>
             </div>
             <div class="col-sm-6 col-lg-3">
                 <div class="p-3 bg-light rounded">
                     <span class="text-muted small">Hardware Plan</span>
-                    <div class="fw-bold fs-5">{{.Server.Plan.Name}} ({{.Server.Plan.CPULimit}} Core / {{.Server.Plan.MemLimitMB}}MB)</div>
+                    <div class="fw-bold fs-5">{{.Server.Plan.Name}} ({{.Server.Plan.CPULimit}} Core /
+                        {{.Server.Plan.MemLimitMB}}MB)</div>
                 </div>
             </div>
             <div class="col-sm-6 col-lg-3">
@@ -52,7 +67,8 @@
         <div class="d-flex flex-wrap gap-2 mt-4">
             {{if .IsExpired}}
             <div class="alert alert-danger py-2 px-3 mb-2 w-100 small">
-                This server has expired.{{if .CanExtend}} Extend within the 7-day retention window to restore access before data is permanently deleted.{{end}}
+                This server has expired.{{if .CanExtend}} Extend within the 7-day retention window to restore access
+                before data is permanently deleted.{{end}}
             </div>
             {{else if .Server.ExpiresAt}}
             <div class="text-muted small w-100 mb-1">
@@ -74,10 +90,24 @@
                 <button type="submit" class="btn btn-outline-success">Extend 30 Days</button>
             </form>
             {{end}}
-            <a href="/dashboard/servers/{{.Server.ID}}/files/open" target="_blank" rel="noopener" class="btn btn-outline-primary">Manage Files</a>
-            <a href="/dashboard/servers/{{.Server.ID}}/backups" class="btn btn-outline-info">Backups</a>
-            <a href="/dashboard/servers/{{.Server.ID}}/settings" class="btn btn-outline-secondary">Settings</a>
+            <!-- <a href="/dashboard/servers/{{.Server.ID}}/files/open" target="_blank" rel="noopener" class="btn btn-outline-primary">Manage Files</a> -->
+            <!-- <a href="/dashboard/servers/{{.Server.ID}}/backups" class="btn btn-outline-info">Backups</a> -->
+            <!-- <a href="/dashboard/servers/{{.Server.ID}}/settings" class="btn btn-outline-secondary">Settings</a> -->
         </div>
     </div>
 </div>
+<script>
+    function copyConnectAddress(btn, value) {
+        if (!navigator.clipboard || !value) {
+            return;
+        }
+        navigator.clipboard.writeText(value).then(function () {
+            const prev = btn.textContent;
+            btn.textContent = "Copied!";
+            setTimeout(function () {
+                btn.textContent = prev;
+            }, 1500);
+        });
+    }
+</script>
 {{end}}

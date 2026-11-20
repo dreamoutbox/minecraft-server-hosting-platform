@@ -307,10 +307,18 @@ func TestAdminMenuSearchPaginationAndPlanCRUD(t *testing.T) {
 		t.Errorf("expected payments page 2 to show pay1")
 	}
 
-	// 6. Server Jobs: search + pagination
+	// 6. Server Jobs: search + pagination + retry button
 	wJobSearch := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/admin/jobs?q=%s", url.QueryEscape(job2.LastError)), adminCookie, nil)
 	if wJobSearch.Code != http.StatusOK || !strings.Contains(wJobSearch.Body.String(), job2.LastError) {
 		t.Errorf("server jobs search failed")
+	}
+	if !strings.Contains(wJobSearch.Body.String(), fmt.Sprintf("/dashboard/servers/%d/jobs/%d/retry", srv2.ID, job2.ID)) {
+		t.Errorf("expected retry form for failed job on admin jobs page")
+	}
+	retryForm := url.Values{"return_to": {"/dashboard/admin/jobs"}}
+	wJobRetry := doDashboardReq(r, http.MethodPost, fmt.Sprintf("/dashboard/servers/%d/jobs/%d/retry", srv2.ID, job2.ID), adminCookie, retryForm)
+	if wJobRetry.Code != http.StatusFound || !strings.HasPrefix(wJobRetry.Header().Get("Location"), "/dashboard/admin/jobs?success=") {
+		t.Errorf("expected admin job retry redirect to /dashboard/admin/jobs?success=..., got %d (%s)", wJobRetry.Code, wJobRetry.Header().Get("Location"))
 	}
 	wJobPage2 := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/admin/jobs?q=%s&page=2&page_size=1", url.QueryEscape(userEmail)), adminCookie, nil)
 	wJobPage1All := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/admin/jobs?q=%s&page=1&page_size=1", url.QueryEscape(fmt.Sprintf("World-%d", suffix))), adminCookie, nil)

@@ -164,7 +164,7 @@ func main() {
 		cfg.DefaultWorkerPublicDomain,
 		cfg.DefaultWorkerPublicIP,
 		cfg.DefaultWorkerKey,
-		20,
+		cfg.DefaultWorkerMaxServers,
 	); err != nil {
 		log.Printf("[WARN] failed seeding default worker host: %v", err)
 	}
