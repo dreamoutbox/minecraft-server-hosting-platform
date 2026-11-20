@@ -12,33 +12,33 @@ services:
       seaweedfs:
         condition: service_started
     environment:
-      PORT: "8080"
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_USER: postgres
-      DB_PASSWORD: postgrespassword
-      DB_NAME: minecraft_hosting
-      DB_SSLMODE: disable
-      PORT_RANGE_MIN: "25565"
-      PORT_RANGE_MAX: "25600"
-      JWT_SECRET: dev-platform-jwt-secret-key-change-in-prod
+      PORT: "${PORT:-8080}"
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: "${DB_PORT:-5432}"
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgrespassword}
+      DB_NAME: ${DB_NAME:-minecraft_hosting}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      PORT_RANGE_MIN: "${PORT_RANGE_MIN:-25565}"
+      PORT_RANGE_MAX: "${PORT_RANGE_MAX:-25600}"
+      JWT_SECRET: ${JWT_SECRET:-dev-platform-jwt-secret-key-change-in-prod}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
       RETENTION_DAYS: ${RETENTION_DAYS:-7}
       BILLING_PROVIDER: ${BILLING_PROVIDER:-}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_dev_mock_key}
-      STORAGE_TYPE: s3
-      S3_ENDPOINT: http://seaweedfs:8333
-      S3_REGION: us-east-1
-      S3_BUCKET: minecraft-backups
-      S3_USE_PATH_STYLE: "true"
-      DEFAULT_WORKER_URL: http://worker:9090
-      DEFAULT_WORKER_KEY: dev-worker-key
-      DEFAULT_WORKER_NAME: worker1
-      DEFAULT_WORKER_PUBLIC_DOMAIN: localhost
-      DEFAULT_WORKER_PUBLIC_IP: 127.0.0.1
-      DEFAULT_FILESERVER_URL: http://localhost:9100
-      DEFAULT_FILESERVER_INTERNAL_URL: http://fileserver:9100
+      STORAGE_TYPE: ${STORAGE_TYPE:-s3}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://seaweedfs:8333}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-minecraft-backups}
+      S3_USE_PATH_STYLE: "${S3_USE_PATH_STYLE:-true}"
+      DEFAULT_WORKER_URL: ${DEFAULT_WORKER_URL:-http://worker:9090}
+      DEFAULT_WORKER_KEY: ${DEFAULT_WORKER_KEY:-dev-worker-key}
+      DEFAULT_WORKER_NAME: ${DEFAULT_WORKER_NAME:-worker1}
+      DEFAULT_WORKER_PUBLIC_DOMAIN: ${DEFAULT_WORKER_PUBLIC_DOMAIN:-localhost}
+      DEFAULT_WORKER_PUBLIC_IP: ${DEFAULT_WORKER_PUBLIC_IP:-127.0.0.1}
+      DEFAULT_FILESERVER_URL: ${DEFAULT_FILESERVER_URL:-http://localhost:9100}
+      DEFAULT_FILESERVER_INTERNAL_URL: ${DEFAULT_FILESERVER_INTERNAL_URL:-http://fileserver:9100}
     ports:
       - "8080:8080"
     networks:
@@ -50,11 +50,11 @@ services:
     restart: unless-stopped
     stop_grace_period: 60s
     environment:
-      WORKER_PORT: "9090"
-      WORKER_API_KEY: dev-worker-key
-      WORKER_BASE_DIR: /var/lib/mc-platform
+      WORKER_PORT: "${WORKER_PORT:-9090}"
+      WORKER_API_KEY: ${WORKER_API_KEY:-dev-worker-key}
+      WORKER_BASE_DIR: ${WORKER_BASE_DIR:-/var/lib/mc-platform}
       WORKER_MAX_SERVERS: "${WORKER_MAX_SERVERS:-20}"
-      WORKER_LOOP_DEVICE_ENABLED: "true"
+      WORKER_LOOP_DEVICE_ENABLED: "${WORKER_LOOP_DEVICE_ENABLED:-true}"
     cap_drop:
       - ALL
     cap_add:
@@ -93,12 +93,12 @@ services:
     container_name: mc_fileserver
     restart: unless-stopped
     environment:
-      FILESERVER_PORT: "9100"
-      FILESERVER_SQLITE_PATH: /data/fileserver.db
-      FILESERVER_MOUNTS_DIR: /var/lib/mc-platform/mounts
-      FILESERVER_API_KEY: dev-worker-key
-      FILESERVER_JWT_SECRET: dev-fileserver-jwt-secret-change-in-prod
-      FILESERVER_MAX_UPLOAD_MB: "2048"
+      FILESERVER_PORT: "${FILESERVER_PORT:-9100}"
+      FILESERVER_SQLITE_PATH: ${FILESERVER_SQLITE_PATH:-/data/fileserver.db}
+      FILESERVER_MOUNTS_DIR: ${FILESERVER_MOUNTS_DIR:-/var/lib/mc-platform/mounts}
+      FILESERVER_API_KEY: ${FILESERVER_API_KEY:-dev-worker-key}
+      FILESERVER_JWT_SECRET: ${FILESERVER_JWT_SECRET:-dev-fileserver-jwt-secret-change-in-prod}
+      FILESERVER_MAX_UPLOAD_MB: "${FILESERVER_MAX_UPLOAD_MB:-2048}"
     ports:
       - "9100:9100"
     volumes:
@@ -117,22 +117,22 @@ services:
       seaweedfs:
         condition: service_started
     environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_USER: postgres
-      DB_PASSWORD: postgrespassword
-      DB_NAME: minecraft_hosting
-      DB_SSLMODE: disable
-      PORT_RANGE_MIN: "25565"
-      PORT_RANGE_MAX: "25600"
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: "${DB_PORT:-5432}"
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgrespassword}
+      DB_NAME: ${DB_NAME:-minecraft_hosting}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      PORT_RANGE_MIN: "${PORT_RANGE_MIN:-25565}"
+      PORT_RANGE_MAX: "${PORT_RANGE_MAX:-25600}"
       RETENTION_DAYS: ${RETENTION_DAYS:-7}
-      STORAGE_TYPE: s3
-      S3_ENDPOINT: http://seaweedfs:8333
-      S3_REGION: us-east-1
-      S3_BUCKET: minecraft-backups
-      S3_USE_PATH_STYLE: "true"
-      DEFAULT_WORKER_URL: http://worker:9090
-      DEFAULT_WORKER_KEY: dev-worker-key
-      DEFAULT_FILESERVER_INTERNAL_URL: http://fileserver:9100
+      STORAGE_TYPE: ${STORAGE_TYPE:-s3}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://seaweedfs:8333}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-minecraft-backups}
+      S3_USE_PATH_STYLE: "${S3_USE_PATH_STYLE:-true}"
+      DEFAULT_WORKER_URL: ${DEFAULT_WORKER_URL:-http://worker:9090}
+      DEFAULT_WORKER_KEY: ${DEFAULT_WORKER_KEY:-dev-worker-key}
+      DEFAULT_FILESERVER_INTERNAL_URL: ${DEFAULT_FILESERVER_INTERNAL_URL:-http://fileserver:9100}
     networks:
       - mc_platform_net
