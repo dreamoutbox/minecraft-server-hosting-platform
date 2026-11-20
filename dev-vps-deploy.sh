@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# dev-deploy-vps.sh
+# dev-vps-deploy.sh
 # Wrapper around dev-docker-build-image.sh that builds all platform Docker images
 # locally, exports them to a compressed archive, rsyncs the archive and runtime
 # compose/script files to a Linux VPS, loads the images remotely via SSH, and
@@ -18,9 +18,9 @@
 #   $2: Optional remote directory override (defaults to REMOTE_DIR).
 #
 # Example usage:
-#   ./dev-deploy-vps.sh root@203.0.113.10
-#   ./dev-deploy-vps.sh ubuntu@203.0.113.10 /opt/minecraft-hosting
-#   REMOTE_DIR=mc-dev ./dev-deploy-vps.sh ubuntu@203.0.113.10
+#   ./dev-vps-deploy.sh root@203.0.113.10
+#   ./dev-vps-deploy.sh ubuntu@203.0.113.10 /opt/minecraft-hosting
+#   REMOTE_DIR=mc-dev ./dev-vps-deploy.sh ubuntu@203.0.113.10
 
 set -euo pipefail
 
@@ -231,9 +231,9 @@ main() {
 	local host_ip="${target#*@}"
 	echo ""
 	echo "Dev deploy complete on ${target}."
-	echo "  Apiserver: http://${host_ip}:8080"
-	echo "  Adminer:   http://${host_ip}:8081"
-	echo "  Logs:      ssh ${target} 'cd ${remote_dir} && docker compose -f docker-compose.base.yml -f docker-compose.app.yml -f docker-compose.stripe.yml logs -f'"
+	echo "Apiserver: http://${host_ip}:8080"
+	echo "Adminer:   http://${host_ip}:8081"
+	echo "Logs:      ssh ${target} 'cd ${remote_dir} && docker compose -f docker-compose.base.yml -f docker-compose.app.yml -f docker-compose.stripe.yml logs -f'"
 }
 
 main "$@"

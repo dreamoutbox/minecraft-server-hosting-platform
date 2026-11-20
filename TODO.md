@@ -113,6 +113,12 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [ ] test deploy in real VPS.
 
+- [ ] make worker update `hostname` `public_domain` `public_ip` `worker_base_url` `file_server_base_url` `api_key` `max_servers` when env change.
+
+- [ ] add button to manually retry failed server_jobs
+
+- [ ] add copy address to "Connect Address" and "Connect IP Address"
+
 ---
 
 # BACKLOG

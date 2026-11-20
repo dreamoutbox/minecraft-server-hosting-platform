@@ -63,6 +63,9 @@ services:
       - DAC_OVERRIDE
       - CHOWN
       - FOWNER
+    # Docker's default AppArmor profile blocks ext4 loop mounts on Ubuntu/Debian hosts.
+    security_opt:
+      - apparmor:unconfined
     # Allow allocating and mounting any loop device (block major 7) without full
     # privileged mode. The worker allocates free indices via /dev/loop-control and
     # creates /dev/loopN nodes on demand using CAP_MKNOD, while device_cgroup_rules

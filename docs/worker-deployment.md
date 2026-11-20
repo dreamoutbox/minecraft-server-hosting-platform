@@ -32,6 +32,7 @@ docker run -d \
   --cap-add=DAC_OVERRIDE \
   --cap-add=CHOWN \
   --cap-add=FOWNER \
+  --security-opt apparmor=unconfined \
   --device /dev/loop-control:/dev/loop-control \
   --device-cgroup-rule='b 7:* rmw' \
   -v /var/run/docker.sock:/var/run/docker.sock \

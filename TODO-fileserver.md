@@ -18,4 +18,6 @@
 
 - [x] determine if file is text file. and allow open to edit. disallow edit binary file or large file.
 
+- [ ] add checkbox for select multiple files.
+
 - [ ] add button to refresh file list
