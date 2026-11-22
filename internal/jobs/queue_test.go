@@ -109,11 +109,36 @@ func (q *queueTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID stri
 }
 
 func (q *queueTestWorker) UploadImageBackup(ctx context.Context, volumeID string, req worker.UploadImageBackupRequest) (*worker.UploadImageBackupResponse, error) {
-	return &worker.UploadImageBackupResponse{}, nil
+	q.mu.Lock()
+	data := append([]byte(nil), q.volumes[volumeID]...)
+	q.mu.Unlock()
+	if len(data) == 0 {
+		data = []byte("mock-ext4-image-bytes")
+	}
+	n, err := worker.PutPresignedBytes(ctx, req.PresignedURLs[0], data, "application/gzip")
+	if err != nil {
+		return nil, err
+	}
+	return &worker.UploadImageBackupResponse{
+		PartsUploaded: 1,
+		PartSizes:     []int64{n},
+		TotalBytes:    n,
+	}, nil
 }
 
 func (q *queueTestWorker) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*worker.RestoreImageBackupResponse, error) {
-	return &worker.RestoreImageBackupResponse{}, nil
+	var merged bytes.Buffer
+	for _, u := range presignedURLs {
+		b, err := worker.GetPresignedBytes(ctx, u)
+		if err != nil {
+			return nil, err
+		}
+		merged.Write(b)
+	}
+	q.mu.Lock()
+	q.volumes[volumeID] = merged.Bytes()
+	q.mu.Unlock()
+	return &worker.RestoreImageBackupResponse{SizeBytes: int64(merged.Len())}, nil
 }
 
 func (q *queueTestWorker) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
@@ -473,4 +498,156 @@ func TestLifecycleExpirationAndRetentionSweep(t *testing.T) {
 	}
 
 	_ = db.Delete(&reloadedRecent).Error
+}
+
+func TestScheduledImageBackupCronAndQueueExecution(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_DSN")
+	if dsn == "" {
+		dsn = "host=localhost user=postgres password=postgrespassword dbname=minecraft_hosting port=5432 sslmode=disable"
+	}
+	db, err := domain.InitDB(dsn)
+	if err != nil {
+		t.Skipf("skipping test: database unreachable: %v", err)
+		return
+	}
+	_ = domain.AutoMigrate(db)
+	_ = domain.SeedPlans(db)
+
+	host := domain.Host{
+		Hostname:      fmt.Sprintf("imgcron-host-%d", time.Now().UnixNano()),
+		WorkerBaseURL: "http://imgcron-host:9090",
+		APIKey:        "k",
+		APIKeyHash:    fmt.Sprintf("h-imgcron-%d", time.Now().UnixNano()),
+		MaxServers:    20,
+		Status:        domain.HostStatusActive,
+	}
+	if err := db.Create(&host).Error; err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+
+	user := domain.User{
+		Email:        fmt.Sprintf("imgcron-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hashed",
+		Role:         domain.UserRoleAdmin,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	var plan domain.Plan
+	_ = db.First(&plan)
+
+	basePort := 26810
+	db.Where("port >= ? AND port <= ?", basePort, basePort+10).Delete(&domain.Server{})
+	db.Model(&domain.ServerJob{}).Where("status = ?", domain.JobStatusPending).Update("status", domain.JobStatusFailed)
+
+	statuses := []domain.ServerStatus{
+		domain.ServerStatusRunning,
+		domain.ServerStatusStopped,
+		domain.ServerStatusPending,
+		domain.ServerStatusProvisioning,
+		domain.ServerStatusMigrating,
+		domain.ServerStatusError,
+	}
+	serversByStatus := make(map[domain.ServerStatus]domain.Server)
+	for i, st := range statuses {
+		srv := domain.Server{
+			UserID:      user.ID,
+			PlanID:      plan.ID,
+			HostID:      host.ID,
+			Name:        fmt.Sprintf("ImgCron-%s", st),
+			Port:        basePort + i,
+			Status:      st,
+			ContainerID: fmt.Sprintf("ctr-%s", st),
+		}
+		if err := db.Create(&srv).Error; err != nil {
+			t.Fatalf("create server (%s): %v", st, err)
+		}
+		serversByStatus[st] = srv
+	}
+	defer func() {
+		for _, srv := range serversByStatus {
+			db.Delete(&domain.Server{}, srv.ID)
+		}
+	}()
+
+	tw := newQueueTestWorker()
+	runningID := serversByStatus[domain.ServerStatusRunning].ID
+	stoppedID := serversByStatus[domain.ServerStatusStopped].ID
+	tw.volumes[fmt.Sprintf("%d", runningID)] = []byte("running-ext4-img-content")
+	tw.volumes[fmt.Sprintf("%d", stoppedID)] = []byte("stopped-ext4-img-content")
+
+	workerFactory := func(baseURL, apiKey string) worker.Client { return tw }
+	hostingSvc := hosting.NewService(db, hosting.NewLeastLoadedScheduler(db), hosting.NewPortAllocator(db, 26850, 26890), workerFactory)
+	memStore := storage.NewMemoryStorageProvider()
+	defer func() { _ = memStore.Close() }()
+	backupSvc := backup.NewService(db, memStore, workerFactory)
+	jobSvc := NewService(db, hostingSvc, backupSvc)
+
+	ctx := context.Background()
+
+	enqueued, err := jobSvc.EnqueueScheduledImageBackups(ctx)
+	if err != nil {
+		t.Fatalf("EnqueueScheduledImageBackups failed: %v", err)
+	}
+	if enqueued < 2 {
+		t.Fatalf("expected at least 2 enqueued image backup jobs, got %d", enqueued)
+	}
+
+	for _, st := range []domain.ServerStatus{domain.ServerStatusPending, domain.ServerStatusProvisioning, domain.ServerStatusMigrating, domain.ServerStatusError} {
+		var cnt int64
+		_ = db.Model(&domain.ServerJob{}).Where("server_id = ? AND type = ?", serversByStatus[st].ID, domain.JobTypeBackupImage).Count(&cnt)
+		if cnt != 0 {
+			t.Errorf("expected 0 image backup jobs for status %s, got %d", st, cnt)
+		}
+	}
+	if _, dupJob, err := jobSvc.EnqueueImageBackup(ctx, 0, runningID); err != nil || dupJob != nil {
+		t.Errorf("expected duplicate pending image backup to be skipped, got job=%+v err=%v", dupJob, err)
+	}
+
+	for i := 0; i < 50; i++ {
+		processed, procErr := jobSvc.ProcessNext(ctx)
+		if procErr != nil {
+			t.Fatalf("ProcessNext failed: %v", procErr)
+		}
+		if !processed {
+			break
+		}
+	}
+
+	runBackups, err := backupSvc.ListImageBackups(ctx, runningID)
+	if err != nil || len(runBackups) != 1 || runBackups[0].Status != domain.BackupStatusCompleted {
+		t.Fatalf("expected 1 completed image backup for running server, got %+v (err=%v)", runBackups, err)
+	}
+	stopBackups, err := backupSvc.ListImageBackups(ctx, stoppedID)
+	if err != nil || len(stopBackups) != 1 || stopBackups[0].Status != domain.BackupStatusCompleted {
+		t.Fatalf("expected 1 completed image backup for stopped server, got %+v (err=%v)", stopBackups, err)
+	}
+
+	tw.volumes[fmt.Sprintf("%d", runningID)] = []byte("corrupted")
+	restoreJob, err := jobSvc.EnqueueImageRestore(ctx, user.ID, runningID, runBackups[0].ID)
+	if err != nil {
+		t.Fatalf("EnqueueImageRestore failed: %v", err)
+	}
+	if restoreJob.Type != domain.JobTypeRestoreImage {
+		t.Fatalf("expected job type %s, got %s", domain.JobTypeRestoreImage, restoreJob.Type)
+	}
+	processed, procErr := jobSvc.ProcessNext(ctx)
+	if !processed || procErr != nil {
+		t.Fatalf("restore_image ProcessNext failed: (%v, %v)", processed, procErr)
+	}
+	if got := string(tw.volumes[fmt.Sprintf("%d", runningID)]); got != "running-ext4-img-content" {
+		t.Errorf("restored running server image = %q, want %q", got, "running-ext4-img-content")
+	}
+
+	if _, err := jobSvc.StartImageBackupCron(ctx, "invalid-cron"); err == nil {
+		t.Error("expected error for invalid cron spec")
+	}
+	cronCtx, cancelCron := context.WithCancel(ctx)
+	stopCron, err := jobSvc.StartImageBackupCron(cronCtx, "0 5 * * *")
+	if err != nil {
+		t.Fatalf("StartImageBackupCron failed: %v", err)
+	}
+	cancelCron()
+	stopCron()
 }

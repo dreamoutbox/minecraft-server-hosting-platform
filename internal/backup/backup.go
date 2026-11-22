@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
@@ -27,14 +26,14 @@ const (
 // WorkerClientFactory instantiates a worker client targeting a specific host.
 type WorkerClientFactory func(baseURL string, apiKey string) worker.Client
 
-// Service coordinates world snapshot archives, restorations, and automated cron sweeps.
+// Service coordinates world snapshot archives, ext4 image backups, and restorations.
 type Service struct {
 	db                  *gorm.DB
 	storage             storage.StorageProvider
 	workerClientFactory WorkerClientFactory
-	cronRunner          *cron.Cron
 	maxBackups          int
 	presignTTL          time.Duration
+	maxImagePartBytes   int64
 }
 
 // NewService instantiates a backup and disaster recovery coordination service.
@@ -58,7 +57,6 @@ func NewService(db *gorm.DB, storage storage.StorageProvider, factory WorkerClie
 		db:                  db,
 		storage:             storage,
 		workerClientFactory: factory,
-		cronRunner:          cron.New(),
 		maxBackups:          DefaultMaxBackups,
 		presignTTL:          DefaultPresignTTL,
 	}
@@ -89,6 +87,20 @@ func (s *Service) SetMaxBackups(limit int) {
 func (s *Service) SetPresignTTL(ttl time.Duration) {
 	if ttl > 0 {
 		s.presignTTL = ttl
+	}
+}
+
+// SetMaxImagePartBytes overrides the per-part byte ceiling for ext4 image tar.gz uploads (0 uses worker's 1 GiB default).
+//
+// Arguments:
+//   - maxBytes: Maximum bytes per compressed part (primarily used to test multi-part splits with small sizes).
+//
+// Example usage:
+//
+//	svc.SetMaxImagePartBytes(64 * 1024)
+func (s *Service) SetMaxImagePartBytes(maxBytes int64) {
+	if maxBytes >= 0 {
+		s.maxImagePartBytes = maxBytes
 	}
 }
 
@@ -377,69 +389,4 @@ func (s *Service) ListBackups(ctx context.Context, serverID uint) ([]domain.Back
 		return nil, err
 	}
 	return records, nil
-}
-
-// SweepAndBackupAllActive scans for all running game servers and creates fresh snapshots.
-//
-// Arguments:
-//   - ctx: Operation cancellation context.
-//
-// Example usage:
-//
-//	err := svc.SweepAndBackupAllActive(ctx)
-func (s *Service) SweepAndBackupAllActive(ctx context.Context) error {
-	var activeServers []domain.Server
-	err := s.db.WithContext(ctx).
-		Where("status = ?", domain.ServerStatusRunning).
-		Find(&activeServers).Error
-	if err != nil {
-		return fmt.Errorf("failed listing active servers for sweep: %w", err)
-	}
-
-	for _, srv := range activeServers {
-		_, err := s.BackupServer(ctx, srv.ID)
-		if err != nil {
-			log.Printf("[ERROR] scheduled backup failed for server %d: %v", srv.ID, err)
-		}
-	}
-
-	return nil
-}
-
-// ScheduleBackups registers a recurring cron expression to sweep and archive active servers.
-//
-// Arguments:
-//   - cronSpec: Standard cron schedule string (e.g. "@daily" or "0 2 * * *").
-//
-// Example usage:
-//
-//	err := svc.ScheduleBackups("@daily")
-func (s *Service) ScheduleBackups(cronSpec string) error {
-	_, err := s.cronRunner.AddFunc(cronSpec, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-		if sweepErr := s.SweepAndBackupAllActive(ctx); sweepErr != nil {
-			log.Printf("[ERROR] cron sweep encountered error: %v", sweepErr)
-		}
-	})
-	if err != nil {
-		return fmt.Errorf("invalid cron expression %s: %w", cronSpec, err)
-	}
-
-	s.cronRunner.Start()
-	return nil
-}
-
-// StopCron halts the background scheduler.
-//
-// Arguments:
-//   - None.
-//
-// Example usage:
-//
-//	svc.StopCron()
-func (s *Service) StopCron() {
-	if s.cronRunner != nil {
-		s.cronRunner.Stop()
-	}
 }

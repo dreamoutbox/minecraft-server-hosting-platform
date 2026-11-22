@@ -97,11 +97,61 @@ func (m *mockWorkerForBackup) RestoreVolumeBackup(ctx context.Context, volumeID 
 }
 
 func (m *mockWorkerForBackup) UploadImageBackup(ctx context.Context, volumeID string, req worker.UploadImageBackupRequest) (*worker.UploadImageBackupResponse, error) {
-	return &worker.UploadImageBackupResponse{}, nil
+	m.mu.Lock()
+	data := append([]byte(nil), m.volumeData[volumeID]...)
+	m.mu.Unlock()
+
+	partCap := req.MaxPartBytes
+	if partCap <= 0 {
+		partCap = int64(len(data))
+		if partCap == 0 {
+			partCap = 1
+		}
+	}
+
+	var partSizes []int64
+	var totalBytes int64
+	for offset, partIdx := 0, 0; offset < len(data) || (len(data) == 0 && partIdx == 0); partIdx++ {
+		if partIdx >= len(req.PresignedURLs) {
+			return nil, fmt.Errorf("not enough presigned URLs (%d)", len(req.PresignedURLs))
+		}
+		end := offset + int(partCap)
+		if end > len(data) {
+			end = len(data)
+		}
+		chunk := data[offset:end]
+		n, err := worker.PutPresignedBytes(ctx, req.PresignedURLs[partIdx], chunk, backupContentType)
+		if err != nil {
+			return nil, err
+		}
+		partSizes = append(partSizes, n)
+		totalBytes += n
+		offset = end
+		if len(data) == 0 {
+			break
+		}
+	}
+
+	return &worker.UploadImageBackupResponse{
+		PartsUploaded: len(partSizes),
+		PartSizes:     partSizes,
+		TotalBytes:    totalBytes,
+	}, nil
 }
 
 func (m *mockWorkerForBackup) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*worker.RestoreImageBackupResponse, error) {
-	return &worker.RestoreImageBackupResponse{}, nil
+	var merged bytes.Buffer
+	for _, u := range presignedURLs {
+		partBytes, err := worker.GetPresignedBytes(ctx, u)
+		if err != nil {
+			return nil, err
+		}
+		merged.Write(partBytes)
+	}
+	m.mu.Lock()
+	m.volumeData[volumeID] = merged.Bytes()
+	m.mu.Unlock()
+	return &worker.RestoreImageBackupResponse{SizeBytes: int64(merged.Len())}, nil
 }
 
 func (m *mockWorkerForBackup) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
@@ -324,18 +374,67 @@ func TestBackupHTTPRoutes(t *testing.T) {
 	}
 }
 
-func TestCronScheduling(t *testing.T) {
-	service, _, _, _, _, _ := setupBackupTestEnv(t)
+func TestImageBackupMultiPartRestoreAndPruning(t *testing.T) {
+	service, mockWorker, sp, server, _, _ := setupBackupTestEnv(t)
 	if service == nil {
 		return
 	}
-	defer service.StopCron()
+	service.SetMaxBackups(8)
+	service.SetMaxImagePartBytes(10) // Force multi-part uploads on 25-byte payloads
 
-	if err := service.ScheduleBackups("@every 1s"); err != nil {
-		t.Fatalf("ScheduleBackups failed: %v", err)
+	ctx := context.Background()
+	volID := fmt.Sprintf("%d", server.ID)
+
+	var created []*domain.ServerImageBackup
+	for i := 1; i <= 10; i++ {
+		payload := []byte(fmt.Sprintf("ext4-img-payload-num-%04d", i))
+		mockWorker.volumeData[volID] = payload
+
+		pending, err := service.CreatePendingImageBackup(ctx, server.ID)
+		if err != nil {
+			t.Fatalf("CreatePendingImageBackup #%d failed: %v", i, err)
+		}
+		rec, err := service.ExecuteImageBackupRecord(ctx, 0, server.ID, pending.ID)
+		if err != nil {
+			t.Fatalf("ExecuteImageBackupRecord #%d failed: %v", i, err)
+		}
+		if rec.PartCount != 3 {
+			t.Fatalf("expected 3 parts for 25-byte payload with 10-byte cap, got %d", rec.PartCount)
+		}
+		created = append(created, rec)
+		time.Sleep(2 * time.Millisecond)
 	}
 
-	time.Sleep(1200 * time.Millisecond)
+	remaining, err := service.ListImageBackups(ctx, server.ID)
+	if err != nil {
+		t.Fatalf("ListImageBackups failed: %v", err)
+	}
+	if len(remaining) != 8 {
+		t.Fatalf("expected 8 image backups retained, got %d", len(remaining))
+	}
+
+	// All parts of the oldest 2 pruned image backups must be deleted from storage
+	for _, old := range created[:2] {
+		oldKeys, err := old.GetPartKeys()
+		if err != nil {
+			t.Fatalf("GetPartKeys failed: %v", err)
+		}
+		for _, k := range oldKeys {
+			if _, err := sp.Get(ctx, k); err == nil {
+				t.Errorf("expected pruned image backup part %s to be deleted from storage", k)
+			}
+		}
+	}
+
+	// Restore from newest multi-part image backup and verify exact bytes restored
+	newest := created[len(created)-1]
+	mockWorker.volumeData[volID] = []byte("corrupted-img")
+	if err := service.RestoreImageBackup(ctx, server.ID, newest.ID); err != nil {
+		t.Fatalf("RestoreImageBackup failed: %v", err)
+	}
+	if got, want := string(mockWorker.volumeData[volID]), "ext4-img-payload-num-0010"; got != want {
+		t.Errorf("restored image payload = %q, want %q", got, want)
+	}
 }
 
 func TestBackupRetentionPrunesOldestBeyondMaxCount(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
@@ -269,6 +270,100 @@ func (s *Service) EnqueueRestore(ctx context.Context, userID uint, serverID uint
 	})
 }
 
+// EnqueueImageBackup creates a pending ServerImageBackup and queues an asynchronous ext4 .img backup job.
+// Returns (nil, nil, nil) if an image backup job for serverID is already pending or running.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Initiating admin/system user ID (0 allowed for CRON/internal callers).
+//   - serverID: Target game server ID.
+//
+// Example usage:
+//
+//	rec, job, err := jobSvc.EnqueueImageBackup(ctx, 0, 42)
+func (s *Service) EnqueueImageBackup(ctx context.Context, userID uint, serverID uint) (*domain.ServerImageBackup, *domain.ServerJob, error) {
+	var server domain.Server
+	if err := s.db.WithContext(ctx).First(&server, serverID).Error; err != nil {
+		return nil, nil, fmt.Errorf("server %d not found: %w", serverID, err)
+	}
+	if server.Status != domain.ServerStatusRunning && server.Status != domain.ServerStatusStopped {
+		return nil, nil, fmt.Errorf("cannot image-backup server %d in status %s", server.ID, server.Status)
+	}
+
+	var existingCount int64
+	if err := s.db.WithContext(ctx).Model(&domain.ServerJob{}).
+		Where("server_id = ? AND type = ? AND status IN (?)", server.ID, domain.JobTypeBackupImage, []domain.JobStatus{domain.JobStatusPending, domain.JobStatusRunning}).
+		Count(&existingCount).Error; err == nil && existingCount > 0 {
+		return nil, nil, nil
+	}
+
+	record, err := s.backupSvc.CreatePendingImageBackup(ctx, server.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	imgBackupID := record.ID
+	actorID := userID
+	if actorID == 0 {
+		actorID = server.UserID
+	}
+
+	job, err := s.createJob(ctx, domain.ServerJob{
+		Type:          domain.JobTypeBackupImage,
+		Status:        domain.JobStatusPending,
+		UserID:        actorID,
+		ServerID:      server.ID,
+		ImageBackupID: &imgBackupID,
+		MaxAttempts:   DefaultMaxAttempts,
+		NextRunAt:     time.Now(),
+	})
+	if err != nil {
+		_ = s.db.WithContext(ctx).Delete(record).Error
+		return nil, nil, err
+	}
+	return record, job, nil
+}
+
+// EnqueueImageRestore validates the target ServerImageBackup and queues an asynchronous ext4 .img restore job.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Initiating admin user ID (0 allowed for internal callers).
+//   - serverID: Target game server ID.
+//   - imageBackupID: Completed ServerImageBackup primary key to restore.
+//
+// Example usage:
+//
+//	job, err := jobSvc.EnqueueImageRestore(ctx, adminID, 42, 7)
+func (s *Service) EnqueueImageRestore(ctx context.Context, userID uint, serverID uint, imageBackupID uint) (*domain.ServerJob, error) {
+	var server domain.Server
+	if err := s.db.WithContext(ctx).First(&server, serverID).Error; err != nil {
+		return nil, fmt.Errorf("server %d not found: %w", serverID, err)
+	}
+	if server.Status == domain.ServerStatusMigrating {
+		return nil, hosting.ErrServerMigrating
+	}
+	if err := s.backupSvc.ValidateImageRestoreTarget(ctx, server.ID, imageBackupID); err != nil {
+		return nil, err
+	}
+
+	actorID := userID
+	if actorID == 0 {
+		actorID = server.UserID
+	}
+	ibid := imageBackupID
+
+	return s.createJob(ctx, domain.ServerJob{
+		Type:          domain.JobTypeRestoreImage,
+		Status:        domain.JobStatusPending,
+		UserID:        actorID,
+		ServerID:      server.ID,
+		ImageBackupID: &ibid,
+		MaxAttempts:   DefaultMaxAttempts,
+		NextRunAt:     time.Now(),
+	})
+}
+
 // RetryJob resets a failed job back to pending so the queue worker re-executes it immediately.
 //
 // Arguments:
@@ -312,6 +407,11 @@ func (s *Service) RetryJob(ctx context.Context, userID uint, isStaffOrAdmin bool
 	if job.Type == domain.JobTypeBackup && job.BackupID != nil {
 		_ = s.db.WithContext(ctx).Model(&domain.BackupRecord{}).
 			Where("id = ?", *job.BackupID).
+			Update("status", domain.BackupStatusPending).Error
+	}
+	if job.Type == domain.JobTypeBackupImage && job.ImageBackupID != nil {
+		_ = s.db.WithContext(ctx).Model(&domain.ServerImageBackup{}).
+			Where("id = ?", *job.ImageBackupID).
 			Update("status", domain.BackupStatusPending).Error
 	}
 
@@ -515,6 +615,17 @@ func (s *Service) executeJob(ctx context.Context, job *domain.ServerJob) error {
 			return errors.New("restore job missing backup_id")
 		}
 		return s.backupSvc.RestoreServer(ctx, job.ServerID, *job.BackupID)
+	case domain.JobTypeBackupImage:
+		if job.ImageBackupID == nil {
+			return errors.New("image backup job missing image_backup_id")
+		}
+		_, err := s.backupSvc.ExecuteImageBackupRecord(ctx, job.UserID, job.ServerID, *job.ImageBackupID)
+		return err
+	case domain.JobTypeRestoreImage:
+		if job.ImageBackupID == nil {
+			return errors.New("image restore job missing image_backup_id")
+		}
+		return s.backupSvc.RestoreImageBackup(ctx, job.ServerID, *job.ImageBackupID)
 	default:
 		return fmt.Errorf("unsupported job type: %s", job.Type)
 	}
@@ -664,4 +775,83 @@ func (s *Service) StartLifecycleCron(ctx context.Context, interval time.Duration
 		cancel()
 		wg.Wait()
 	}
+}
+
+// EnqueueScheduledImageBackups scans all provisioned servers (running and stopped) and enqueues
+// ext4 image backup jobs in server_jobs, skipping any server that already has one queued.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//
+// Example usage:
+//
+//	count, err := jobSvc.EnqueueScheduledImageBackups(ctx)
+func (s *Service) EnqueueScheduledImageBackups(ctx context.Context) (int, error) {
+	var servers []domain.Server
+	if err := s.db.WithContext(ctx).
+		Where("status IN (?)", []domain.ServerStatus{domain.ServerStatusRunning, domain.ServerStatusStopped}).
+		Find(&servers).Error; err != nil {
+		return 0, fmt.Errorf("failed querying provisioned servers for image backup sweep: %w", err)
+	}
+
+	enqueued := 0
+	for _, srv := range servers {
+		if ctx.Err() != nil {
+			break
+		}
+		_, job, err := s.EnqueueImageBackup(ctx, 0, srv.ID)
+		if err != nil {
+			log.Printf("[WARN] scheduled image backup enqueue failed for server %d: %v", srv.ID, err)
+			continue
+		}
+		if job != nil {
+			enqueued++
+		}
+	}
+	return enqueued, nil
+}
+
+// StartImageBackupCron schedules daily (or custom cronSpec) ext4 image backup enqueue sweeps
+// using the container's local timezone and stops cleanly when ctx is canceled or stopFn is invoked.
+//
+// Arguments:
+//   - ctx: Cancellation context.
+//   - cronSpec: Standard 5-field cron expression (e.g. "0 5 * * *").
+//
+// Example usage:
+//
+//	stopBackupCron, err := jobSvc.StartImageBackupCron(sigCtx, "0 5 * * *")
+//	defer stopBackupCron()
+func (s *Service) StartImageBackupCron(ctx context.Context, cronSpec string) (func(), error) {
+	c := cron.New()
+	_, err := c.AddFunc(cronSpec, func() {
+		sweepCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		enqueued, sweepErr := s.EnqueueScheduledImageBackups(sweepCtx)
+		if sweepErr != nil {
+			log.Printf("[WARN] scheduled image backup cron sweep error: %v", sweepErr)
+			return
+		}
+		log.Printf("[INFO] scheduled image backup cron enqueued %d job(s)", enqueued)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("invalid image backup cron expression %q: %w", cronSpec, err)
+	}
+
+	c.Start()
+
+	var stopOnce sync.Once
+	stopFn := func() {
+		stopOnce.Do(func() {
+			stopCtx := c.Stop()
+			<-stopCtx.Done()
+		})
+	}
+
+	go func() {
+		<-ctx.Done()
+		stopFn()
+	}()
+
+	return stopFn, nil
 }

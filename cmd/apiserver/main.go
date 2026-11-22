@@ -98,6 +98,8 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 	}
 
 	backupService := backup.NewService(db, storageProvider, workerFactory)
+	backupService.SetMaxBackups(cfg.BackupMaxCount)
+	backupService.SetPresignTTL(cfg.BackupPresignTTL)
 	backupHandler := backup.NewHandler(backupService)
 	backupHandler.RegisterRoutes(r, cfg.JWTSecret)
 

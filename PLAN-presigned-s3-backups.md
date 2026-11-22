@@ -78,23 +78,23 @@ Architecture decisions locked in before implementation:
   - [x] Update mocks and tests in `internal/backup/backup_test.go`, `internal/hosting/migration_test.go`, and `internal/jobs/queue_test.go`, adding a test that creating 10 backups prunes down to the newest 8 in both DB and storage.
 - Done when: `go test ./internal/backup/... ./internal/hosting/... ./internal/jobs/...` passes and backup pruning deletes both S3 objects and DB records beyond the configured limit.
 
-### Phase 7: Implement ext4 image backup/restore service, job queue execution, and daily CRON in `cmd/jobworker` [STATUS: TODO]
+### Phase 7: Implement ext4 image backup/restore service, job queue execution, and daily CRON in `cmd/jobworker` [STATUS: DONE]
 - Goal: Orchestrate scheduled daily ext4 `.img` backups via `server_jobs` in `cmd/jobworker` with per-server 8-backup pruning and image restore execution.
 - Tasks:
-  - [ ] Add image backup service methods in `internal/backup/image_backup.go`:
+  - [x] Add image backup service methods in `internal/backup/image_backup.go`:
     - `CreatePendingImageBackup(ctx, serverID)`
     - `ExecuteImageBackupRecord(ctx, userID, serverID, imageBackupID)`: pre-mints `max(server.Plan.DiskLimitGB+2, 4)` presigned PUT URLs under `image-backups/server-<id>/<ts>/part-001.tar.gz`..., calls `wClient.UploadImageBackup` (passing `ContainerID` only when `status == running`), stores only the uploaded `PartKeys[:resp.PartsUploaded]`, logs `ServerOpImageBackup`, and prunes older completed `ServerImageBackup` records beyond `maxBackups` (deleting all part keys in S3 + DB row).
     - `ListImageBackups(ctx, serverID)` and `ValidateImageRestoreTarget(ctx, serverID, imageBackupID)`
     - `RestoreImageBackup(ctx, serverID, imageBackupID)`: mints presigned GET URLs for `PartKeys` in order, stops container if active, calls `wClient.RestoreImageBackup`, recreates/starts container if it was running, and logs `ServerOpImageRestore`.
-  - [ ] Extend `internal/jobs/queue.go`:
+  - [x] Extend `internal/jobs/queue.go`:
     - `EnqueueImageBackup(ctx, userID, serverID)` (deduplicates if a `backup_image` job for the server is already `pending` or `running`).
     - `EnqueueImageRestore(ctx, userID, serverID, imageBackupID)`.
     - `EnqueueScheduledImageBackups(ctx)` targeting all servers with `status IN ('running', 'stopped')`.
     - `StartImageBackupCron(ctx, cronSpec string)` scheduling `EnqueueScheduledImageBackups` via `robfig/cron/v3` and stopping cleanly on context cancellation.
     - Dispatch `JobTypeBackupImage` and `JobTypeRestoreImage` in `executeJob` and reset `ServerImageBackup` to `pending` in `RetryJob`.
-  - [ ] Wire `backupService.SetMaxBackups(cfg.BackupMaxCount)`, `backupService.SetPresignTTL(cfg.BackupPresignTTL)`, and `jobService.StartImageBackupCron(sigCtx, cfg.CronMCServerDataBackup)` in `cmd/jobworker/main.go` (and apply `SetMaxBackups` / `SetPresignTTL` in `cmd/apiserver/main.go`).
-  - [ ] Remove dead `ScheduleBackups` / `SweepAndBackupAllActive` (and its unused `cronRunner` field) from `internal/backup/backup.go` once superseded by `jobs.Service.StartImageBackupCron`.
-  - [ ] Add unit tests in `internal/backup/backup_test.go` and `internal/jobs/queue_test.go` covering CRON enqueueing of running+stopped servers (skipping pending/provisioning/migrating/error), job execution, multi-part pruning (8-backup limit), and image restore job execution.
+  - [x] Wire `backupService.SetMaxBackups(cfg.BackupMaxCount)`, `backupService.SetPresignTTL(cfg.BackupPresignTTL)`, and `jobService.StartImageBackupCron(sigCtx, cfg.CronMCServerDataBackup)` in `cmd/jobworker/main.go` (and apply `SetMaxBackups` / `SetPresignTTL` in `cmd/apiserver/main.go`).
+  - [x] Remove dead `ScheduleBackups` / `SweepAndBackupAllActive` (and its unused `cronRunner` field) from `internal/backup/backup.go` once superseded by `jobs.Service.StartImageBackupCron`.
+  - [x] Add unit tests in `internal/backup/backup_test.go` and `internal/jobs/queue_test.go` covering CRON enqueueing of running+stopped servers (skipping pending/provisioning/migrating/error), job execution, multi-part pruning (8-backup limit), and image restore job execution.
 - Done when: `go test ./...` and `go build ./cmd/...` pass, and starting `cmd/jobworker` logs the active `CRON_MC_SERVER_DATA_BACKUP` schedule, `BACKUP_MAX_COUNT`, and `BACKUP_PRESIGN_TTL`.
 
 ### Phase 8: Add admin image-backup endpoints on `cmd/apiserver` and restore shell script [STATUS: TODO]

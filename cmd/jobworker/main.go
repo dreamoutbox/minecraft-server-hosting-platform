@@ -64,6 +64,8 @@ func main() {
 	}
 
 	backupService := backup.NewService(db, storageProvider, workerFactory)
+	backupService.SetMaxBackups(cfg.BackupMaxCount)
+	backupService.SetPresignTTL(cfg.BackupPresignTTL)
 	jobService := jobs.NewService(db, hostingService, backupService)
 
 	sigCtx, stopSig := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -75,7 +77,19 @@ func main() {
 	stopLifecycle := jobService.StartLifecycleCron(sigCtx, time.Minute, cfg.RetentionDays)
 	defer stopLifecycle()
 
-	log.Printf("Background jobworker started (retention=%d days)", cfg.RetentionDays)
+	stopBackupCron, err := jobService.StartImageBackupCron(sigCtx, cfg.CronMCServerDataBackup)
+	if err != nil {
+		log.Fatalf("failed starting image backup cron: %v", err)
+	}
+	defer stopBackupCron()
+
+	log.Printf(
+		"Background jobworker started (retention=%d days, backup_cron=%q, backup_max_count=%d, presign_ttl=%s)",
+		cfg.RetentionDays,
+		cfg.CronMCServerDataBackup,
+		cfg.BackupMaxCount,
+		cfg.BackupPresignTTL,
+	)
 	<-sigCtx.Done()
 	log.Println("Background jobworker shutting down...")
 }
