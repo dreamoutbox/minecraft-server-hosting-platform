@@ -305,8 +305,22 @@ func TestToolbarModalsWebEditAndZipDownload(t *testing.T) {
 	if !strings.Contains(html, `<span class="text-body">eula.txt</span>`) {
 		t.Errorf("expected file to render as normal text")
 	}
-	if !strings.Contains(html, `data-bs-target="#uploadFileModal"`) || !strings.Contains(html, `data-bs-target="#newFileModal"`) || !strings.Contains(html, `data-bs-target="#newFolderModal"`) {
-		t.Errorf("expected sub-navbar toolbar buttons for upload file, new file, new folder")
+	if strings.Contains(html, `id="uploadFileModal"`) || strings.Contains(html, `data-bs-target="#uploadFileModal"`) {
+		t.Errorf("uploadFileModal must be removed in favor of direct file picker")
+	}
+	if !strings.Contains(html, `id="uploadFileBtn"`) || !strings.Contains(html, `id="directUploadForm"`) || !strings.Contains(html, `id="uploadFileInput"`) {
+		t.Errorf("expected direct upload button and hidden form in toolbar")
+	}
+	if formIdx := strings.Index(html, `id="directUploadForm"`); formIdx >= 0 {
+		formSnippet := html[formIdx:]
+		pathIdx := strings.Index(formSnippet, `name="path"`)
+		fileIdx := strings.Index(formSnippet, `name="file"`)
+		if pathIdx < 0 || fileIdx < 0 || pathIdx >= fileIdx {
+			t.Errorf("expected path field before file input in directUploadForm")
+		}
+	}
+	if !strings.Contains(html, `data-bs-target="#newFileModal"`) || !strings.Contains(html, `data-bs-target="#newFolderModal"`) {
+		t.Errorf("expected sub-navbar toolbar buttons for new file and new folder")
 	}
 	if strings.Contains(html, `<div class="col-lg-4">`) {
 		t.Errorf("right-hand upload/new-folder panels should be removed")

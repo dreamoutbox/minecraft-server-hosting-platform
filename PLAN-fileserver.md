@@ -5,13 +5,13 @@ Test command: `cd fileserver && go test ./...` (existing tests in `internal/{fil
 
 Order: independent UI items first, then the quota feature (backend + store + config), since quota touches upload/download handlers that the earlier phases also modify.
 
-### Phase 1: Immediate browser file dialog for upload [STATUS: TODO]
+### Phase 1: Immediate browser file dialog for upload [STATUS: DONE]
 - Goal: "Upload File" button opens the native file picker and submits on selection, with no modal.
 - Tasks:
-  - [ ] In `internal/files/templates/files.html`, replace the `#uploadFileModal` trigger button (line ~31) with a button that clicks a hidden `<input type="file" name="file">` inside a hidden form posting to `/upload` (multipart, with `path` field = current dir, as the modal form does today).
-  - [ ] Auto-submit the form on the input's `change` event (small inline-free JS block in the existing script section).
-  - [ ] Remove the `#uploadFileModal` markup (lines ~96-117).
-  - [ ] Keep `Upload` handler in `internal/files/handler.go` unchanged; confirm field order (`path` before `file`) is preserved since it uses `MultipartReader`.
+  - [x] In `internal/files/templates/files.html`, replace the `#uploadFileModal` trigger button (line ~31) with a button that clicks a hidden `<input type="file" name="file">` inside a hidden form posting to `/upload` (multipart, with `path` field = current dir, as the modal form does today).
+  - [x] Auto-submit the form on the input's `change` event (small inline-free JS block in the existing script section).
+  - [x] Remove the `#uploadFileModal` markup (lines ~96-117).
+  - [x] Keep `Upload` handler in `internal/files/handler.go` unchanged; confirm field order (`path` before `file`) is preserved since it uses `MultipartReader`.
 - Done when: `go test ./...` passes; manual check: clicking Upload File opens the OS dialog, picking a file uploads it and the list refreshes with the success message; no upload modal in the DOM.
 
 ### Phase 2: Multi-select checkboxes [STATUS: TODO]
