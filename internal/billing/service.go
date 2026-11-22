@@ -178,7 +178,7 @@ func (s *Service) CreateExtendCheckout(ctx context.Context, userID uint, serverI
 		Description: "Extend server duration by 30 days",
 		AmountCents: server.Plan.PriceCents,
 		SuccessURL:  fmt.Sprintf("%s/dashboard/servers/%d?success=Extension+payment+received!", s.appBaseURL, server.ID),
-		CancelURL:   fmt.Sprintf("%s/dashboard/servers/%d?error=Checkout+cancelled", s.appBaseURL, server.ID),
+		CancelURL:   fmt.Sprintf("%s/dashboard/servers/%d/settings?error=Checkout+cancelled#extend-server", s.appBaseURL, server.ID),
 	})
 	if err != nil {
 		_ = s.db.WithContext(ctx).Model(&order).Update("status", domain.OrderStatusFailed).Error

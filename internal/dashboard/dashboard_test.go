@@ -642,3 +642,79 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 		t.Errorf("expected server operation logs persisted for server %d", server.ID)
 	}
 }
+
+func TestExtendServerPanelInSettings(t *testing.T) {
+	r, dashSvc, _ := setupDashboardTestEnv(t)
+	if r == nil {
+		return
+	}
+
+	suffix := time.Now().UnixNano()
+	owner := domain.User{
+		Email:        fmt.Sprintf("extend-panel-%d@example.com", suffix),
+		PasswordHash: "hash",
+		Role:         domain.UserRoleUser,
+	}
+	if err := dashSvc.db.Create(&owner).Error; err != nil {
+		t.Fatalf("failed creating user: %v", err)
+	}
+	var plan domain.Plan
+	if err := dashSvc.db.Order("id asc").First(&plan).Error; err != nil {
+		t.Fatalf("expected seeded plan: %v", err)
+	}
+	var host domain.Host
+	if err := dashSvc.db.First(&host).Error; err != nil {
+		t.Fatalf("expected seeded host: %v", err)
+	}
+
+	expiredAt := time.Now().Add(-24 * time.Hour)
+	srv := domain.Server{
+		UserID:        owner.ID,
+		PlanID:        plan.ID,
+		HostID:        host.ID,
+		Name:          fmt.Sprintf("ExtendPanelSrv-%d", suffix),
+		Status:        domain.ServerStatusStopped,
+		Port:          25756,
+		ServerType:    domain.ServerTypeVanilla,
+		ServerVersion: "LATEST",
+		ExpiresAt:     &expiredAt,
+	}
+	if err := dashSvc.db.Create(&srv).Error; err != nil {
+		t.Fatalf("failed creating server: %v", err)
+	}
+	t.Cleanup(func() {
+		dashSvc.db.Delete(&domain.Server{}, srv.ID)
+		dashSvc.db.Delete(&domain.User{}, owner.ID)
+	})
+
+	tokens, _ := authkit.GenerateTokenPair(owner.ID, owner.Email, owner.Role, dashSvc.jwtSecret)
+	cookie := &http.Cookie{Name: "token", Value: tokens.AccessToken}
+
+	// Overview page must not have the inline Extend 30 Days form, and must link to settings#extend-server.
+	wDetail := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/servers/%d", srv.ID), cookie, nil)
+	if wDetail.Code != http.StatusOK {
+		t.Fatalf("expected 200 on server detail, got %d", wDetail.Code)
+	}
+	detailBody := wDetail.Body.String()
+	extendAction := fmt.Sprintf(`action="/dashboard/servers/%d/extend"`, srv.ID)
+	if strings.Contains(detailBody, extendAction) {
+		t.Errorf("expected Extend 30 Days form removed from server overview page")
+	}
+	expectedAnchorLink := fmt.Sprintf(`/dashboard/servers/%d/settings#extend-server`, srv.ID)
+	if !strings.Contains(detailBody, expectedAnchorLink) {
+		t.Errorf("expected expired overview banner to link to %s", expectedAnchorLink)
+	}
+
+	// Settings page must render the #extend-server panel with the Extend 30 Days form.
+	wSettings := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/settings", srv.ID), cookie, nil)
+	if wSettings.Code != http.StatusOK {
+		t.Fatalf("expected 200 on server settings, got %d", wSettings.Code)
+	}
+	settingsBody := wSettings.Body.String()
+	if !strings.Contains(settingsBody, `id="extend-server"`) {
+		t.Errorf("expected settings page to contain id=\"extend-server\" panel")
+	}
+	if !strings.Contains(settingsBody, extendAction) || !strings.Contains(settingsBody, "Extend 30 Days") {
+		t.Errorf("expected settings page to render Extend 30 Days form pointing to %s", extendAction)
+	}
+}

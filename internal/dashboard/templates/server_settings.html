@@ -47,6 +47,38 @@
         </div>
     </div>
 
+    <div class="col-12" id="extend-server">
+        <div class="card shadow-sm border-0">
+            <div class="card-body p-4">
+                <h5 class="fw-bold mb-2">Extend Server</h5>
+                {{if .IsExpired}}
+                <div class="alert alert-danger py-2 px-3 mb-3 small">
+                    This server expired on <strong>{{.Server.ExpiresAt.Format "2006-01-02 15:04"}}</strong>.
+                    {{if .CanExtend}}
+                    Extend within the {{.RetentionDays}}-day retention window to restore access before data is permanently deleted.
+                    {{else}}
+                    This server has passed the retention period and can no longer be extended.
+                    {{end}}
+                </div>
+                {{else if .Server.ExpiresAt}}
+                <p class="text-muted small mb-3">
+                    Current expiration: <strong>{{.Server.ExpiresAt.Format "2006-01-02 15:04"}}</strong>.
+                    Extend your subscription by 30 days to keep your server running without interruption.
+                </p>
+                {{else}}
+                <p class="text-muted small mb-0">
+                    This server does not have an expiration date and does not require renewal.
+                </p>
+                {{end}}
+                {{if .CanExtend}}
+                <form method="POST" action="/dashboard/servers/{{.Server.ID}}/extend">
+                    <button type="submit" class="btn btn-success">Extend 30 Days</button>
+                </form>
+                {{end}}
+            </div>
+        </div>
+    </div>
+
     <div class="col-12">
         <div class="card shadow-sm border-danger">
             <div class="card-body p-4">

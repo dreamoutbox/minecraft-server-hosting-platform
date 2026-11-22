@@ -31,14 +31,14 @@ Build & test commands:
     - Regular non-owner user is still rejected with `unauthorized access to server`.
 - Done when: `go vet ./...`, `go test -p 1 ./...`, and `go build ./cmd/...` pass; mock fileserver assertions confirm staff/admin receives permission for the target server and redirects with a valid login token.
 
-### Phase 3: Move Extend Server button to new panel in Server Settings page [STATUS: TODO]
+### Phase 3: Move Extend Server button to new panel in Server Settings page [STATUS: DONE]
 - Goal: Relocate the "Extend 30 Days" action from the Server Overview page into a dedicated `#extend-server` panel on the Server Settings page.
 - Tasks:
-  - [ ] Update `dashboard.Service.ShowServerSettings` in `internal/dashboard/dashboard.go` to pass expiration/extension state (`IsExpired`, `CanExtend`, retention days) to `server_settings.html` (extracting a small shared helper for computing expiry/extend flags so `ShowServerDetail` and `ShowServerSettings` stay DRY).
-  - [ ] Add a dedicated "Extend Server" card panel with `id="extend-server"` in `internal/dashboard/templates/server_settings.html` (between Software & Version and Danger Zone), showing current expiration status/timestamp and the `POST /dashboard/servers/{{.Server.ID}}/extend` form button when `CanExtend` is true.
-  - [ ] Remove the inline `Extend 30 Days` button from `internal/dashboard/templates/server_detail.html`, replacing the expired-banner CTA with a link to `/dashboard/servers/{{.Server.ID}}/settings#extend-server`.
-  - [ ] Update `dashboard.Service.ExtendServerDuration` error redirect to return to `/dashboard/servers/:id/settings#extend-server` (and update `billing.Service.CreateExtendCheckout` `CancelURL` to `/dashboard/servers/:id/settings#extend-server` if appropriate).
-  - [ ] Add/update dashboard tests verifying the Extend Server panel renders on `/dashboard/servers/:id/settings` with `id="extend-server"` and the `Extend 30 Days` form is no longer rendered on `/dashboard/servers/:id`.
+  - [x] Update `dashboard.Service.ShowServerSettings` in `internal/dashboard/dashboard.go` to pass expiration/extension state (`IsExpired`, `CanExtend`, retention days) to `server_settings.html` (extracting a small shared helper for computing expiry/extend flags so `ShowServerDetail` and `ShowServerSettings` stay DRY).
+  - [x] Add a dedicated "Extend Server" card panel with `id="extend-server"` in `internal/dashboard/templates/server_settings.html` (between Software & Version and Danger Zone), showing current expiration status/timestamp and the `POST /dashboard/servers/{{.Server.ID}}/extend` form button when `CanExtend` is true.
+  - [x] Remove the inline `Extend 30 Days` button from `internal/dashboard/templates/server_detail.html`, replacing the expired-banner CTA with a link to `/dashboard/servers/{{.Server.ID}}/settings#extend-server`.
+  - [x] Update `dashboard.Service.ExtendServerDuration` error redirect to return to `/dashboard/servers/:id/settings#extend-server` (and update `billing.Service.CreateExtendCheckout` `CancelURL` to `/dashboard/servers/:id/settings#extend-server` if appropriate).
+  - [x] Add/update dashboard tests verifying the Extend Server panel renders on `/dashboard/servers/:id/settings` with `id="extend-server"` and the `Extend 30 Days` form is no longer rendered on `/dashboard/servers/:id`.
 - Done when: `go vet ./...`, `go test -p 1 ./...`, and `go build ./cmd/...` pass; `/dashboard/servers/:id/settings#extend-server` displays the Extend Server panel and submits to `POST /dashboard/servers/:id/extend`.
 
 ### Phase 4: Add expiring-server alert on web dashboard with link to Extend Server panel [STATUS: TODO]

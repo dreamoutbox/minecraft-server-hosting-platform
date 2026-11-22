@@ -360,6 +360,23 @@ func (s *Service) ProcessBuyServer(c *gin.Context) {
 	c.Redirect(http.StatusSeeOther, cs.CheckoutURL)
 }
 
+const defaultServerRetentionDays = 7
+
+// serverExpiryFlags computes expiration and extension eligibility flags for a server.
+//
+// Arguments:
+//   - server: Target server model.
+//   - now: Reference timestamp.
+//
+// Example usage:
+//
+//	isExpired, canExtend := serverExpiryFlags(server, time.Now())
+func serverExpiryFlags(server *domain.Server, now time.Time) (bool, bool) {
+	isExpired := server.IsExpired(now)
+	canExtend := server.ExpiresAt != nil && server.IsWithinRetention(now, defaultServerRetentionDays)
+	return isExpired, canExtend
+}
+
 // ExtendServerDuration creates a Stripe Checkout session to extend a server by 30 days.
 //
 // Arguments:
@@ -378,7 +395,7 @@ func (s *Service) ExtendServerDuration(c *gin.Context) {
 
 	cs, _, err := s.billingSvc.CreateExtendCheckout(c.Request.Context(), userID, serverIDVal)
 	if err != nil {
-		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "", "error", err.Error()))
+		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/settings", "error", err.Error())+"#extend-server")
 		return
 	}
 
@@ -400,13 +417,14 @@ func (s *Service) ShowServerDetail(c *gin.Context) {
 		return
 	}
 
-	now := time.Now()
+	isExpired, canExtend := serverExpiryFlags(server, time.Now())
 	s.renderView(c, "server_detail.html", map[string]interface{}{
-		"ActiveTab":  "overview",
-		"Server":     server,
-		"LiveStatus": liveStatus,
-		"IsExpired":  server.IsExpired(now),
-		"CanExtend":  server.ExpiresAt != nil && server.IsWithinRetention(now, 7),
+		"ActiveTab":     "overview",
+		"Server":        server,
+		"LiveStatus":    liveStatus,
+		"IsExpired":     isExpired,
+		"CanExtend":     canExtend,
+		"RetentionDays": defaultServerRetentionDays,
 	})
 }
 
@@ -695,10 +713,14 @@ func (s *Service) ShowServerSettings(c *gin.Context) {
 		return
 	}
 
+	isExpired, canExtend := serverExpiryFlags(server, time.Now())
 	s.renderView(c, "server_settings.html", map[string]interface{}{
-		"ActiveTab":   "settings",
-		"Server":      server,
-		"ServerTypes": domain.AllServerTypes(),
+		"ActiveTab":     "settings",
+		"Server":        server,
+		"ServerTypes":   domain.AllServerTypes(),
+		"IsExpired":     isExpired,
+		"CanExtend":     canExtend,
+		"RetentionDays": defaultServerRetentionDays,
 	})
 }
 
