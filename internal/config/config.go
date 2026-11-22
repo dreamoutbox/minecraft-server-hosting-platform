@@ -4,6 +4,16 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
+
+	"github.com/robfig/cron/v3"
+)
+
+const (
+	defaultServerExpiredRetentionDays = 7
+	defaultCronMCServerDataBackup     = "0 5 * * *"
+	defaultBackupMaxCount             = 8
+	defaultBackupPresignTTL           = time.Hour
 )
 
 // Config encapsulates runtime configuration settings for the platform orchestrator.
@@ -15,6 +25,9 @@ type Config struct {
 	JWTSecret                    string
 	AppBaseURL                   string
 	RetentionDays                int
+	CronMCServerDataBackup       string
+	BackupMaxCount               int
+	BackupPresignTTL             time.Duration
 	BillingProvider              string
 	StripeSecretKey              string
 	StripeWebhookSecret          string
@@ -51,9 +64,30 @@ func LoadFromEnv() (*Config, error) {
 	dbSSL := getEnv("DB_SSLMODE", "disable")
 	jwtSecret := getEnv("JWT_SECRET", "dev-platform-jwt-secret-key-change-in-prod")
 	appBaseURL := getEnv("APP_BASE_URL", "http://localhost:8080")
-	retentionDays, err := parseEnvInt("RETENTION_DAYS", 7)
+	retentionDays, err := parseEnvInt("SERVER_EXPIRED_DATA_RETENTION_DAYS", defaultServerExpiredRetentionDays)
 	if err != nil || retentionDays <= 0 {
-		retentionDays = 7
+		retentionDays = defaultServerExpiredRetentionDays
+	}
+
+	cronMCServerDataBackup := getEnv("CRON_MC_SERVER_DATA_BACKUP", defaultCronMCServerDataBackup)
+	if _, err := cron.ParseStandard(cronMCServerDataBackup); err != nil {
+		return nil, fmt.Errorf("invalid CRON_MC_SERVER_DATA_BACKUP (%q): %w", cronMCServerDataBackup, err)
+	}
+
+	backupMaxCount, err := parseEnvInt("BACKUP_MAX_COUNT", defaultBackupMaxCount)
+	if err != nil {
+		return nil, fmt.Errorf("invalid BACKUP_MAX_COUNT: %w", err)
+	}
+	if backupMaxCount <= 0 {
+		return nil, fmt.Errorf("BACKUP_MAX_COUNT must be positive: got %d", backupMaxCount)
+	}
+
+	backupPresignTTL, err := parseEnvDuration("BACKUP_PRESIGN_TTL", defaultBackupPresignTTL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid BACKUP_PRESIGN_TTL: %w", err)
+	}
+	if backupPresignTTL <= 0 {
+		return nil, fmt.Errorf("BACKUP_PRESIGN_TTL must be positive: got %s", backupPresignTTL)
 	}
 	billingProvider := getEnv("BILLING_PROVIDER", "")
 	stripeSecretKey := getEnv("STRIPE_SECRET_KEY", "")
@@ -117,6 +151,9 @@ func LoadFromEnv() (*Config, error) {
 		JWTSecret:                    jwtSecret,
 		AppBaseURL:                   appBaseURL,
 		RetentionDays:                retentionDays,
+		CronMCServerDataBackup:       cronMCServerDataBackup,
+		BackupMaxCount:               backupMaxCount,
+		BackupPresignTTL:             backupPresignTTL,
 		BillingProvider:              billingProvider,
 		StripeSecretKey:              stripeSecretKey,
 		StripeWebhookSecret:          stripeWebhookSecret,
@@ -162,6 +199,27 @@ func parseEnvInt(key string, fallback int) (int, error) {
 		return fallback, nil
 	}
 	parsed, err := strconv.Atoi(val)
+	if err != nil {
+		return 0, err
+	}
+	return parsed, nil
+}
+
+// parseEnvDuration parses a Go duration string from the environment or returns fallback.
+//
+// Arguments:
+//   - key: Name of the environment variable.
+//   - fallback: Default duration value to use if key is unset.
+//
+// Example usage:
+//
+//	ttl, err := parseEnvDuration("BACKUP_PRESIGN_TTL", time.Hour)
+func parseEnvDuration(key string, fallback time.Duration) (time.Duration, error) {
+	val := os.Getenv(key)
+	if val == "" {
+		return fallback, nil
+	}
+	parsed, err := time.ParseDuration(val)
 	if err != nil {
 		return 0, err
 	}

@@ -16,14 +16,14 @@ Architecture decisions locked in before implementation:
 
 ---
 
-### Phase 1: Rename retention env var and add backup config settings [STATUS: TODO]
+### Phase 1: Rename retention env var and add backup config settings [STATUS: DONE]
 - Goal: Rename `RETENTION_DAYS` to `SERVER_EXPIRED_DATA_RETENTION_DAYS` and expose backup CRON, max count, and presign TTL settings in config and deployment files.
 - Tasks:
-  - [ ] Rename `RETENTION_DAYS` to `SERVER_EXPIRED_DATA_RETENTION_DAYS` (default `7`) in `internal/config/config.go`, `template.env`, and `docker-compose.app.yml` (`apiserver` and `jobworker` services).
-  - [ ] Add `CronMCServerDataBackup` (`CRON_MC_SERVER_DATA_BACKUP`, default `"0 5 * * *"`), `BackupMaxCount` (`BACKUP_MAX_COUNT`, default `8`), and `BackupPresignTTL` (`BACKUP_PRESIGN_TTL`, default `1h`) to `config.Config` and `LoadFromEnv()` in `internal/config/config.go`.
-  - [ ] Validate `CRON_MC_SERVER_DATA_BACKUP` (standard 5-field cron expression via `robfig/cron/v3`), `BACKUP_MAX_COUNT > 0`, and `BACKUP_PRESIGN_TTL > 0` in `LoadFromEnv()`.
-  - [ ] Document the new env vars in `template.env` and wire them into `docker-compose.app.yml` using `${VAR:-default}` syntax.
-  - [ ] Add unit tests in `internal/config/config_test.go` covering defaults, renamed env var, and invalid cron/duration/count values.
+  - [x] Rename `RETENTION_DAYS` to `SERVER_EXPIRED_DATA_RETENTION_DAYS` (default `7`) in `internal/config/config.go`, `template.env`, and `docker-compose.app.yml` (`apiserver` and `jobworker` services).
+  - [x] Add `CronMCServerDataBackup` (`CRON_MC_SERVER_DATA_BACKUP`, default `"0 5 * * *"`), `BackupMaxCount` (`BACKUP_MAX_COUNT`, default `8`), and `BackupPresignTTL` (`BACKUP_PRESIGN_TTL`, default `1h`) to `config.Config` and `LoadFromEnv()` in `internal/config/config.go`.
+  - [x] Validate `CRON_MC_SERVER_DATA_BACKUP` (standard 5-field cron expression via `robfig/cron/v3`), `BACKUP_MAX_COUNT > 0`, and `BACKUP_PRESIGN_TTL > 0` in `LoadFromEnv()`.
+  - [x] Document the new env vars in `template.env` and wire them into `docker-compose.app.yml` using `${VAR:-default}` syntax.
+  - [x] Add unit tests in `internal/config/config_test.go` covering defaults, renamed env var, and invalid cron/duration/count values.
 - Done when: `go test ./internal/config/...` and `go build ./cmd/...` pass, and no stale `RETENTION_DAYS` references remain outside `TODO.md` or historical docs.
 
 ### Phase 2: Add presigned PUT/GET URL generation to `internal/storage` [STATUS: TODO]
