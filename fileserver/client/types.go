@@ -2,16 +2,17 @@ package client
 
 import "time"
 
-// EnsureUserRequest is the payload sent to idempotently create or update a fileserver user.
-type EnsureUserRequest struct {
-	ID    uint   `json:"id" binding:"required"`
-	Email string `json:"email" binding:"required,email"`
-	UID   *int   `json:"uid,omitempty"`
-	GID   *int   `json:"gid,omitempty"`
+// RegisterUserRequest is the payload sent to idempotently create or update a fileserver user.
+type RegisterUserRequest struct {
+	ID       uint   `json:"id" binding:"required"`
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+	UID      *int   `json:"uid,omitempty"`
+	GID      *int   `json:"gid,omitempty"`
 }
 
-// EnsureUserResponse reports the ensured user identity and whether a new record was created.
-type EnsureUserResponse struct {
+// RegisterUserResponse reports the registered user identity and whether a new record was created.
+type RegisterUserResponse struct {
 	ID      uint   `json:"id"`
 	Email   string `json:"email"`
 	UID     *int   `json:"uid,omitempty"`

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dreamoutbox/authkit"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -30,6 +31,8 @@ const (
 	// defaultMinecraftFileUID and defaultMinecraftFileGID match the UID/GID used by itzg/minecraft-server.
 	defaultMinecraftFileUID = 1000
 	defaultMinecraftFileGID = 1000
+	// fileserverRandomPasswordBytes is the entropy length used when provisioning fileserver accounts.
+	fileserverRandomPasswordBytes = 32
 )
 
 // Service coordinates server scheduling, port allocation, and host worker provisioning.
@@ -614,10 +617,15 @@ func (s *Service) OpenFileManagerURL(ctx context.Context, actorUserID uint, serv
 		return "", fmt.Errorf("failed loading fileserver user: %w", err)
 	}
 
+	randomPassword, err := authkit.GenerateRandomPassword(fileserverRandomPasswordBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed generating fileserver user password: %w", err)
+	}
+
 	fileUID := defaultMinecraftFileUID
 	fileGID := defaultMinecraftFileGID
 	fsClient := s.fileServerClientFactory(host.FileServerBaseURL, host.APIKey)
-	if _, err := fsClient.EnsureUser(ctx, user.ID, user.Email, &fileUID, &fileGID); err != nil {
+	if _, err := fsClient.RegisterUser(ctx, user.ID, user.Email, randomPassword, &fileUID, &fileGID); err != nil {
 		return "", fmt.Errorf("failed provisioning fileserver user: %w", err)
 	}
 

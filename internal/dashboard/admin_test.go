@@ -578,16 +578,16 @@ func TestStaffAndAdminOpenFileManagerOnOtherUserServer(t *testing.T) {
 		return
 	}
 
-	var ensuredUsers []fsclient.EnsureUserRequest
+	var registeredUsers []fsclient.RegisterUserRequest
 	var grantedPerms []fsclient.PermissionRequest
 	var tokenPaths []string
 	fakeFS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch {
 		case req.Method == http.MethodPut && req.URL.Path == "/api/v1/users":
-			var body fsclient.EnsureUserRequest
+			var body fsclient.RegisterUserRequest
 			_ = json.NewDecoder(req.Body).Decode(&body)
-			ensuredUsers = append(ensuredUsers, body)
-			_ = json.NewEncoder(w).Encode(fsclient.EnsureUserResponse{ID: body.ID, Email: body.Email, Created: true})
+			registeredUsers = append(registeredUsers, body)
+			_ = json.NewEncoder(w).Encode(fsclient.RegisterUserResponse{ID: body.ID, Email: body.Email, Created: true})
 		case req.Method == http.MethodPut && req.URL.Path == "/api/v1/permissions":
 			var body fsclient.PermissionRequest
 			_ = json.NewDecoder(req.Body).Decode(&body)
@@ -663,7 +663,7 @@ func TestStaffAndAdminOpenFileManagerOnOtherUserServer(t *testing.T) {
 		{"staff", staff, staffTokens.AccessToken},
 		{"admin", admin, adminTokens.AccessToken},
 	} {
-		ensuredUsers = nil
+		registeredUsers = nil
 		grantedPerms = nil
 		tokenPaths = nil
 
@@ -672,11 +672,14 @@ func TestStaffAndAdminOpenFileManagerOnOtherUserServer(t *testing.T) {
 		if w.Code != http.StatusFound || !strings.HasPrefix(loc, fakeFS.URL+"/login?") || !strings.Contains(loc, "token=staff-admin-tok") {
 			t.Fatalf("%s open file manager failed: code=%d loc=%s", actor.label, w.Code, loc)
 		}
-		if len(ensuredUsers) != 1 || ensuredUsers[0].ID != actor.user.ID || ensuredUsers[0].Email != actor.user.Email {
-			t.Errorf("%s expected EnsureUser(%d, %s), got %+v", actor.label, actor.user.ID, actor.user.Email, ensuredUsers)
+		if len(registeredUsers) != 1 || registeredUsers[0].ID != actor.user.ID || registeredUsers[0].Email != actor.user.Email {
+			t.Errorf("%s expected RegisterUser(%d, %s), got %+v", actor.label, actor.user.ID, actor.user.Email, registeredUsers)
 		}
-		if len(ensuredUsers) == 1 && (ensuredUsers[0].UID == nil || *ensuredUsers[0].UID != 1000 || ensuredUsers[0].GID == nil || *ensuredUsers[0].GID != 1000) {
-			t.Errorf("%s expected EnsureUser uid=1000 gid=1000, got uid=%v gid=%v", actor.label, ensuredUsers[0].UID, ensuredUsers[0].GID)
+		if len(registeredUsers) == 1 && registeredUsers[0].Password == "" {
+			t.Errorf("%s expected RegisterUser non-empty random password", actor.label)
+		}
+		if len(registeredUsers) == 1 && (registeredUsers[0].UID == nil || *registeredUsers[0].UID != 1000 || registeredUsers[0].GID == nil || *registeredUsers[0].GID != 1000) {
+			t.Errorf("%s expected RegisterUser uid=1000 gid=1000, got uid=%v gid=%v", actor.label, registeredUsers[0].UID, registeredUsers[0].GID)
 		}
 		if len(grantedPerms) != 1 || grantedPerms[0].UserID != actor.user.ID || grantedPerms[0].ServerID != srv.ID {
 			t.Errorf("%s expected Allow(%d, %d), got %+v", actor.label, actor.user.ID, srv.ID, grantedPerms)

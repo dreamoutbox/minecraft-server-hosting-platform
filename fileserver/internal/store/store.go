@@ -27,11 +27,12 @@ var (
 	ErrTokenAlreadyUsed = errors.New("login token has already been used")
 	// ErrInvalidUIDGID indicates a negative Unix UID or GID was supplied.
 	ErrInvalidUIDGID = errors.New("uid and gid must be non-negative")
+	// ErrPasswordRequired indicates an empty password was supplied during user registration.
+	ErrPasswordRequired = errors.New("password is required")
 )
 
 const (
-	randomPasswordEntropyBytes = 32
-	usageRetentionDays         = 30
+	usageRetentionDays = 30
 	// UsageDayFormat is the UTC date layout used to bucket daily transfer usage.
 	UsageDayFormat = "2006-01-02"
 )
@@ -124,29 +125,33 @@ func intPtrDiffers(current, incoming *int) bool {
 	return current == nil || *current != *incoming
 }
 
-// EnsureUser idempotently provisions a local user record matching the platform user ID.
-// When creating a new user, a random password is generated and hashed with bcrypt.
-// Non-nil uid/gid values are persisted on creation and updated on existing users when changed;
-// nil values leave existing uid/gid untouched.
+// RegisterUser idempotently provisions a local user record matching the platform user ID.
+// When creating a new user, the provided password is hashed with bcrypt.
+// On existing users, the existing password hash is preserved; email and non-nil uid/gid values
+// are updated when changed, while nil uid/gid leave existing values untouched.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
 //   - userID: Platform user primary key.
 //   - email: Account email address.
+//   - password: Raw password required for registration (hashed on user creation).
 //   - uid: Optional Unix user ID (>= 0) for file ownership.
 //   - gid: Optional Unix group ID (>= 0) for file ownership.
 //
 // Example usage:
 //
 //	uid, gid := 1000, 1000
-//	user, created, err := st.EnsureUser(ctx, 1, "player@example.com", &uid, &gid)
-func (s *Store) EnsureUser(ctx context.Context, userID uint, email string, uid *int, gid *int) (*User, bool, error) {
+//	user, created, err := st.RegisterUser(ctx, 1, "player@example.com", "secret-pass", &uid, &gid)
+func (s *Store) RegisterUser(ctx context.Context, userID uint, email string, password string, uid *int, gid *int) (*User, bool, error) {
 	if userID == 0 {
 		return nil, false, errors.New("user_id must be positive")
 	}
 	normalized := strings.ToLower(strings.TrimSpace(email))
 	if normalized == "" {
 		return nil, false, errors.New("email is required")
+	}
+	if strings.TrimSpace(password) == "" {
+		return nil, false, ErrPasswordRequired
 	}
 	if (uid != nil && *uid < 0) || (gid != nil && *gid < 0) {
 		return nil, false, ErrInvalidUIDGID
@@ -179,13 +184,9 @@ func (s *Store) EnsureUser(ctx context.Context, userID uint, email string, uid *
 		return nil, false, fmt.Errorf("failed querying user: %w", err)
 	}
 
-	rawPwd, err := authkit.GenerateRandomPassword(randomPasswordEntropyBytes)
+	hashed, err := authkit.HashPassword(password)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed generating random password: %w", err)
-	}
-	hashed, err := authkit.HashPassword(rawPwd)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed hashing random password: %w", err)
+		return nil, false, fmt.Errorf("failed hashing password: %w", err)
 	}
 
 	user := User{

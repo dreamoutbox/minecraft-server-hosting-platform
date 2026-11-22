@@ -28,6 +28,10 @@
 
 - [x] add dev shell script to inspect sqlite database. show all tables and rows.
 
-- [ ] change EnsureUser method and DTO. to RegisterUser.
+- [x] change EnsureUser method and DTO. to RegisterUser.
 
-- [ ] the RegisterUser should take Password input.
+- [x] the RegisterUser should take Password input.
+
+- [ ] change `Dir` or `Server` naming like in `RevokeServer` `RevokeServerPermissions` to `Drive`
+
+- [ ] move fileserver to new repository.

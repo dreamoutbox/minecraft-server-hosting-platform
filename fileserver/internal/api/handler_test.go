@@ -45,7 +45,7 @@ func TestManagementAPIAuthAndLifecycle(t *testing.T) {
 
 	// 1. Reject missing or wrong API key
 	badClient := client.New(srv.URL, "wrong-key")
-	if _, err := badClient.EnsureUser(ctx, 1, "u@example.com", nil, nil); err == nil || !strings.Contains(err.Error(), "401") {
+	if _, err := badClient.RegisterUser(ctx, 1, "u@example.com", "secret-pass", nil, nil); err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("expected 401 for bad api key, got %v", err)
 	}
 
@@ -66,26 +66,36 @@ func TestManagementAPIAuthAndLifecycle(t *testing.T) {
 		t.Fatalf("expected 404 for missing user, got %v", err)
 	}
 
-	// 3. EnsureUser idempotent + UID/GID persistence and validation
+	// 3. RegisterUser idempotent + password & UID/GID persistence and validation
 	uid1000, gid1000 := 1000, 1000
 	neg := -1
-	if _, err := c.EnsureUser(ctx, 7, "alice@example.com", &neg, &gid1000); err == nil || !strings.Contains(err.Error(), "400") {
+	if _, err := c.RegisterUser(ctx, 7, "alice@example.com", "", &uid1000, &gid1000); err == nil || !strings.Contains(err.Error(), "400") {
+		t.Fatalf("expected 400 for empty password, got %v", err)
+	}
+	if _, err := c.RegisterUser(ctx, 7, "alice@example.com", "alice-pass", &neg, &gid1000); err == nil || !strings.Contains(err.Error(), "400") {
 		t.Fatalf("expected 400 for negative uid, got %v", err)
 	}
-	if _, err := c.EnsureUser(ctx, 7, "alice@example.com", &uid1000, &neg); err == nil || !strings.Contains(err.Error(), "400") {
+	if _, err := c.RegisterUser(ctx, 7, "alice@example.com", "alice-pass", &uid1000, &neg); err == nil || !strings.Contains(err.Error(), "400") {
 		t.Fatalf("expected 400 for negative gid, got %v", err)
 	}
 
-	u1, err := c.EnsureUser(ctx, 7, "alice@example.com", &uid1000, &gid1000)
+	u1, err := c.RegisterUser(ctx, 7, "alice@example.com", "alice-pass", &uid1000, &gid1000)
 	if err != nil {
-		t.Fatalf("EnsureUser 1 failed: %v", err)
+		t.Fatalf("RegisterUser 1 failed: %v", err)
 	}
 	if !u1.Created || u1.ID != 7 || u1.UID == nil || *u1.UID != 1000 || u1.GID == nil || *u1.GID != 1000 {
 		t.Fatalf("expected created=true id=7 uid=1000 gid=1000, got %+v", u1)
 	}
-	u2, err := c.EnsureUser(ctx, 7, "alice@example.com", nil, nil)
+	storedUser, err := st.GetUser(ctx, 7)
 	if err != nil {
-		t.Fatalf("EnsureUser 2 failed: %v", err)
+		t.Fatalf("GetUser failed: %v", err)
+	}
+	if !authkit.CheckPassword(storedUser.PasswordHash, "alice-pass") {
+		t.Fatalf("expected stored password hash to verify supplied password")
+	}
+	u2, err := c.RegisterUser(ctx, 7, "alice@example.com", "other-pass", nil, nil)
+	if err != nil {
+		t.Fatalf("RegisterUser 2 failed: %v", err)
 	}
 	if u2.Created || u2.ID != 7 || u2.UID == nil || *u2.UID != 1000 || u2.GID == nil || *u2.GID != 1000 {
 		t.Fatalf("expected created=false id=7 preserved uid=1000 gid=1000, got %+v", u2)

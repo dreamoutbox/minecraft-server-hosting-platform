@@ -445,7 +445,7 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 	_ = domain.SeedPlans(db)
 
 	var callOrder []string
-	var lastEnsureReq fsclient.EnsureUserRequest
+	var lastRegisterReq fsclient.RegisterUserRequest
 	var lastPermReq fsclient.PermissionRequest
 	var lastTokenPath string
 	var revokedServerID string
@@ -458,9 +458,9 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 		}
 		switch {
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/users":
-			callOrder = append(callOrder, "ensure_user")
-			_ = json.NewDecoder(r.Body).Decode(&lastEnsureReq)
-			_ = json.NewEncoder(w).Encode(fsclient.EnsureUserResponse{ID: lastEnsureReq.ID, Email: lastEnsureReq.Email, Created: true})
+			callOrder = append(callOrder, "register_user")
+			_ = json.NewDecoder(r.Body).Decode(&lastRegisterReq)
+			_ = json.NewEncoder(w).Encode(fsclient.RegisterUserResponse{ID: lastRegisterReq.ID, Email: lastRegisterReq.Email, Created: true})
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/permissions":
 			callOrder = append(callOrder, "allow")
 			_ = json.NewDecoder(r.Body).Decode(&lastPermReq)
@@ -538,7 +538,7 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 	if len(openURL) <= len(expectedPrefix) || openURL[:len(expectedPrefix)] != expectedPrefix {
 		t.Fatalf("unexpected openURL: %s", openURL)
 	}
-	expectedCalls := []string{"ensure_user", "allow", "login_token"}
+	expectedCalls := []string{"register_user", "allow", "login_token"}
 	if len(callOrder) != len(expectedCalls) {
 		t.Fatalf("expected call order %v, got %v", expectedCalls, callOrder)
 	}
@@ -547,8 +547,12 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 			t.Errorf("call %d: expected %s, got %s", i, expectedCalls[i], callOrder[i])
 		}
 	}
-	if lastEnsureReq.UID == nil || *lastEnsureReq.UID != defaultMinecraftFileUID || lastEnsureReq.GID == nil || *lastEnsureReq.GID != defaultMinecraftFileGID {
-		t.Errorf("expected owner EnsureUser uid=%d gid=%d, got uid=%v gid=%v", defaultMinecraftFileUID, defaultMinecraftFileGID, lastEnsureReq.UID, lastEnsureReq.GID)
+	if lastRegisterReq.Password == "" {
+		t.Errorf("expected owner RegisterUser to include non-empty random password")
+	}
+	ownerRegisterPwd := lastRegisterReq.Password
+	if lastRegisterReq.UID == nil || *lastRegisterReq.UID != defaultMinecraftFileUID || lastRegisterReq.GID == nil || *lastRegisterReq.GID != defaultMinecraftFileGID {
+		t.Errorf("expected owner RegisterUser uid=%d gid=%d, got uid=%v gid=%v", defaultMinecraftFileUID, defaultMinecraftFileGID, lastRegisterReq.UID, lastRegisterReq.GID)
 	}
 
 	// Non-owner without allowNonOwner must be rejected.
@@ -565,11 +569,14 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 	if len(adminOpenURL) <= len(expectedPrefix) || adminOpenURL[:len(expectedPrefix)] != expectedPrefix {
 		t.Fatalf("unexpected admin openURL: %s", adminOpenURL)
 	}
-	if lastEnsureReq.ID != adminUser.ID || lastEnsureReq.Email != adminUser.Email {
-		t.Errorf("expected fileserver EnsureUser for admin (%d, %s), got (%d, %s)", adminUser.ID, adminUser.Email, lastEnsureReq.ID, lastEnsureReq.Email)
+	if lastRegisterReq.ID != adminUser.ID || lastRegisterReq.Email != adminUser.Email {
+		t.Errorf("expected fileserver RegisterUser for admin (%d, %s), got (%d, %s)", adminUser.ID, adminUser.Email, lastRegisterReq.ID, lastRegisterReq.Email)
 	}
-	if lastEnsureReq.UID == nil || *lastEnsureReq.UID != defaultMinecraftFileUID || lastEnsureReq.GID == nil || *lastEnsureReq.GID != defaultMinecraftFileGID {
-		t.Errorf("expected admin EnsureUser uid=%d gid=%d, got uid=%v gid=%v", defaultMinecraftFileUID, defaultMinecraftFileGID, lastEnsureReq.UID, lastEnsureReq.GID)
+	if lastRegisterReq.Password == "" || lastRegisterReq.Password == ownerRegisterPwd {
+		t.Errorf("expected admin RegisterUser to include a fresh non-empty random password")
+	}
+	if lastRegisterReq.UID == nil || *lastRegisterReq.UID != defaultMinecraftFileUID || lastRegisterReq.GID == nil || *lastRegisterReq.GID != defaultMinecraftFileGID {
+		t.Errorf("expected admin RegisterUser uid=%d gid=%d, got uid=%v gid=%v", defaultMinecraftFileUID, defaultMinecraftFileGID, lastRegisterReq.UID, lastRegisterReq.GID)
 	}
 	if lastPermReq.UserID != adminUser.ID || lastPermReq.ServerID != srv.ID {
 		t.Errorf("expected fileserver Allow(%d, %d), got (%d, %d)", adminUser.ID, srv.ID, lastPermReq.UserID, lastPermReq.ServerID)

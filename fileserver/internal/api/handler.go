@@ -41,13 +41,13 @@ func NewHandler(st *store.Store, jwtSecret string, loginTokenTTL time.Duration) 
 // RegisterUser idempotently creates or retrieves a fileserver user record.
 //
 // Arguments:
-//   - c: Active Gin request context containing client.EnsureUserRequest JSON.
+//   - c: Active Gin request context containing client.RegisterUserRequest JSON.
 //
 // Example usage:
 //
 //	PUT /api/v1/users
 func (h *Handler) RegisterUser(c *gin.Context) {
-	var req client.EnsureUserRequest
+	var req client.RegisterUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user payload: " + err.Error()})
 		return
@@ -58,9 +58,9 @@ func (h *Handler) RegisterUser(c *gin.Context) {
 		return
 	}
 
-	user, created, err := h.store.EnsureUser(c.Request.Context(), req.ID, req.Email, req.UID, req.GID)
+	user, created, err := h.store.RegisterUser(c.Request.Context(), req.ID, req.Email, req.Password, req.UID, req.GID)
 	if err != nil {
-		if errors.Is(err, store.ErrInvalidUIDGID) {
+		if errors.Is(err, store.ErrInvalidUIDGID) || errors.Is(err, store.ErrPasswordRequired) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -68,7 +68,7 @@ func (h *Handler) RegisterUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, client.EnsureUserResponse{
+	c.JSON(http.StatusOK, client.RegisterUserResponse{
 		ID:      user.ID,
 		Email:   user.Email,
 		UID:     user.UID,

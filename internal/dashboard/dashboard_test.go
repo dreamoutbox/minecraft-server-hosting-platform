@@ -182,7 +182,7 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 	fakeFS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/users":
-			_ = json.NewEncoder(w).Encode(fsclient.EnsureUserResponse{ID: 1, Email: "dash@example.com", Created: true})
+			_ = json.NewEncoder(w).Encode(fsclient.RegisterUserResponse{ID: 1, Email: "dash@example.com", Created: true})
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/permissions":
 			_ = json.NewEncoder(w).Encode(fsclient.PermissionResponse{Allowed: true})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/login-token"):

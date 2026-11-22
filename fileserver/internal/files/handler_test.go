@@ -46,8 +46,8 @@ func setupFilesTestRouter(t *testing.T) (*gin.Engine, *store.Store, string, stri
 	st := store.New(db, mountsDir)
 
 	ctx := context.Background()
-	if _, _, err := st.EnsureUser(ctx, 1, "owner@example.com", nil, nil); err != nil {
-		t.Fatalf("EnsureUser failed: %v", err)
+	if _, _, err := st.RegisterUser(ctx, 1, "owner@example.com", "test-pass", nil, nil); err != nil {
+		t.Fatalf("RegisterUser failed: %v", err)
 	}
 	if _, err := st.Allow(ctx, 1, 1); err != nil {
 		t.Fatalf("Allow failed: %v", err)
@@ -700,8 +700,8 @@ func TestDailyQuotaEnforcementAndReset(t *testing.T) {
 	}
 	st := store.New(db, mountsDir)
 	ctx := context.Background()
-	_, _, _ = st.EnsureUser(ctx, 1, "u1@example.com", nil, nil)
-	_, _, _ = st.EnsureUser(ctx, 2, "u2@example.com", nil, nil)
+	_, _, _ = st.RegisterUser(ctx, 1, "u1@example.com", "test-pass", nil, nil)
+	_, _, _ = st.RegisterUser(ctx, 2, "u2@example.com", "test-pass", nil, nil)
 	_, _ = st.Allow(ctx, 1, 1)
 	_, _ = st.Allow(ctx, 2, 2)
 
@@ -819,8 +819,8 @@ func TestHandlerAppliesUserUIDGIDOnUploadAndCreate(t *testing.T) {
 
 	uid := os.Getuid()
 	gid := os.Getgid()
-	if _, _, err := st.EnsureUser(ctx, 1, "owner@example.com", &uid, &gid); err != nil {
-		t.Fatalf("EnsureUser with uid/gid failed: %v", err)
+	if _, _, err := st.RegisterUser(ctx, 1, "owner@example.com", "test-pass", &uid, &gid); err != nil {
+		t.Fatalf("RegisterUser with uid/gid failed: %v", err)
 	}
 
 	loginTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
