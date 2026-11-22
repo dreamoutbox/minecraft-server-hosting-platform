@@ -528,7 +528,7 @@ func (s *Service) GetServerConsoleLogsJSON(c *gin.Context) {
 func (s *Service) SendConsoleCommand(c *gin.Context) {
 	wantsJSON := strings.Contains(c.GetHeader("Accept"), "application/json") || c.GetHeader("X-Requested-With") == "XMLHttpRequest"
 
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		if wantsJSON {
@@ -711,7 +711,7 @@ func (s *Service) ShowServerSettings(c *gin.Context) {
 //
 //	POST /dashboard/servers/:id/settings
 func (s *Service) UpdateServerSettings(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -768,7 +768,7 @@ func (s *Service) ShowServerHost(c *gin.Context) {
 
 // StartServer resumes a stopped server.
 func (s *Service) StartServer(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, _ := parseIDParam(c, "id")
 
 	_, err := s.hostingSvc.StartServer(c.Request.Context(), userID, serverIDVal)
@@ -781,7 +781,7 @@ func (s *Service) StartServer(c *gin.Context) {
 
 // StopServer halts a running server container.
 func (s *Service) StopServer(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, _ := parseIDParam(c, "id")
 
 	_, err := s.hostingSvc.StopServer(c.Request.Context(), userID, serverIDVal)
@@ -794,7 +794,7 @@ func (s *Service) StopServer(c *gin.Context) {
 
 // DeleteServer enqueues asynchronous teardown and deletion of a server instance.
 func (s *Service) DeleteServer(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -810,7 +810,7 @@ func (s *Service) DeleteServer(c *gin.Context) {
 
 // TriggerBackup queues an on-demand snapshot backup job for the server.
 func (s *Service) TriggerBackup(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -826,7 +826,7 @@ func (s *Service) TriggerBackup(c *gin.Context) {
 
 // RestoreBackup queues a job reverting server storage to the chosen snapshot.
 func (s *Service) RestoreBackup(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID := s.effectiveServerUserID(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")

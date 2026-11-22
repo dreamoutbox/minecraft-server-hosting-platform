@@ -236,7 +236,7 @@ func (h *Handler) ListServers(c *gin.Context) {
 //
 //	GET /api/v1/servers/:id
 func (h *Handler) GetServer(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := effectiveServerUserID(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -269,7 +269,7 @@ func (h *Handler) GetServer(c *gin.Context) {
 //
 //	POST /api/v1/servers/:id/start
 func (h *Handler) StartServer(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := effectiveServerUserID(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -299,7 +299,7 @@ func (h *Handler) StartServer(c *gin.Context) {
 //
 //	POST /api/v1/servers/:id/stop
 func (h *Handler) StopServer(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := effectiveServerUserID(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -329,7 +329,7 @@ func (h *Handler) StopServer(c *gin.Context) {
 //
 //	DELETE /api/v1/servers/:id
 func (h *Handler) DeleteServer(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := effectiveServerUserID(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -371,7 +371,7 @@ func (h *Handler) DeleteServer(c *gin.Context) {
 //
 //	PUT /api/v1/servers/:id/settings
 func (h *Handler) UpdateSettings(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := effectiveServerUserID(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -452,7 +452,7 @@ func (h *Handler) MigrateServer(c *gin.Context) {
 //
 //	GET /api/v1/servers/:id/console/logs?tail=200
 func (h *Handler) GetConsoleLogs(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := effectiveServerUserID(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing user context"})
 		return
@@ -489,7 +489,7 @@ func (h *Handler) GetConsoleLogs(c *gin.Context) {
 //
 //	POST /api/v1/servers/:id/console/command
 func (h *Handler) SendConsoleCommand(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := effectiveServerUserID(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing user context"})
 		return
@@ -514,6 +514,19 @@ func (h *Handler) SendConsoleCommand(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, res)
+}
+
+// effectiveServerUserID returns 0 for staff/admin callers so they can operate on any server,
+// and returns the authenticated user ID for regular users.
+func effectiveServerUserID(c *gin.Context) (uint, error) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		return 0, err
+	}
+	if authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+		return 0, nil
+	}
+	return userID, nil
 }
 
 // parseIDParam extracts and converts a URL route parameter to an unsigned integer.

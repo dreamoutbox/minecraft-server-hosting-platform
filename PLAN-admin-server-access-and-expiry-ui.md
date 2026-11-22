@@ -9,14 +9,14 @@ Build & test commands:
 
 ## Phases
 
-### Phase 1: Fix staff/admin access for server actions (dashboard & API) [STATUS: TODO]
+### Phase 1: Fix staff/admin access for server actions (dashboard & API) [STATUS: DONE]
 - Goal: Allow staff and admin users to view and operate (backup, restore, send console commands, update settings, start/stop, delete) on another user's server without hitting `unauthorized access to server`.
 - Tasks:
-  - [ ] Widen `effectiveServerUserID(c)` in `internal/dashboard/admin.go` from `IsAdmin()` to `IsStaffOrAdmin()` so both staff and admin users bypass ownership checks across dashboard server views and actions.
-  - [ ] Update dashboard action handlers in `internal/dashboard/dashboard.go` (`SendConsoleCommand`, `UpdateServerSettings`, `StartServer`, `StopServer`, `DeleteServer`, `TriggerBackup`, `RestoreBackup`) to use `s.effectiveServerUserID(c)` (matching existing read handlers in `dashboard.go` and `admin.go`).
-  - [ ] Add an equivalent staff/admin-aware helper (`IsStaffOrAdmin()`) in `internal/hosting/handler.go` and `internal/backup/handler.go` so authenticated staff and admin API requests to `/api/v1/servers/:id/...` (get, start, stop, settings, delete, console logs/command, backup, restore) also bypass ownership checks.
-  - [ ] Ensure `actorID` fallback (`if actorID == 0 { actorID = server.UserID }`) is applied consistently in `jobs.Service.EnqueueDeleteServer` (`internal/jobs/queue.go`) and `hosting.Service.{StopServer,SendServerCommand}` (`internal/hosting/service.go`) so job rows and `server_operation_logs` never store `user_id = 0` when staff/admin triggers an action.
-  - [ ] Add tests in `internal/dashboard/admin_test.go` (and/or `internal/dashboard/dashboard_test.go`) verifying both staff and admin can trigger backup, restore, send console command, update settings, start/stop, and delete another user's server while a regular non-owner user is still rejected.
+  - [x] Widen `effectiveServerUserID(c)` in `internal/dashboard/admin.go` from `IsAdmin()` to `IsStaffOrAdmin()` so both staff and admin users bypass ownership checks across dashboard server views and actions.
+  - [x] Update dashboard action handlers in `internal/dashboard/dashboard.go` (`SendConsoleCommand`, `UpdateServerSettings`, `StartServer`, `StopServer`, `DeleteServer`, `TriggerBackup`, `RestoreBackup`) to use `s.effectiveServerUserID(c)` (matching existing read handlers in `dashboard.go` and `admin.go`).
+  - [x] Add an equivalent staff/admin-aware helper (`IsStaffOrAdmin()`) in `internal/hosting/handler.go` and `internal/backup/handler.go` so authenticated staff and admin API requests to `/api/v1/servers/:id/...` (get, start, stop, settings, delete, console logs/command, backup, restore) also bypass ownership checks.
+  - [x] Ensure `actorID` fallback (`if actorID == 0 { actorID = server.UserID }`) is applied consistently in `jobs.Service.EnqueueDeleteServer` (`internal/jobs/queue.go`) and `hosting.Service.{StopServer,SendServerCommand}` (`internal/hosting/service.go`) so job rows and `server_operation_logs` never store `user_id = 0` when staff/admin triggers an action.
+  - [x] Add tests in `internal/dashboard/admin_test.go` (and/or `internal/dashboard/dashboard_test.go`) verifying both staff and admin can trigger backup, restore, send console command, update settings, start/stop, and delete another user's server while a regular non-owner user is still rejected.
 - Done when: `go vet ./...`, `go test -p 1 ./...`, and `go build ./cmd/...` pass; tests cover staff and admin performing all listed server actions on another user's server and regular non-owner denial remains enforced.
 
 ### Phase 2: Fix staff/admin Manage Files access on another user's server [STATUS: TODO]

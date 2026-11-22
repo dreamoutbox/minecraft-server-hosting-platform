@@ -381,27 +381,31 @@ func (s *Service) StopServer(ctx context.Context, userID uint, serverID uint) (*
 	if err != nil {
 		return nil, err
 	}
+	actorID := userID
+	if actorID == 0 {
+		actorID = server.UserID
+	}
 
 	if server.Status == domain.ServerStatusMigrating {
-		domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpStop, domain.ServerLogStatusError, ErrServerMigrating.Error())
+		domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpStop, domain.ServerLogStatusError, ErrServerMigrating.Error())
 		return nil, ErrServerMigrating
 	}
 
 	if server.ContainerID != "" {
 		wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
 		if err := wClient.StopContainer(ctx, server.ContainerID); err != nil {
-			domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpStop, domain.ServerLogStatusError, err.Error())
+			domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpStop, domain.ServerLogStatusError, err.Error())
 			return nil, fmt.Errorf("worker stop container failed: %w", err)
 		}
 	}
 
 	server.Status = domain.ServerStatusStopped
 	if err := s.db.WithContext(ctx).Save(server).Error; err != nil {
-		domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpStop, domain.ServerLogStatusError, err.Error())
+		domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpStop, domain.ServerLogStatusError, err.Error())
 		return nil, err
 	}
 
-	domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpStop, domain.ServerLogStatusSuccess, "server stopped")
+	domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpStop, domain.ServerLogStatusSuccess, "server stopped")
 	return server, nil
 }
 
@@ -727,14 +731,19 @@ func (s *Service) SendServerCommand(ctx context.Context, userID uint, serverID u
 		return nil, fmt.Errorf("server must be running to send console commands (current status: %s)", server.Status)
 	}
 
+	actorID := userID
+	if actorID == 0 {
+		actorID = server.UserID
+	}
+
 	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
 	res, err := wClient.ExecContainerCommand(ctx, server.ContainerID, trimmed)
 	if err != nil {
-		domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpConsoleCommand, domain.ServerLogStatusError, fmt.Sprintf("command %q failed: %v", trimmed, err))
+		domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpConsoleCommand, domain.ServerLogStatusError, fmt.Sprintf("command %q failed: %v", trimmed, err))
 		return nil, err
 	}
 
-	domain.RecordServerLog(ctx, s.db, server.ID, userID, domain.ServerOpConsoleCommand, domain.ServerLogStatusSuccess, fmt.Sprintf("executed %q", trimmed))
+	domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpConsoleCommand, domain.ServerLogStatusSuccess, fmt.Sprintf("executed %q", trimmed))
 	return res, nil
 }
 

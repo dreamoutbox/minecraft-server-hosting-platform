@@ -55,10 +55,10 @@ func (s *Service) renderAdminView(c *gin.Context, page string, data map[string]i
 	s.renderView(c, page, data)
 }
 
-// effectiveServerUserID returns 0 for admins so they can inspect any server from the admin list,
-// and returns the authenticated user ID for everyone else.
+// effectiveServerUserID returns 0 for staff and admin users so they can inspect and manage
+// any server, and returns the authenticated user ID for regular users.
 func (s *Service) effectiveServerUserID(c *gin.Context) uint {
-	if authkit.GetUserRoleFromContext(c).IsAdmin() {
+	if authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
 		return 0
 	}
 	userID, _ := authkit.GetUserIDFromContext(c)

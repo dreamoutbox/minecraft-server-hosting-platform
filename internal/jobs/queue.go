@@ -162,10 +162,15 @@ func (s *Service) EnqueueDeleteServer(ctx context.Context, userID uint, serverID
 		return nil, errors.New("server deletion is already queued")
 	}
 
+	actorID := userID
+	if actorID == 0 {
+		actorID = server.UserID
+	}
+
 	return s.createJob(ctx, domain.ServerJob{
 		Type:        domain.JobTypeDeleteServer,
 		Status:      domain.JobStatusPending,
-		UserID:      userID,
+		UserID:      actorID,
 		ServerID:    server.ID,
 		MaxAttempts: DefaultMaxAttempts,
 		NextRunAt:   time.Now(),

@@ -66,7 +66,7 @@ func (h *Handler) CreateBackup(c *gin.Context) {
 	}
 
 	if h.jobQueue != nil {
-		userID, _ := authkit.GetUserIDFromContext(c)
+		userID := effectiveServerUserID(c)
 		record, job, err := h.jobQueue.EnqueueBackup(c.Request.Context(), userID, serverID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -135,7 +135,7 @@ func (h *Handler) RestoreBackup(c *gin.Context) {
 	}
 
 	if h.jobQueue != nil {
-		userID, _ := authkit.GetUserIDFromContext(c)
+		userID := effectiveServerUserID(c)
 		job, err := h.jobQueue.EnqueueRestore(c.Request.Context(), userID, serverID, backupID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -154,6 +154,16 @@ func (h *Handler) RestoreBackup(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "server restored successfully from backup"})
+}
+
+// effectiveServerUserID returns 0 for staff/admin callers so they can backup/restore any server,
+// and returns the authenticated user ID for regular users.
+func effectiveServerUserID(c *gin.Context) uint {
+	if authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+		return 0
+	}
+	userID, _ := authkit.GetUserIDFromContext(c)
+	return userID
 }
 
 // ListImageBackups returns recorded ext4 image backups for the specified server (admin-only).

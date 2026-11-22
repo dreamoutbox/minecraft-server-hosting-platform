@@ -418,3 +418,154 @@ func TestAdminMenuSearchPaginationAndPlanCRUD(t *testing.T) {
 		t.Errorf("expected deleted plan %d to be removed from database", createdPlan2.ID)
 	}
 }
+
+func TestStaffAndAdminCrossUserServerActions(t *testing.T) {
+	r, dashSvc, _ := setupDashboardTestEnv(t)
+	if r == nil {
+		return
+	}
+
+	suffix := time.Now().UnixNano()
+	owner := domain.User{Email: fmt.Sprintf("owner-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}
+	otherUser := domain.User{Email: fmt.Sprintf("other-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}
+	staffUser := domain.User{Email: fmt.Sprintf("staff-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleStaff}
+	adminUser := domain.User{Email: fmt.Sprintf("admin-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleAdmin}
+	for _, u := range []*domain.User{&owner, &otherUser, &staffUser, &adminUser} {
+		if err := dashSvc.db.Create(u).Error; err != nil {
+			t.Fatalf("failed creating user %s: %v", u.Email, err)
+		}
+	}
+
+	var plan domain.Plan
+	if err := dashSvc.db.Order("id asc").First(&plan).Error; err != nil {
+		t.Fatalf("expected seeded plan: %v", err)
+	}
+	var host domain.Host
+	if err := dashSvc.db.First(&host).Error; err != nil {
+		t.Fatalf("expected seeded host: %v", err)
+	}
+
+	createTargetServer := func(name string, port int) domain.Server {
+		srv := domain.Server{
+			UserID:        owner.ID,
+			PlanID:        plan.ID,
+			HostID:        host.ID,
+			Name:          name,
+			Status:        domain.ServerStatusRunning,
+			ContainerID:   fmt.Sprintf("ctr-%s", name),
+			Port:          port,
+			ServerType:    domain.ServerTypeVanilla,
+			ServerVersion: "LATEST",
+		}
+		if err := dashSvc.db.Create(&srv).Error; err != nil {
+			t.Fatalf("failed creating server %s: %v", name, err)
+		}
+		return srv
+	}
+
+	srvStaff := createTargetServer(fmt.Sprintf("CrossStaff-%d", suffix), 25751)
+	srvAdmin := createTargetServer(fmt.Sprintf("CrossAdmin-%d", suffix), 25752)
+
+	backupStaff := domain.BackupRecord{ServerID: srvStaff.ID, StorageKey: fmt.Sprintf("backups/s-%d.tar.gz", suffix), SizeBytes: 128, Status: domain.BackupStatusCompleted}
+	backupAdmin := domain.BackupRecord{ServerID: srvAdmin.ID, StorageKey: fmt.Sprintf("backups/a-%d.tar.gz", suffix), SizeBytes: 128, Status: domain.BackupStatusCompleted}
+	if err := dashSvc.db.Create(&backupStaff).Error; err != nil {
+		t.Fatalf("failed creating backupStaff: %v", err)
+	}
+	if err := dashSvc.db.Create(&backupAdmin).Error; err != nil {
+		t.Fatalf("failed creating backupAdmin: %v", err)
+	}
+
+	t.Cleanup(func() {
+		dashSvc.db.Where("server_id IN ?", []uint{srvStaff.ID, srvAdmin.ID}).Delete(&domain.ServerJob{})
+		dashSvc.db.Where("server_id IN ?", []uint{srvStaff.ID, srvAdmin.ID}).Delete(&domain.ServerOperationLog{})
+		dashSvc.db.Where("server_id IN ?", []uint{srvStaff.ID, srvAdmin.ID}).Delete(&domain.BackupRecord{})
+		dashSvc.db.Delete(&domain.Server{}, []uint{srvStaff.ID, srvAdmin.ID})
+		dashSvc.db.Delete(&domain.User{}, []uint{owner.ID, otherUser.ID, staffUser.ID, adminUser.ID})
+	})
+
+	otherTokens, _ := authkit.GenerateTokenPair(otherUser.ID, otherUser.Email, otherUser.Role, dashSvc.jwtSecret)
+	staffTokens, _ := authkit.GenerateTokenPair(staffUser.ID, staffUser.Email, staffUser.Role, dashSvc.jwtSecret)
+	adminTokens, _ := authkit.GenerateTokenPair(adminUser.ID, adminUser.Email, adminUser.Role, dashSvc.jwtSecret)
+
+	otherCookie := &http.Cookie{Name: "token", Value: otherTokens.AccessToken}
+	staffCookie := &http.Cookie{Name: "token", Value: staffTokens.AccessToken}
+	adminCookie := &http.Cookie{Name: "token", Value: adminTokens.AccessToken}
+
+	// Regular non-owner user must be denied across all actions.
+	for _, tc := range []struct {
+		path string
+		form url.Values
+	}{
+		{fmt.Sprintf("/dashboard/servers/%d/console/command", srvStaff.ID), url.Values{"command": {"list"}}},
+		{fmt.Sprintf("/dashboard/servers/%d/settings", srvStaff.ID), url.Values{"server_type": {"PAPER"}, "server_version": {"1.21.4"}}},
+		{fmt.Sprintf("/dashboard/servers/%d/stop", srvStaff.ID), nil},
+		{fmt.Sprintf("/dashboard/servers/%d/backups/now", srvStaff.ID), nil},
+		{fmt.Sprintf("/dashboard/servers/%d/backups/%d/restore", srvStaff.ID, backupStaff.ID), nil},
+		{fmt.Sprintf("/dashboard/servers/%d/delete", srvStaff.ID), nil},
+	} {
+		w := doDashboardReq(r, http.MethodPost, tc.path, otherCookie, tc.form)
+		loc := w.Header().Get("Location")
+		if w.Code != http.StatusFound || !strings.Contains(loc, "error=unauthorized+access+to+server") {
+			t.Fatalf("expected non-owner denial on %s, got code=%d location=%s", tc.path, w.Code, loc)
+		}
+	}
+
+	// Both staff and admin can perform all actions on another user's server.
+	for _, tc := range []struct {
+		label  string
+		cookie *http.Cookie
+		srv    domain.Server
+		backup domain.BackupRecord
+	}{
+		{"staff", staffCookie, srvStaff, backupStaff},
+		{"admin", adminCookie, srvAdmin, backupAdmin},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			wCmd := doDashboardReq(r, http.MethodPost, fmt.Sprintf("/dashboard/servers/%d/console/command", tc.srv.ID), tc.cookie, url.Values{"command": {"list"}})
+			if wCmd.Code != http.StatusFound || !strings.Contains(wCmd.Header().Get("Location"), "success=Command+sent") {
+				t.Fatalf("%s console command failed: code=%d loc=%s", tc.label, wCmd.Code, wCmd.Header().Get("Location"))
+			}
+
+			wSet := doDashboardReq(r, http.MethodPost, fmt.Sprintf("/dashboard/servers/%d/settings", tc.srv.ID), tc.cookie, url.Values{
+				"server_type":    {"PAPER"},
+				"server_version": {"1.21.4"},
+			})
+			if wSet.Code != http.StatusFound || !strings.Contains(wSet.Header().Get("Location"), "success=") {
+				t.Fatalf("%s update settings failed: code=%d loc=%s", tc.label, wSet.Code, wSet.Header().Get("Location"))
+			}
+
+			wBkp := doDashboardReq(r, http.MethodPost, fmt.Sprintf("/dashboard/servers/%d/backups/now", tc.srv.ID), tc.cookie, nil)
+			if wBkp.Code != http.StatusFound || !strings.Contains(wBkp.Header().Get("Location"), "success=Backup+queued") {
+				t.Fatalf("%s trigger backup failed: code=%d loc=%s", tc.label, wBkp.Code, wBkp.Header().Get("Location"))
+			}
+
+			wRes := doDashboardReq(r, http.MethodPost, fmt.Sprintf("/dashboard/servers/%d/backups/%d/restore", tc.srv.ID, tc.backup.ID), tc.cookie, nil)
+			if wRes.Code != http.StatusFound || !strings.Contains(wRes.Header().Get("Location"), "success=Restore+queued") {
+				t.Fatalf("%s restore backup failed: code=%d loc=%s", tc.label, wRes.Code, wRes.Header().Get("Location"))
+			}
+
+			wStop := doDashboardReq(r, http.MethodPost, fmt.Sprintf("/dashboard/servers/%d/stop", tc.srv.ID), tc.cookie, nil)
+			if wStop.Code != http.StatusFound || !strings.Contains(wStop.Header().Get("Location"), "success=Server+stopped") {
+				t.Fatalf("%s stop server failed: code=%d loc=%s", tc.label, wStop.Code, wStop.Header().Get("Location"))
+			}
+
+			wStart := doDashboardReq(r, http.MethodPost, fmt.Sprintf("/dashboard/servers/%d/start", tc.srv.ID), tc.cookie, nil)
+			if wStart.Code != http.StatusFound || !strings.Contains(wStart.Header().Get("Location"), "success=Server+started") {
+				t.Fatalf("%s start server failed: code=%d loc=%s", tc.label, wStart.Code, wStart.Header().Get("Location"))
+			}
+
+			wDel := doDashboardReq(r, http.MethodPost, fmt.Sprintf("/dashboard/servers/%d/delete", tc.srv.ID), tc.cookie, nil)
+			if wDel.Code != http.StatusFound || !strings.Contains(wDel.Header().Get("Location"), "success=Server+deletion+queued") {
+				t.Fatalf("%s delete server failed: code=%d loc=%s", tc.label, wDel.Code, wDel.Header().Get("Location"))
+			}
+
+			var delJob domain.ServerJob
+			if err := dashSvc.db.Where("server_id = ? AND type = ?", tc.srv.ID, domain.JobTypeDeleteServer).First(&delJob).Error; err != nil {
+				t.Fatalf("%s expected queued delete job: %v", tc.label, err)
+			}
+			if delJob.UserID == 0 {
+				t.Errorf("%s expected non-zero UserID on queued delete job", tc.label)
+			}
+		})
+	}
+}
