@@ -73,3 +73,18 @@ type HostStatusResponse struct {
 	FreeDiskBytes    uint64 `json:"free_disk_bytes"`
 	TotalDiskBytes   uint64 `json:"total_disk_bytes"`
 }
+
+// UploadVolumeBackupRequest instructs the worker to tar.gz a server mount and PUT it to a presigned URL.
+type UploadVolumeBackupRequest struct {
+	PresignedURL string `json:"presigned_url" binding:"required"`
+}
+
+// UploadVolumeBackupResponse reports the uploaded compressed archive size in bytes.
+type UploadVolumeBackupResponse struct {
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// RestoreVolumeBackupRequest instructs the worker to GET an archive from a presigned URL and unpack it into the mount.
+type RestoreVolumeBackupRequest struct {
+	PresignedURL string `json:"presigned_url" binding:"required"`
+}

@@ -44,16 +44,16 @@ Architecture decisions locked in before implementation:
   - [x] Add nullable indexed `ImageBackupID *uint` field to `domain.ServerJob` so backup/restore jobs cleanly reference `server_image_backups`.
 - Done when: `go test ./internal/domain/...` and `go build ./...` pass with the updated schema and enums.
 
-### Phase 4: Add worker presigned `.tar.gz` volume backup/restore endpoints [STATUS: TODO]
+### Phase 4: Add worker presigned `.tar.gz` volume backup/restore endpoints [STATUS: DONE]
 - Goal: Enable `cmd/worker` to compress mounted Minecraft files to `.tar.gz` and transfer directly to/from S3 via presigned URLs without holding S3 credentials.
 - Tasks:
-  - [ ] Add request/response DTOs (`UploadVolumeBackupRequest`, `UploadVolumeBackupResponse`, `RestoreVolumeBackupRequest`) in `internal/worker/types.go`.
-  - [ ] Implement gzip-aware tar export/import helpers in `internal/worker/volume.go`:
+  - [x] Add request/response DTOs (`UploadVolumeBackupRequest`, `UploadVolumeBackupResponse`, `RestoreVolumeBackupRequest`) in `internal/worker/types.go`.
+  - [x] Implement gzip-aware tar export/import helpers in `internal/worker/volume.go`:
     - `ExportVolumeGzip`: tars `/var/lib/mc-platform/mounts/<id>` (skipping `lost+found`) through `gzip` into a temp file (yielding exact `Content-Length` for S3/SeaweedFS PUT), uploads via HTTP `PUT` to `PresignedURL`, and cleans up the temp file.
     - `ImportVolumeAuto`: peeks magic bytes (`0x1f 0x8b`) so both new `.tar.gz` and legacy uncompressed `.tar` archives unpack cleanly into the mount directory.
-  - [ ] Register `POST /volumes/:id/backup-upload` and `POST /volumes/:id/backup-restore` on `worker.Handler` (`internal/worker/handler.go`) — worker only uses standard `net/http` against the supplied presigned URL.
-  - [ ] Add `UploadVolumeBackup` and `RestoreVolumeBackup` to `worker.Client` / `worker.HTTPClient` (`internal/worker/client.go`), using a dedicated transfer HTTP client without the 60s fixed timeout (relying on caller `ctx` deadline) so large backups do not time out.
-  - [ ] Add unit tests in `internal/worker/worker_test.go` using an `httptest.Server` as a mock presigned S3 endpoint to verify `.tar.gz` upload, download+restore, and legacy `.tar` restore.
+  - [x] Register `POST /volumes/:id/backup-upload` and `POST /volumes/:id/backup-restore` on `worker.Handler` (`internal/worker/handler.go`) — worker only uses standard `net/http` against the supplied presigned URL.
+  - [x] Add `UploadVolumeBackup` and `RestoreVolumeBackup` to `worker.Client` / `worker.HTTPClient` (`internal/worker/client.go`), using a dedicated transfer HTTP client without the 60s fixed timeout (relying on caller `ctx` deadline) so large backups do not time out.
+  - [x] Add unit tests in `internal/worker/worker_test.go` using an `httptest.Server` as a mock presigned S3 endpoint to verify `.tar.gz` upload, download+restore, and legacy `.tar` restore.
 - Done when: `go test ./internal/worker/...` passes and `cmd/worker` has zero AWS/S3 SDK imports.
 
 ### Phase 5: Add worker presigned ext4 `.img` multi-part backup/restore endpoints [STATUS: TODO]

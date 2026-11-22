@@ -79,6 +79,14 @@ func (m *multiHostWorkerClient) ImportVolume(ctx context.Context, volumeID strin
 	return nil
 }
 
+func (m *multiHostWorkerClient) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
+	return &worker.UploadVolumeBackupResponse{SizeBytes: 0}, nil
+}
+
+func (m *multiHostWorkerClient) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
+	return nil
+}
+
 func (m *multiHostWorkerClient) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

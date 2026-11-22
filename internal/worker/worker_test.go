@@ -3,6 +3,7 @@ package worker
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/docker/docker/api/types"
@@ -570,5 +572,134 @@ func TestParseMountInfoLine(t *testing.T) {
 
 	if _, ok := parseMountInfoLine("short line"); ok {
 		t.Error("expected malformed mountinfo line to be rejected")
+	}
+}
+
+func TestPresignedVolumeBackupUploadAndRestore(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	vm := NewLocalVolumeManager(tmpDir, false)
+	cm := newMockContainerManager()
+	handler := NewHandler(cm, vm, 10, tmpDir)
+	router := gin.New()
+	handler.RegisterRoutes(router, "worker-secret")
+
+	workerSrv := httptest.NewServer(router)
+	defer workerSrv.Close()
+	wClient := NewClient(workerSrv.URL, "worker-secret")
+
+	// Prepare volume directory with Minecraft files
+	mountDir := filepath.Join(tmpDir, "mounts", "42")
+	if err := os.MkdirAll(filepath.Join(mountDir, "world"), 0755); err != nil {
+		t.Fatalf("failed creating mount dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mountDir, "server.properties"), []byte("motd=PresignedWorld\n"), 0644); err != nil {
+		t.Fatalf("failed writing server.properties: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mountDir, "world", "level.dat"), []byte("chunk-data-123"), 0644); err != nil {
+		t.Fatalf("failed writing level.dat: %v", err)
+	}
+
+	// Mock presigned S3 endpoint verifying Content-Type and exact Content-Length
+	var mu sync.Mutex
+	objects := make(map[string][]byte)
+	var lastContentType string
+	var lastContentLength int64
+	s3Srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.Method {
+		case http.MethodPut:
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			lastContentType = r.Header.Get("Content-Type")
+			lastContentLength = r.ContentLength
+			objects[r.URL.Path] = body
+			w.WriteHeader(http.StatusOK)
+		case http.MethodGet:
+			data, ok := objects[r.URL.Path]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(data)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+	defer s3Srv.Close()
+
+	// 1. Upload .tar.gz backup via presigned PUT
+	putURL := s3Srv.URL + "/backups/server-42/snap1.tar.gz"
+	upResp, err := wClient.UploadVolumeBackup(ctx, "42", putURL)
+	if err != nil {
+		t.Fatalf("UploadVolumeBackup failed: %v", err)
+	}
+	if upResp.SizeBytes <= 0 {
+		t.Fatalf("expected positive uploaded size, got %d", upResp.SizeBytes)
+	}
+
+	mu.Lock()
+	uploaded := objects["/backups/server-42/snap1.tar.gz"]
+	ct := lastContentType
+	cl := lastContentLength
+	mu.Unlock()
+
+	if ct != "application/gzip" {
+		t.Errorf("expected Content-Type application/gzip, got %q", ct)
+	}
+	if cl != int64(len(uploaded)) || cl != upResp.SizeBytes {
+		t.Errorf("Content-Length mismatch: header=%d actual=%d resp=%d", cl, len(uploaded), upResp.SizeBytes)
+	}
+	if len(uploaded) < 2 || uploaded[0] != gzipMagicByte0 || uploaded[1] != gzipMagicByte1 {
+		t.Fatal("uploaded backup is not gzip-compressed")
+	}
+	// Sanity-check the uploaded tar.gz is readable
+	gzr, err := gzip.NewReader(bytes.NewReader(uploaded))
+	if err != nil {
+		t.Fatalf("uploaded archive is invalid gzip: %v", err)
+	}
+	_ = gzr.Close()
+
+	// 2. Corrupt volume and add stale file
+	_ = os.WriteFile(filepath.Join(mountDir, "server.properties"), []byte("motd=Corrupted\n"), 0644)
+	_ = os.WriteFile(filepath.Join(mountDir, "stale.txt"), []byte("remove-me"), 0644)
+
+	// 3. Restore .tar.gz via presigned GET
+	if err := wClient.RestoreVolumeBackup(ctx, "42", putURL); err != nil {
+		t.Fatalf("RestoreVolumeBackup (.tar.gz) failed: %v", err)
+	}
+	gotProps, err := os.ReadFile(filepath.Join(mountDir, "server.properties"))
+	if err != nil || string(gotProps) != "motd=PresignedWorld\n" {
+		t.Fatalf("restored server.properties = %q (err=%v), want motd=PresignedWorld", string(gotProps), err)
+	}
+	if _, err := os.Stat(filepath.Join(mountDir, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale.txt to be removed during restore")
+	}
+
+	// 4. Verify legacy uncompressed .tar restore still works
+	var plainTar bytes.Buffer
+	tw := tar.NewWriter(&plainTar)
+	legacyContent := []byte("motd=LegacyPlainTar\n")
+	_ = tw.WriteHeader(&tar.Header{Name: "server.properties", Mode: 0644, Size: int64(len(legacyContent))})
+	_, _ = tw.Write(legacyContent)
+	_ = tw.Close()
+
+	mu.Lock()
+	objects["/backups/server-42/legacy.tar"] = plainTar.Bytes()
+	mu.Unlock()
+
+	if err := wClient.RestoreVolumeBackup(ctx, "42", s3Srv.URL+"/backups/server-42/legacy.tar"); err != nil {
+		t.Fatalf("RestoreVolumeBackup (legacy .tar) failed: %v", err)
+	}
+	gotLegacy, err := os.ReadFile(filepath.Join(mountDir, "server.properties"))
+	if err != nil || string(gotLegacy) != string(legacyContent) {
+		t.Fatalf("legacy restored server.properties = %q (err=%v), want %q", string(gotLegacy), err, string(legacyContent))
 	}
 }

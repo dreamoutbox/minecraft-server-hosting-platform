@@ -70,6 +70,14 @@ func (m *mockWorkerClient) ImportVolume(ctx context.Context, volumeID string, r 
 	return nil
 }
 
+func (m *mockWorkerClient) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
+	return &worker.UploadVolumeBackupResponse{SizeBytes: 0}, nil
+}
+
+func (m *mockWorkerClient) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
+	return nil
+}
+
 func (m *mockWorkerClient) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
 	id := fmt.Sprintf("ctr-server-%d", req.ServerID)
 	m.createdContainers[id] = req

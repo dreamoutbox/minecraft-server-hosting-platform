@@ -71,6 +71,14 @@ func (m *mockWorkerForBackup) ImportVolume(ctx context.Context, volumeID string,
 	return nil
 }
 
+func (m *mockWorkerForBackup) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
+	return &worker.UploadVolumeBackupResponse{SizeBytes: 0}, nil
+}
+
+func (m *mockWorkerForBackup) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
+	return nil
+}
+
 func (m *mockWorkerForBackup) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

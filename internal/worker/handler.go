@@ -304,6 +304,65 @@ func (h *Handler) ImportVolume(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "imported", "volume_id": id})
 }
 
+// UploadVolumeBackup compresses volume files to tar.gz and uploads to the provided presigned S3 PUT URL.
+//
+// Arguments:
+//   - c: Active Gin request context with URL param 'id' and UploadVolumeBackupRequest JSON body.
+//
+// Example usage:
+//
+//	POST /volumes/:id/backup-upload
+func (h *Handler) UploadVolumeBackup(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing volume id"})
+		return
+	}
+
+	var req UploadVolumeBackupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid backup upload request: " + err.Error()})
+		return
+	}
+
+	sizeBytes, err := h.volumes.UploadVolumeBackup(c.Request.Context(), id, req.PresignedURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, UploadVolumeBackupResponse{SizeBytes: sizeBytes})
+}
+
+// RestoreVolumeBackup downloads a backup archive from the provided presigned S3 GET URL and unpacks it.
+//
+// Arguments:
+//   - c: Active Gin request context with URL param 'id' and RestoreVolumeBackupRequest JSON body.
+//
+// Example usage:
+//
+//	POST /volumes/:id/backup-restore
+func (h *Handler) RestoreVolumeBackup(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing volume id"})
+		return
+	}
+
+	var req RestoreVolumeBackupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid backup restore request: " + err.Error()})
+		return
+	}
+
+	if err := h.volumes.RestoreVolumeBackup(c.Request.Context(), id, req.PresignedURL); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "restored", "volume_id": id})
+}
+
 // GetStatus reports host health, active container count, and disk capacity.
 //
 // Arguments:
@@ -381,5 +440,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, apiKey string) {
 		authorized.DELETE("/volumes/:id", h.DeleteVolume)
 		authorized.GET("/volumes/:id/export", h.ExportVolume)
 		authorized.POST("/volumes/:id/import", h.ImportVolume)
+		authorized.POST("/volumes/:id/backup-upload", h.UploadVolumeBackup)
+		authorized.POST("/volumes/:id/backup-restore", h.RestoreVolumeBackup)
 	}
 }

@@ -32,6 +32,8 @@ type VolumeManager interface {
 	UnmountAll(ctx context.Context) error
 	ExportVolume(ctx context.Context, volumeID string, w io.Writer) error
 	ImportVolume(ctx context.Context, volumeID string, r io.Reader) error
+	UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (int64, error)
+	RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error
 	GetVolumePath(volumeID string) (mountPath string, exists bool)
 }
 
@@ -398,7 +400,13 @@ func (m *LocalVolumeManager) ImportVolume(ctx context.Context, volumeID string, 
 		}
 	}
 
-	tr := tar.NewReader(r)
+	trReader, closeArchive, err := unwrapOptionalGzip(r)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = closeArchive() }()
+
+	tr := tar.NewReader(trReader)
 	for {
 		select {
 		case <-ctx.Done():

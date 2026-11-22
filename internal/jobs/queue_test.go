@@ -80,6 +80,14 @@ func (q *queueTestWorker) ImportVolume(ctx context.Context, volumeID string, r i
 	return nil
 }
 
+func (q *queueTestWorker) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
+	return &worker.UploadVolumeBackupResponse{SizeBytes: 0}, nil
+}
+
+func (q *queueTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
+	return nil
+}
+
 func (q *queueTestWorker) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

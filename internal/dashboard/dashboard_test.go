@@ -74,6 +74,14 @@ func (d *dashboardTestWorker) ImportVolume(ctx context.Context, volumeID string,
 	return nil
 }
 
+func (d *dashboardTestWorker) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
+	return &worker.UploadVolumeBackupResponse{SizeBytes: 0}, nil
+}
+
+func (d *dashboardTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
+	return nil
+}
+
 func (d *dashboardTestWorker) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

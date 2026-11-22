@@ -18,6 +18,8 @@ type Client interface {
 	DeleteVolume(ctx context.Context, volumeID string) error
 	ExportVolume(ctx context.Context, volumeID string) (io.ReadCloser, error)
 	ImportVolume(ctx context.Context, volumeID string, r io.Reader) error
+	UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*UploadVolumeBackupResponse, error)
+	RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error
 	CreateContainer(ctx context.Context, req CreateContainerRequest) (*CreateContainerResponse, error)
 	StopContainer(ctx context.Context, containerID string) error
 	DeleteContainer(ctx context.Context, containerID string) error
@@ -28,9 +30,10 @@ type Client interface {
 
 // HTTPClient implements Client via standard HTTP requests injecting the worker API key.
 type HTTPClient struct {
-	baseURL    string
-	apiKey     string
-	httpClient *http.Client
+	baseURL        string
+	apiKey         string
+	httpClient     *http.Client
+	transferClient *http.Client
 }
 
 // NewClient constructs an HTTP worker client targeting a specific host node.
@@ -49,11 +52,17 @@ func NewClient(baseURL string, apiKey string) *HTTPClient {
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+		// Long-running backup/restore transfers rely on caller context deadlines instead of a 60s cap.
+		transferClient: &http.Client{},
 	}
 }
 
 // doRequest handles request execution, header injection, and HTTP status verification.
 func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
+	return c.doRequestWithClient(ctx, c.httpClient, method, path, body, contentType)
+}
+
+func (c *HTTPClient) doRequestWithClient(ctx context.Context, client *http.Client, method, path string, body io.Reader, contentType string) (*http.Response, error) {
 	url := fmt.Sprintf("%s%s", c.baseURL, path)
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
@@ -69,7 +78,7 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body io
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("worker request to %s failed: %w", url, err)
 	}
@@ -209,6 +218,69 @@ func (c *HTTPClient) ImportVolume(ctx context.Context, volumeID string, r io.Rea
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("import volume failed with code %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
+}
+
+// UploadVolumeBackup instructs the worker to tar.gz volumeID and upload it to presignedURL.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - volumeID: Identifier of the server volume to archive.
+//   - presignedURL: Pre-signed S3 PUT URL.
+//
+// Example usage:
+//
+//	res, err := client.UploadVolumeBackup(ctx, "42", putURL)
+func (c *HTTPClient) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*UploadVolumeBackupResponse, error) {
+	payload, err := json.Marshal(UploadVolumeBackupRequest{PresignedURL: presignedURL})
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.doRequestWithClient(ctx, c.transferClient, http.MethodPost, fmt.Sprintf("/volumes/%s/backup-upload", volumeID), bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("upload volume backup failed with code %d: %s", resp.StatusCode, string(b))
+	}
+
+	var res UploadVolumeBackupResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("failed decoding upload volume backup response: %w", err)
+	}
+	return &res, nil
+}
+
+// RestoreVolumeBackup instructs the worker to download a backup from presignedURL and unpack it into volumeID.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - volumeID: Identifier of the server volume to overwrite.
+//   - presignedURL: Pre-signed S3 GET URL.
+//
+// Example usage:
+//
+//	err := client.RestoreVolumeBackup(ctx, "42", getURL)
+func (c *HTTPClient) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
+	payload, err := json.Marshal(RestoreVolumeBackupRequest{PresignedURL: presignedURL})
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.doRequestWithClient(ctx, c.transferClient, http.MethodPost, fmt.Sprintf("/volumes/%s/backup-restore", volumeID), bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("restore volume backup failed with code %d: %s", resp.StatusCode, string(b))
 	}
 	return nil
 }
