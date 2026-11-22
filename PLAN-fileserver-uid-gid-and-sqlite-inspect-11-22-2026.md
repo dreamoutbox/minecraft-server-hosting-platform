@@ -20,13 +20,13 @@ Modules:
   - [x] Update existing callers in `internal/hosting/service.go` (temporary nil or 1000:1000? Pass `nil, nil` in Phase 1 so Phase 1 compiles across the workspace, then wire `1000:1000` in Phase 3) and add unit tests in `fileserver/internal/store/store_test.go` and `fileserver/internal/api/handler_test.go`.
 - Done when: `cd fileserver && go vet ./... && go test ./... && go build ./cmd/...` and root `go vet ./... && go build ./cmd/...` pass; SQLite `users` table has `uid`/`gid` columns and `PUT /api/v1/users` persists and updates them.
 
-### Phase 2: Apply uploader `uid:gid` ownership on file upload and creation in fileserver [STATUS: TODO]
+### Phase 2: Apply uploader `uid:gid` ownership on file upload and creation in fileserver [STATUS: DONE]
 - Goal: Ensure files uploaded (and files/folders created) through the fileserver web UI are owned by the logged-in user's configured `uid:gid` instead of `root:root`.
 - Tasks:
-  - [ ] Add a `FileOwner` helper struct (e.g. `UID *int`, `GID *int`) and a shared `applyFileOwnership(f *os.File, owner *FileOwner) error` helper in `fileserver/internal/files/fs.go` that calls `f.Chown(uid, gid)` on the open file descriptor inside `os.Root` (symlink/TOCTOU-safe) when `owner` specifies valid non-nil `UID`/`GID` (or falls back to `-1` for an unspecified half).
-  - [ ] Update `SaveUploadedFile`, `CreateFile`, and `CreateDir` in `fileserver/internal/files/fs.go` to accept `*FileOwner` and apply ownership immediately upon creation (for `CreateDir`, open the newly created directory via `root.Open` and call `f.Chown`).
-  - [ ] Update `files.Handler` (`Upload`, `CreateFile`, `MakeDir`) in `fileserver/internal/files/handler.go` to load the authenticated user's `UID`/`GID` from `h.store.GetUser(ctx, userID)` via a shared helper `h.resolveFileOwner(ctx, userID)` and pass it to `SaveUploadedFile`, `CreateFile`, and `CreateDir`.
-  - [ ] Add tests in `fileserver/internal/files/fs_test.go` and `fileserver/internal/files/handler_test.go` verifying ownership is applied on upload, create file, and create folder (using `os.Getuid()`/`os.Getgid()` so tests pass cleanly as both non-root and root, plus testing the nil-owner no-op path).
+  - [x] Add a `FileOwner` helper struct (e.g. `UID *int`, `GID *int`) and a shared `applyFileOwnership(f *os.File, owner *FileOwner) error` helper in `fileserver/internal/files/fs.go` that calls `f.Chown(uid, gid)` on the open file descriptor inside `os.Root` (symlink/TOCTOU-safe) when `owner` specifies valid non-nil `UID`/`GID` (or falls back to `-1` for an unspecified half).
+  - [x] Update `SaveUploadedFile`, `CreateFile`, and `CreateDir` in `fileserver/internal/files/fs.go` to accept `*FileOwner` and apply ownership immediately upon creation (for `CreateDir`, open the newly created directory via `root.Open` and call `f.Chown`).
+  - [x] Update `files.Handler` (`Upload`, `CreateFile`, `MakeDir`) in `fileserver/internal/files/handler.go` to load the authenticated user's `UID`/`GID` from `h.store.GetUser(ctx, userID)` via a shared helper `h.resolveFileOwner(ctx, userID)` and pass it to `SaveUploadedFile`, `CreateFile`, and `CreateDir`.
+  - [x] Add tests in `fileserver/internal/files/fs_test.go` and `fileserver/internal/files/handler_test.go` verifying ownership is applied on upload, create file, and create folder (using `os.Getuid()`/`os.Getgid()` so tests pass cleanly as both non-root and root, plus testing the nil-owner no-op path).
 - Done when: `cd fileserver && go vet ./... && go test ./... && go build ./cmd/...` passes; uploaded files, created files, and created folders get chowned to the user's `uid:gid` when configured.
 
 ### Phase 3: Register fileserver users with `1000:1000` from API server [STATUS: TODO]

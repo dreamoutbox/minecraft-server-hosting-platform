@@ -27,3 +27,7 @@
 - [ ] upload file should not own by root:root. add field uid and gid to users table. upload file should be owned by uid:gid to user who uploaded it.
 
 - [ ] add dev shell script to inspect sqlite database. show all tables and rows.
+
+- [ ] change EnsureUser method and DTO. to RegisterUser.
+
+- [ ] the RegisterUser should take Password input.

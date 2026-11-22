@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -31,10 +32,10 @@ func TestFileOpsAndRootSafety(t *testing.T) {
 	}
 
 	// 1. Create folder and upload file
-	if err := CreateDir(rootDir, ".", "plugins"); err != nil {
+	if err := CreateDir(rootDir, ".", "plugins", nil); err != nil {
 		t.Fatalf("CreateDir failed: %v", err)
 	}
-	if err := SaveUploadedFile(rootDir, "plugins", "config.yml", bytes.NewBufferString("enabled: true\n")); err != nil {
+	if err := SaveUploadedFile(rootDir, "plugins", "config.yml", bytes.NewBufferString("enabled: true\n"), nil); err != nil {
 		t.Fatalf("SaveUploadedFile failed: %v", err)
 	}
 
@@ -72,7 +73,7 @@ func TestFileOpsAndRootSafety(t *testing.T) {
 	}
 
 	// 6. Reject traversal and invalid names
-	if err := CreateDir(rootDir, ".", "../escape"); !errors.Is(err, ErrInvalidName) {
+	if err := CreateDir(rootDir, ".", "../escape", nil); !errors.Is(err, ErrInvalidName) {
 		t.Errorf("expected ErrInvalidName for traversal folder name, got %v", err)
 	}
 	if err := DeleteEntry(rootDir, "."); !errors.Is(err, ErrCannotModifyRoot) {
@@ -177,7 +178,7 @@ func TestCreateEditAndZipOperations(t *testing.T) {
 
 	// CreateFile, ReadEditableFile, SaveEditableFile on .env and .yaml
 	for _, name := range []string{"notes.txt", ".rcon-cli.yaml", ".custom.env"} {
-		if err := CreateFile(rootDir, ".", name); err != nil {
+		if err := CreateFile(rootDir, ".", name, nil); err != nil {
 			t.Fatalf("CreateFile(%s) failed: %v", name, err)
 		}
 		if err := SaveEditableFile(rootDir, name, "hello=world\n", 1024); err != nil {
@@ -188,12 +189,12 @@ func TestCreateEditAndZipOperations(t *testing.T) {
 			t.Fatalf("ReadEditableFile(%s) got (%q, %v)", name, gotContent, err)
 		}
 	}
-	if err := CreateFile(rootDir, ".", "notes.txt"); !errors.Is(err, ErrAlreadyExists) {
+	if err := CreateFile(rootDir, ".", "notes.txt", nil); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("expected ErrAlreadyExists on duplicate file, got %v", err)
 	}
 
 	// Binary extensions and oversized files are rejected
-	if err := CreateFile(rootDir, ".", "server.jar"); err != nil {
+	if err := CreateFile(rootDir, ".", "server.jar", nil); err != nil {
 		t.Fatalf("CreateFile jar failed: %v", err)
 	}
 	if _, err := ReadEditableFile(rootDir, "server.jar", 1024); !errors.Is(err, ErrBinaryFile) {
@@ -228,13 +229,13 @@ func TestCreateEditAndZipOperations(t *testing.T) {
 	}
 
 	// Zip folder with nested file, empty subfolder, and external symlink (must be skipped)
-	if err := CreateDir(rootDir, ".", "world"); err != nil {
+	if err := CreateDir(rootDir, ".", "world", nil); err != nil {
 		t.Fatalf("CreateDir world: %v", err)
 	}
-	if err := CreateDir(rootDir, "world", "empty-sub"); err != nil {
+	if err := CreateDir(rootDir, "world", "empty-sub", nil); err != nil {
 		t.Fatalf("CreateDir empty-sub: %v", err)
 	}
-	if err := SaveUploadedFile(rootDir, "world", "level.txt", bytes.NewBufferString("seed=123\n")); err != nil {
+	if err := SaveUploadedFile(rootDir, "world", "level.txt", bytes.NewBufferString("seed=123\n"), nil); err != nil {
 		t.Fatalf("SaveUploadedFile level.txt: %v", err)
 	}
 	if err := os.Symlink(filepath.Join(outsideDir, "secret.txt"), filepath.Join(rootDir, "world", "leak.txt")); err != nil {
@@ -300,7 +301,7 @@ func (r *failingReader) Read(p []byte) (int, error) {
 
 func TestSaveUploadedFileRemovesPartialOnError(t *testing.T) {
 	rootDir := t.TempDir()
-	if err := SaveUploadedFile(rootDir, ".", "huge.bin", &failingReader{}); err == nil {
+	if err := SaveUploadedFile(rootDir, ".", "huge.bin", &failingReader{}, nil); err == nil {
 		t.Fatal("expected SaveUploadedFile error on failing stream")
 	}
 	if _, err := os.Stat(filepath.Join(rootDir, "huge.bin")); !os.IsNotExist(err) {
@@ -312,13 +313,13 @@ func TestOpenPathsForZip(t *testing.T) {
 	rootDir := t.TempDir()
 	outsideDir := t.TempDir()
 
-	if err := SaveUploadedFile(rootDir, ".", "a.txt", bytes.NewBufferString("alpha")); err != nil {
+	if err := SaveUploadedFile(rootDir, ".", "a.txt", bytes.NewBufferString("alpha"), nil); err != nil {
 		t.Fatalf("write a.txt: %v", err)
 	}
-	if err := CreateDir(rootDir, ".", "sub"); err != nil {
+	if err := CreateDir(rootDir, ".", "sub", nil); err != nil {
 		t.Fatalf("mkdir sub: %v", err)
 	}
-	if err := SaveUploadedFile(rootDir, "sub", "b.txt", bytes.NewBufferString("beta")); err != nil {
+	if err := SaveUploadedFile(rootDir, "sub", "b.txt", bytes.NewBufferString("beta"), nil); err != nil {
 		t.Fatalf("write sub/b.txt: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(outsideDir, "secret.txt"), []byte("nope"), 0644); err != nil {
@@ -374,4 +375,52 @@ func TestOpenPathsForZip(t *testing.T) {
 	if _, leaked := found["link.txt"]; leaked {
 		t.Errorf("symlink link.txt must not appear in multi-zip")
 	}
+}
+
+func assertPathUIDGID(t *testing.T, path string, wantUID, wantGID uint32) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s failed: %v", path, err)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatalf("unexpected Stat_t type for %s", path)
+	}
+	if st.Uid != wantUID || st.Gid != wantGID {
+		t.Errorf("%s owner = %d:%d, want %d:%d", path, st.Uid, st.Gid, wantUID, wantGID)
+	}
+}
+
+func TestFileOwnershipOnCreateAndUpload(t *testing.T) {
+	rootDir := t.TempDir()
+	uid := os.Getuid()
+	gid := os.Getgid()
+	owner := &FileOwner{UID: &uid, GID: &gid}
+
+	if err := SaveUploadedFile(rootDir, ".", "uploaded.txt", bytes.NewBufferString("hello"), owner); err != nil {
+		t.Fatalf("SaveUploadedFile with owner failed: %v", err)
+	}
+	assertPathUIDGID(t, filepath.Join(rootDir, "uploaded.txt"), uint32(uid), uint32(gid))
+
+	if err := CreateFile(rootDir, ".", "created.txt", owner); err != nil {
+		t.Fatalf("CreateFile with owner failed: %v", err)
+	}
+	assertPathUIDGID(t, filepath.Join(rootDir, "created.txt"), uint32(uid), uint32(gid))
+
+	if err := CreateDir(rootDir, ".", "owned-dir", owner); err != nil {
+		t.Fatalf("CreateDir with owner failed: %v", err)
+	}
+	assertPathUIDGID(t, filepath.Join(rootDir, "owned-dir"), uint32(uid), uint32(gid))
+
+	// Partial owner (only UID set) and nil owner no-op paths
+	if err := CreateFile(rootDir, ".", "partial.txt", &FileOwner{UID: &uid}); err != nil {
+		t.Fatalf("CreateFile with partial owner failed: %v", err)
+	}
+	assertPathUIDGID(t, filepath.Join(rootDir, "partial.txt"), uint32(uid), uint32(gid))
+
+	if err := SaveUploadedFile(rootDir, ".", "noop.txt", bytes.NewBufferString("noop"), nil); err != nil {
+		t.Fatalf("SaveUploadedFile with nil owner failed: %v", err)
+	}
+	assertPathUIDGID(t, filepath.Join(rootDir, "noop.txt"), uint32(uid), uint32(gid))
 }

@@ -1,6 +1,7 @@
 package files
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -396,6 +397,22 @@ func (h *Handler) streamZipResponse(c *gin.Context, userID uint, writeZip func(i
 	h.recordUsage(c.Request.Context(), userID, store.TransferDirectionDownload, cw.n)
 }
 
+// resolveFileOwner looks up the authenticated user's configured Unix UID/GID in SQLite.
+// Returns nil when the user does not exist or has no UID/GID configured.
+func (h *Handler) resolveFileOwner(ctx context.Context, userID uint) (*FileOwner, error) {
+	user, err := h.store.GetUser(ctx, userID)
+	if err != nil {
+		if errors.Is(err, store.ErrUserNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed loading user ownership settings: %w", err)
+	}
+	if user.UID == nil && user.GID == nil {
+		return nil, nil
+	}
+	return &FileOwner{UID: user.UID, GID: user.GID}, nil
+}
+
 // Upload streams an uploaded multipart file directly into the authorized target directory
 // without buffering the entire payload to /tmp first when the 'path' field precedes 'file'.
 //
@@ -409,6 +426,12 @@ func (h *Handler) Upload(c *gin.Context) {
 	userID, err := authkit.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	owner, err := h.resolveFileOwner(c.Request.Context(), userID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -481,7 +504,7 @@ func (h *Handler) Upload(c *gin.Context) {
 					_ = part.Close()
 					return
 				}
-				saveErr := SaveUploadedFile(perm.DirPath, rel, filename, qr)
+				saveErr := SaveUploadedFile(perm.DirPath, rel, filename, qr, owner)
 				_ = part.Close()
 				if saveErr != nil {
 					if errors.Is(saveErr, errQuotaExceeded) {
@@ -534,7 +557,7 @@ func (h *Handler) Upload(c *gin.Context) {
 			redirectWithMessage(c, dirPath, "", "Failed reading buffered upload")
 			return
 		}
-		if saveErr := SaveUploadedFile(perm.DirPath, rel, tmpFilename, tmpFile); saveErr != nil {
+		if saveErr := SaveUploadedFile(perm.DirPath, rel, tmpFilename, tmpFile, owner); saveErr != nil {
 			redirectUploadError(c, dirPath, saveErr)
 			return
 		}
@@ -580,8 +603,14 @@ func (h *Handler) MakeDir(c *gin.Context) {
 		return
 	}
 
+	owner, err := h.resolveFileOwner(c.Request.Context(), userID)
+	if err != nil {
+		redirectWithMessage(c, dirPath, "", err.Error())
+		return
+	}
+
 	folderName := c.PostForm("name")
-	if err := CreateDir(perm.DirPath, rel, folderName); err != nil {
+	if err := CreateDir(perm.DirPath, rel, folderName, owner); err != nil {
 		redirectWithMessage(c, dirPath, "", err.Error())
 		return
 	}
@@ -610,8 +639,14 @@ func (h *Handler) CreateFile(c *gin.Context) {
 		return
 	}
 
+	owner, err := h.resolveFileOwner(c.Request.Context(), userID)
+	if err != nil {
+		redirectWithMessage(c, dirPath, "", err.Error())
+		return
+	}
+
 	fileName := c.PostForm("name")
-	if err := CreateFile(perm.DirPath, rel, fileName); err != nil {
+	if err := CreateFile(perm.DirPath, rel, fileName, owner); err != nil {
 		redirectWithMessage(c, dirPath, "", err.Error())
 		return
 	}

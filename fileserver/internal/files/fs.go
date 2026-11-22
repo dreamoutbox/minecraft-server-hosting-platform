@@ -253,18 +253,46 @@ func ListDir(rootDir, relPath string) ([]Entry, error) {
 	return entries, nil
 }
 
-// SaveUploadedFile writes an uploaded file stream into dirRel inside rootDir using os.Root.
+// FileOwner specifies optional Unix UID and GID ownership to apply on newly created
+// files and directories. Nil fields leave that ownership component unchanged (-1).
+type FileOwner struct {
+	UID *int
+	GID *int
+}
+
+// applyFileOwnership applies optional UID/GID ownership to an open file descriptor inside os.Root
+// so ownership changes remain symlink- and TOCTOU-safe.
+func applyFileOwnership(f *os.File, owner *FileOwner) error {
+	if owner == nil || (owner.UID == nil && owner.GID == nil) {
+		return nil
+	}
+	uid, gid := -1, -1
+	if owner.UID != nil {
+		uid = *owner.UID
+	}
+	if owner.GID != nil {
+		gid = *owner.GID
+	}
+	if err := f.Chown(uid, gid); err != nil {
+		return fmt.Errorf("failed setting file ownership (%d:%d): %w", uid, gid, err)
+	}
+	return nil
+}
+
+// SaveUploadedFile writes an uploaded file stream into dirRel inside rootDir using os.Root
+// and applies optional Unix UID/GID ownership on the open file descriptor.
 //
 // Arguments:
 //   - rootDir: Absolute root directory granted to the user.
 //   - dirRel: Target directory relative to rootDir.
 //   - rawFilename: Uploaded filename (base name is extracted and validated).
 //   - src: Stream providing file bytes.
+//   - owner: Optional UID/GID ownership to apply (nil skips chown).
 //
 // Example usage:
 //
-//	err := SaveUploadedFile(perm.DirPath, rel, header.Filename, fileReader)
-func SaveUploadedFile(rootDir, dirRel, rawFilename string, src io.Reader) error {
+//	err := SaveUploadedFile(perm.DirPath, rel, header.Filename, fileReader, owner)
+func SaveUploadedFile(rootDir, dirRel, rawFilename string, src io.Reader, owner *FileOwner) error {
 	base := filepath.Base(strings.ReplaceAll(rawFilename, "\\", "/"))
 	name, err := validateSingleName(base)
 	if err != nil {
@@ -288,6 +316,11 @@ func SaveUploadedFile(rootDir, dirRel, rawFilename string, src io.Reader) error 
 		_ = root.Remove(targetRel)
 		return fmt.Errorf("failed writing uploaded file: %w", err)
 	}
+	if err := applyFileOwnership(dst, owner); err != nil {
+		_ = dst.Close()
+		_ = root.Remove(targetRel)
+		return err
+	}
 	if err := dst.Close(); err != nil {
 		_ = root.Remove(targetRel)
 		return fmt.Errorf("failed closing uploaded file: %w", err)
@@ -295,17 +328,19 @@ func SaveUploadedFile(rootDir, dirRel, rawFilename string, src io.Reader) error 
 	return nil
 }
 
-// CreateDir creates a subdirectory inside dirRel within rootDir using os.Root.
+// CreateDir creates a subdirectory inside dirRel within rootDir using os.Root
+// and applies optional Unix UID/GID ownership on the created directory.
 //
 // Arguments:
 //   - rootDir: Absolute root directory granted to the user.
 //   - dirRel: Parent directory relative to rootDir.
 //   - folderName: Name of the new subdirectory.
+//   - owner: Optional UID/GID ownership to apply (nil skips chown).
 //
 // Example usage:
 //
-//	err := CreateDir(perm.DirPath, ".", "plugins")
-func CreateDir(rootDir, dirRel, folderName string) error {
+//	err := CreateDir(perm.DirPath, ".", "plugins", owner)
+func CreateDir(rootDir, dirRel, folderName string, owner *FileOwner) error {
 	name, err := validateSingleName(folderName)
 	if err != nil {
 		return err
@@ -317,8 +352,23 @@ func CreateDir(rootDir, dirRel, folderName string) error {
 	}
 	defer func() { _ = root.Close() }()
 
-	if err := root.Mkdir(joinRel(dirRel, name), 0755); err != nil {
+	targetRel := joinRel(dirRel, name)
+	if err := root.Mkdir(targetRel, 0755); err != nil {
 		return fmt.Errorf("failed creating directory: %w", err)
+	}
+
+	if owner != nil && (owner.UID != nil || owner.GID != nil) {
+		dirFile, err := root.Open(targetRel)
+		if err != nil {
+			_ = root.Remove(targetRel)
+			return fmt.Errorf("failed opening created directory for chown: %w", err)
+		}
+		chownErr := applyFileOwnership(dirFile, owner)
+		_ = dirFile.Close()
+		if chownErr != nil {
+			_ = root.Remove(targetRel)
+			return chownErr
+		}
 	}
 	return nil
 }
@@ -427,17 +477,19 @@ func OpenDownload(rootDir, entryRel string) (*os.File, os.FileInfo, func(), erro
 	return f, info, cleanup, nil
 }
 
-// CreateFile creates a new empty file inside dirRel within rootDir without overwriting existing files.
+// CreateFile creates a new empty file inside dirRel within rootDir without overwriting existing files
+// and applies optional Unix UID/GID ownership on the open file descriptor.
 //
 // Arguments:
 //   - rootDir: Absolute root directory granted to the user.
 //   - dirRel: Target directory relative to rootDir.
 //   - fileName: Name of the new file to create.
+//   - owner: Optional UID/GID ownership to apply (nil skips chown).
 //
 // Example usage:
 //
-//	err := CreateFile(perm.DirPath, ".", "whitelist.json")
-func CreateFile(rootDir, dirRel, fileName string) error {
+//	err := CreateFile(perm.DirPath, ".", "whitelist.json", owner)
+func CreateFile(rootDir, dirRel, fileName string, owner *FileOwner) error {
 	name, err := validateSingleName(fileName)
 	if err != nil {
 		return err
@@ -449,12 +501,18 @@ func CreateFile(rootDir, dirRel, fileName string) error {
 	}
 	defer func() { _ = root.Close() }()
 
-	dst, err := root.OpenFile(joinRel(dirRel, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	targetRel := joinRel(dirRel, name)
+	dst, err := root.OpenFile(targetRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return ErrAlreadyExists
 		}
 		return fmt.Errorf("failed creating file: %w", err)
+	}
+	if err := applyFileOwnership(dst, owner); err != nil {
+		_ = dst.Close()
+		_ = root.Remove(targetRel)
+		return err
 	}
 	return dst.Close()
 }

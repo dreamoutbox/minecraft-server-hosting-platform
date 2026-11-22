@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -809,5 +810,81 @@ func TestDailyQuotaEnforcementAndReset(t *testing.T) {
 	wNextDay := uploadFile(c1, server1Dir, "nextday.txt", bytes.Repeat([]byte("n"), 80))
 	if wNextDay.Code != http.StatusFound {
 		t.Fatalf("expected upload to succeed after UTC day rollover, got %d (%s)", wNextDay.Code, wNextDay.Body.String())
+	}
+}
+
+func TestHandlerAppliesUserUIDGIDOnUploadAndCreate(t *testing.T) {
+	r, st, secret, serverDir, _ := setupFilesTestRouter(t)
+	ctx := context.Background()
+
+	uid := os.Getuid()
+	gid := os.Getgid()
+	if _, _, err := st.EnsureUser(ctx, 1, "owner@example.com", &uid, &gid); err != nil {
+		t.Fatalf("EnsureUser with uid/gid failed: %v", err)
+	}
+
+	loginTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
+	if err != nil {
+		t.Fatalf("GenerateLoginToken failed: %v", err)
+	}
+	wLogin := httptest.NewRecorder()
+	reqLogin, _ := http.NewRequest(http.MethodGet, "/login?token="+url.QueryEscape(loginTok)+"&target="+url.QueryEscape(serverDir), nil)
+	r.ServeHTTP(wLogin, reqLogin)
+	if wLogin.Code != http.StatusFound || len(wLogin.Result().Cookies()) == 0 {
+		t.Fatalf("login failed: code=%d", wLogin.Code)
+	}
+	sessionCookie := wLogin.Result().Cookies()[0]
+
+	// 1. Upload file
+	var uploadBuf bytes.Buffer
+	mw := multipart.NewWriter(&uploadBuf)
+	_ = mw.WriteField("path", serverDir)
+	fw, _ := mw.CreateFormFile("file", "plugin.jar")
+	_, _ = fw.Write([]byte("jar-bytes"))
+	_ = mw.Close()
+
+	wUpload := httptest.NewRecorder()
+	reqUpload, _ := http.NewRequest(http.MethodPost, "/upload", &uploadBuf)
+	reqUpload.Header.Set("Content-Type", mw.FormDataContentType())
+	reqUpload.AddCookie(sessionCookie)
+	r.ServeHTTP(wUpload, reqUpload)
+	if wUpload.Code != http.StatusFound {
+		t.Fatalf("upload failed: code=%d body=%s", wUpload.Code, wUpload.Body.String())
+	}
+
+	// 2. Create file
+	formFile := url.Values{"path": {serverDir}, "name": {"eula.txt"}}
+	wFile := httptest.NewRecorder()
+	reqFile, _ := http.NewRequest(http.MethodPost, "/create-file", strings.NewReader(formFile.Encode()))
+	reqFile.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqFile.AddCookie(sessionCookie)
+	r.ServeHTTP(wFile, reqFile)
+	if wFile.Code != http.StatusFound {
+		t.Fatalf("create-file failed: code=%d", wFile.Code)
+	}
+
+	// 3. Create folder
+	formDir := url.Values{"path": {serverDir}, "name": {"mods"}}
+	wDir := httptest.NewRecorder()
+	reqDir, _ := http.NewRequest(http.MethodPost, "/mkdir", strings.NewReader(formDir.Encode()))
+	reqDir.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqDir.AddCookie(sessionCookie)
+	r.ServeHTTP(wDir, reqDir)
+	if wDir.Code != http.StatusFound {
+		t.Fatalf("mkdir failed: code=%d", wDir.Code)
+	}
+
+	for _, rel := range []string{"plugin.jar", "eula.txt", "mods"} {
+		info, err := os.Stat(filepath.Join(serverDir, rel))
+		if err != nil {
+			t.Fatalf("stat %s failed: %v", rel, err)
+		}
+		statT, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			t.Fatalf("expected *syscall.Stat_t for %s", rel)
+		}
+		if statT.Uid != uint32(uid) || statT.Gid != uint32(gid) {
+			t.Errorf("%s owner = %d:%d, want %d:%d", rel, statT.Uid, statT.Gid, uid, gid)
+		}
 	}
 }
