@@ -139,7 +139,7 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] script to manually trigger admin ext4 imgs backup and restore.
 
-- [ ] fix admin can't manage files on another user server. error "unauthorized access to server". should give access admin to server when click on manage file tab
+- [ ] fix admin can't manage files on another user server. error "unauthorized access to server". should invoke to fileserver and give access to admin user for that server. when click on manage file tab
 
 - [ ] fix admin can't backup, restore, send command to server, change settings, delete server on another user server. error "unauthorized access to server"
 
