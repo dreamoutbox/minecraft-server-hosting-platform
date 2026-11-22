@@ -105,6 +105,8 @@ var (
 	ErrAlreadyExists = errors.New("file already exists")
 	// ErrBinaryFile indicates a file appears to contain binary data.
 	ErrBinaryFile = errors.New("binary files cannot be edited as text")
+	// ErrNoPathsSelected indicates a bulk operation received no target paths.
+	ErrNoPathsSelected = errors.New("no paths selected")
 )
 
 // Entry describes a single file or subdirectory inside a permitted mount root.
@@ -630,6 +632,112 @@ func OpenDirForZip(rootDir, entryRel string) (string, func(io.Writer) error, fun
 		_ = root.Close()
 	}
 	return baseName + ".zip", writeZip, cleanup, nil
+}
+
+type zipTarget struct {
+	rel     string
+	zipName string
+	info    os.FileInfo
+	isDir   bool
+}
+
+// OpenPathsForZip validates multiple files or directories inside rootDir and prepares a streaming zip writer.
+// Callers must invoke cleanup when finished.
+//
+// Arguments:
+//   - rootDir: Absolute root directory granted to the user.
+//   - entryRels: Non-empty slice of paths relative to rootDir (cannot contain ".").
+//
+// Example usage:
+//
+//	zipName, writeZip, cleanup, err := OpenPathsForZip(perm.DirPath, []string{"server.properties", "world"})
+func OpenPathsForZip(rootDir string, entryRels []string) (string, func(io.Writer) error, func(), error) {
+	if len(entryRels) == 0 {
+		return "", nil, nil, ErrNoPathsSelected
+	}
+
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("failed opening mount root: %w", err)
+	}
+
+	seenRel := make(map[string]bool, len(entryRels))
+	usedZipNames := make(map[string]bool, len(entryRels))
+	targets := make([]zipTarget, 0, len(entryRels))
+
+	for _, rel := range entryRels {
+		if rel == "" || rel == "." {
+			_ = root.Close()
+			return "", nil, nil, ErrCannotModifyRoot
+		}
+		cleanRel := filepath.Clean(rel)
+		if seenRel[cleanRel] {
+			continue
+		}
+		seenRel[cleanRel] = true
+
+		info, err := root.Lstat(cleanRel)
+		if err != nil {
+			_ = root.Close()
+			return "", nil, nil, fmt.Errorf("failed stating %s: %w", cleanRel, err)
+		}
+		// Skip symlinks so archives stay confined to real files within rootDir.
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+
+		zipName := filepath.Base(cleanRel)
+		if usedZipNames[zipName] {
+			zipName = filepath.ToSlash(cleanRel)
+		}
+		usedZipNames[zipName] = true
+
+		targets = append(targets, zipTarget{
+			rel:     cleanRel,
+			zipName: zipName,
+			info:    info,
+			isDir:   info.IsDir(),
+		})
+	}
+
+	if len(targets) == 0 {
+		_ = root.Close()
+		return "", nil, nil, ErrNoPathsSelected
+	}
+
+	writeZip := func(w io.Writer) error {
+		zw := zip.NewWriter(w)
+		for _, t := range targets {
+			if t.isDir {
+				hdr, err := zip.FileInfoHeader(t.info)
+				if err != nil {
+					_ = zw.Close()
+					return err
+				}
+				hdr.Name = t.zipName + "/"
+				hdr.Method = zip.Store
+				if _, err := zw.CreateHeader(hdr); err != nil {
+					_ = zw.Close()
+					return err
+				}
+				if err := addDirToZip(root, t.rel, t.zipName, zw); err != nil {
+					_ = zw.Close()
+					return err
+				}
+				continue
+			}
+			if err := addFileToZip(root, t.rel, t.zipName, t.info, zw); err != nil {
+				_ = zw.Close()
+				return err
+			}
+		}
+		return zw.Close()
+	}
+
+	cleanup := func() {
+		_ = root.Close()
+	}
+	return "selected.zip", writeZip, cleanup, nil
 }
 
 func addDirToZip(root *os.Root, diskRel, zipPrefix string, zw *zip.Writer) error {

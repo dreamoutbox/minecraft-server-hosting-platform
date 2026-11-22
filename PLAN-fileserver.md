@@ -14,15 +14,15 @@ Order: independent UI items first, then the quota feature (backend + store + con
   - [x] Keep `Upload` handler in `internal/files/handler.go` unchanged; confirm field order (`path` before `file`) is preserved since it uses `MultipartReader`.
 - Done when: `go test ./...` passes; manual check: clicking Upload File opens the OS dialog, picking a file uploads it and the list refreshes with the success message; no upload modal in the DOM.
 
-### Phase 2: Multi-select checkboxes [STATUS: TODO]
+### Phase 2: Multi-select checkboxes [STATUS: DONE]
 - Goal: select multiple entries via checkboxes and act on them in bulk.
 - Tasks:
-  - [ ] Add a checkbox column plus a select-all header checkbox to the table in `files.html`.
-  - [ ] Add a bulk action bar in the sub-navbar toolbar (shown only when 1+ selected): Delete selected, Download selected as zip. (Assumption: these are the bulk actions wanted.)
-  - [ ] Backend: add `POST /delete-multi` (accepts repeated `paths` fields) reusing `authorizePath` and the single-delete logic in `Delete`; extract the shared delete routine into a helper in `internal/files/` rather than copying.
-  - [ ] Backend: add `POST /download-zip-multi` building a zip of selected entries; extend `OpenDirForZip` logic in `fs.go` with a multi-path variant, sharing the zip-walk code.
-  - [ ] Register routes in `RegisterRoutes`.
-  - [ ] Tests in `handler_test.go` / `fs_test.go`: multi-delete, multi-zip, rejection of paths outside the permitted dir (path traversal), empty selection.
+  - [x] Add a checkbox column plus a select-all header checkbox to the table in `files.html`.
+  - [x] Add a bulk action bar in the sub-navbar toolbar (shown only when 1+ selected): Delete selected, Download selected as zip. (Assumption: these are the bulk actions wanted.)
+  - [x] Backend: add `POST /delete-multi` (accepts repeated `paths` fields) reusing `authorizePath` and the single-delete logic in `Delete`; extract the shared delete routine into a helper in `internal/files/` rather than copying.
+  - [x] Backend: add `POST /download-zip-multi` building a zip of selected entries; extend `OpenDirForZip` logic in `fs.go` with a multi-path variant, sharing the zip-walk code.
+  - [x] Register routes in `RegisterRoutes`.
+  - [x] Tests in `handler_test.go` / `fs_test.go`: multi-delete, multi-zip, rejection of paths outside the permitted dir (path traversal), empty selection.
 - Done when: `go test ./...` passes including the new tests; manual check: select-all, partial selection, bulk delete and bulk zip work and the bar hides when nothing is selected.
 
 ### Phase 3: Quota config and usage store [STATUS: TODO]

@@ -307,3 +307,71 @@ func TestSaveUploadedFileRemovesPartialOnError(t *testing.T) {
 		t.Fatalf("expected partial huge.bin to be removed after write error, stat err=%v", err)
 	}
 }
+
+func TestOpenPathsForZip(t *testing.T) {
+	rootDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	if err := SaveUploadedFile(rootDir, ".", "a.txt", bytes.NewBufferString("alpha")); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	if err := CreateDir(rootDir, ".", "sub"); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	if err := SaveUploadedFile(rootDir, "sub", "b.txt", bytes.NewBufferString("beta")); err != nil {
+		t.Fatalf("write sub/b.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideDir, "secret.txt"), []byte("nope"), 0644); err != nil {
+		t.Fatalf("write outside: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outsideDir, "secret.txt"), filepath.Join(rootDir, "link.txt")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// Empty list rejected
+	if _, _, _, err := OpenPathsForZip(rootDir, nil); !errors.Is(err, ErrNoPathsSelected) {
+		t.Fatalf("expected ErrNoPathsSelected, got %v", err)
+	}
+	// Root "." rejected
+	if _, _, _, err := OpenPathsForZip(rootDir, []string{"."}); !errors.Is(err, ErrCannotModifyRoot) {
+		t.Fatalf("expected ErrCannotModifyRoot, got %v", err)
+	}
+
+	zipName, writeZip, cleanup, err := OpenPathsForZip(rootDir, []string{"a.txt", "sub", "link.txt"})
+	if err != nil {
+		t.Fatalf("OpenPathsForZip failed: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := writeZip(&buf); err != nil {
+		cleanup()
+		t.Fatalf("writeZip failed: %v", err)
+	}
+	cleanup()
+	if zipName != "selected.zip" {
+		t.Errorf("expected selected.zip, got %s", zipName)
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatalf("zip.NewReader: %v", err)
+	}
+	found := make(map[string]string)
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", f.Name, err)
+		}
+		data, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		found[f.Name] = string(data)
+	}
+	if found["a.txt"] != "alpha" {
+		t.Errorf("expected a.txt=alpha, got %+v", found)
+	}
+	if found["sub/b.txt"] != "beta" {
+		t.Errorf("expected sub/b.txt=beta, got %+v", found)
+	}
+	if _, leaked := found["link.txt"]; leaked {
+		t.Errorf("symlink link.txt must not appear in multi-zip")
+	}
+}

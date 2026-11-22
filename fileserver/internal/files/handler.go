@@ -307,8 +307,65 @@ func (h *Handler) DownloadZip(c *gin.Context) {
 	c.Header("Content-Type", "application/zip")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", zipName))
 	c.Status(http.StatusOK)
+	h.streamZipResponse(c, writeZip, requestedPath)
+}
+
+// DownloadZipMulti streams multiple selected files and directories as a single zip archive.
+//
+// Arguments:
+//   - c: Active Gin request context with repeated form field 'paths'.
+//
+// Example usage:
+//
+//	POST /download-zip-multi
+func (h *Handler) DownloadZipMulti(c *gin.Context) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		c.String(http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	paths := filterNonEmptyPaths(c.PostFormArray("paths"))
+	if len(paths) == 0 {
+		c.String(http.StatusBadRequest, ErrNoPathsSelected.Error())
+		return
+	}
+
+	targets, err := h.authorizePaths(c, userID, paths)
+	if err != nil {
+		return
+	}
+
+	rootDir := targets[0].perm.DirPath
+	rels := make([]string, 0, len(targets))
+	for _, t := range targets {
+		if t.perm.DirPath != rootDir {
+			c.String(http.StatusBadRequest, "selected paths must be within the same directory root")
+			return
+		}
+		rels = append(rels, t.rel)
+	}
+
+	zipName, writeZip, cleanup, err := OpenPathsForZip(rootDir, rels)
+	if err != nil {
+		status := http.StatusNotFound
+		if errors.Is(err, ErrCannotModifyRoot) || errors.Is(err, ErrNoPathsSelected) {
+			status = http.StatusBadRequest
+		}
+		c.String(status, err.Error())
+		return
+	}
+	defer cleanup()
+
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", zipName))
+	c.Status(http.StatusOK)
+	h.streamZipResponse(c, writeZip, "selected")
+}
+
+func (h *Handler) streamZipResponse(c *gin.Context, writeZip func(io.Writer) error, label string) {
 	if err := writeZip(c.Writer); err != nil {
-		log.Printf("[WARN] failed streaming zip for %s: %v", requestedPath, err)
+		log.Printf("[WARN] failed streaming zip for %s: %v", label, err)
 	}
 }
 
@@ -651,7 +708,7 @@ func (h *Handler) Delete(c *gin.Context) {
 	targetPath := strings.TrimSpace(c.PostForm("path"))
 	currentDir := strings.TrimSpace(c.PostForm("current_dir"))
 
-	perm, rel, err := h.authorizePath(c, userID, targetPath)
+	targets, err := h.authorizePaths(c, userID, []string{targetPath})
 	if err != nil {
 		return
 	}
@@ -660,12 +717,51 @@ func (h *Handler) Delete(c *gin.Context) {
 		currentDir = filepath.Dir(targetPath)
 	}
 
-	if err := DeleteEntry(perm.DirPath, rel); err != nil {
+	if err := deleteAuthorizedTargets(targets); err != nil {
 		redirectWithMessage(c, currentDir, "", err.Error())
 		return
 	}
 
 	redirectWithMessage(c, currentDir, "Deleted successfully", "")
+}
+
+// DeleteMulti removes multiple authorized files or subdirectories in one request.
+//
+// Arguments:
+//   - c: Active Gin request context with repeated form field 'paths' and optional 'current_dir'.
+//
+// Example usage:
+//
+//	POST /delete-multi
+func (h *Handler) DeleteMulti(c *gin.Context) {
+	userID, err := authkit.GetUserIDFromContext(c)
+	if err != nil {
+		c.String(http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	currentDir := strings.TrimSpace(c.PostForm("current_dir"))
+	paths := filterNonEmptyPaths(c.PostFormArray("paths"))
+	if len(paths) == 0 {
+		redirectWithMessage(c, currentDir, "", "No items selected")
+		return
+	}
+
+	targets, err := h.authorizePaths(c, userID, paths)
+	if err != nil {
+		return
+	}
+
+	if currentDir == "" {
+		currentDir = filepath.Dir(paths[0])
+	}
+
+	if err := deleteAuthorizedTargets(targets); err != nil {
+		redirectWithMessage(c, currentDir, "", err.Error())
+		return
+	}
+
+	redirectWithMessage(c, currentDir, fmt.Sprintf("Deleted %d item(s)", len(targets)), "")
 }
 
 // RegisterRoutes binds login, logout, and authenticated file manager endpoints onto r.
@@ -689,6 +785,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		protected.GET("/files", h.Browse)
 		protected.GET("/download", h.Download)
 		protected.GET("/download-zip", h.DownloadZip)
+		protected.POST("/download-zip-multi", h.DownloadZipMulti)
 		protected.GET("/file-content", h.GetFileContent)
 		protected.POST("/upload", h.Upload)
 		protected.POST("/create-file", h.CreateFile)
@@ -696,7 +793,44 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		protected.POST("/edit", h.EditFile)
 		protected.POST("/rename", h.Rename)
 		protected.POST("/delete", h.Delete)
+		protected.POST("/delete-multi", h.DeleteMulti)
 	}
+}
+
+type authorizedTarget struct {
+	perm *store.DirPermission
+	rel  string
+}
+
+func filterNonEmptyPaths(rawPaths []string) []string {
+	out := make([]string, 0, len(rawPaths))
+	for _, raw := range rawPaths {
+		if trimmed := strings.TrimSpace(raw); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func (h *Handler) authorizePaths(c *gin.Context, userID uint, paths []string) ([]authorizedTarget, error) {
+	targets := make([]authorizedTarget, 0, len(paths))
+	for _, p := range paths {
+		perm, rel, err := h.authorizePath(c, userID, p)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, authorizedTarget{perm: perm, rel: rel})
+	}
+	return targets, nil
+}
+
+func deleteAuthorizedTargets(targets []authorizedTarget) error {
+	for _, t := range targets {
+		if err := DeleteEntry(t.perm.DirPath, t.rel); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *Handler) authorizePath(c *gin.Context, userID uint, absPath string) (*store.DirPermission, string, error) {

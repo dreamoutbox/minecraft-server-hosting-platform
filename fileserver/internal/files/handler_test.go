@@ -539,3 +539,143 @@ func TestStreamingUploadConcurrencyAndOutOfOrderFields(t *testing.T) {
 		t.Fatalf("unexpected slow-stream.txt contents: %q (err=%v)", string(streamed), err)
 	}
 }
+
+func TestMultiSelectDeleteAndZipDownload(t *testing.T) {
+	r, _, secret, serverDir, otherDir := setupFilesTestRouter(t)
+
+	loginTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
+	if err != nil {
+		t.Fatalf("GenerateLoginToken: %v", err)
+	}
+	wLogin := httptest.NewRecorder()
+	reqLogin, _ := http.NewRequest(http.MethodGet, "/login?token="+url.QueryEscape(loginTok), nil)
+	r.ServeHTTP(wLogin, reqLogin)
+	cookie := extractSessionCookie(wLogin.Result())
+	if cookie == nil {
+		t.Fatal("expected session cookie")
+	}
+
+	if err := os.WriteFile(filepath.Join(serverDir, "one.txt"), []byte("111"), 0644); err != nil {
+		t.Fatalf("write one.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serverDir, "two.txt"), []byte("222"), 0644); err != nil {
+		t.Fatalf("write two.txt: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(serverDir, "mods"), 0755); err != nil {
+		t.Fatalf("mkdir mods: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(serverDir, "mods", "m.txt"), []byte("mod"), 0644); err != nil {
+		t.Fatalf("write mods/m.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "secret.txt"), []byte("secret"), 0644); err != nil {
+		t.Fatalf("write otherDir/secret.txt: %v", err)
+	}
+
+	// 1. Browse renders checkboxes and bulk action bar
+	wBrowse := httptest.NewRecorder()
+	reqBrowse, _ := http.NewRequest(http.MethodGet, "/files?path="+url.QueryEscape(serverDir), nil)
+	reqBrowse.AddCookie(cookie)
+	r.ServeHTTP(wBrowse, reqBrowse)
+	html := wBrowse.Body.String()
+	for _, want := range []string{`id="selectAllEntries"`, `class="form-check-input entry-checkbox"`, `id="bulkActionBar"`, `id="bulkDownloadZipBtn"`, `id="bulkDeleteBtn"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("expected %s in browse HTML", want)
+		}
+	}
+
+	// 2. Empty selection rejected cleanly
+	wEmptyDel := httptest.NewRecorder()
+	emptyForm := url.Values{"current_dir": {serverDir}}
+	reqEmptyDel, _ := http.NewRequest(http.MethodPost, "/delete-multi", strings.NewReader(emptyForm.Encode()))
+	reqEmptyDel.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqEmptyDel.AddCookie(cookie)
+	r.ServeHTTP(wEmptyDel, reqEmptyDel)
+	if wEmptyDel.Code != http.StatusFound || !strings.Contains(wEmptyDel.Header().Get("Location"), "error=") {
+		t.Fatalf("expected error redirect on empty /delete-multi, got code=%d loc=%s", wEmptyDel.Code, wEmptyDel.Header().Get("Location"))
+	}
+
+	wEmptyZip := httptest.NewRecorder()
+	reqEmptyZip, _ := http.NewRequest(http.MethodPost, "/download-zip-multi", strings.NewReader(""))
+	reqEmptyZip.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqEmptyZip.AddCookie(cookie)
+	r.ServeHTTP(wEmptyZip, reqEmptyZip)
+	if wEmptyZip.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on empty /download-zip-multi, got %d", wEmptyZip.Code)
+	}
+
+	// 3. Unauthorized / traversal path rejected without partial deletes
+	badForm := url.Values{}
+	badForm.Add("current_dir", serverDir)
+	badForm.Add("paths", filepath.Join(serverDir, "one.txt"))
+	badForm.Add("paths", filepath.Join(otherDir, "secret.txt"))
+	wBadDel := httptest.NewRecorder()
+	reqBadDel, _ := http.NewRequest(http.MethodPost, "/delete-multi", strings.NewReader(badForm.Encode()))
+	reqBadDel.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqBadDel.AddCookie(cookie)
+	r.ServeHTTP(wBadDel, reqBadDel)
+	if wBadDel.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on unauthorized /delete-multi, got %d", wBadDel.Code)
+	}
+	if _, err := os.Stat(filepath.Join(serverDir, "one.txt")); err != nil {
+		t.Fatalf("one.txt should not have been deleted when another path was forbidden: %v", err)
+	}
+
+	wBadZip := httptest.NewRecorder()
+	reqBadZip, _ := http.NewRequest(http.MethodPost, "/download-zip-multi", strings.NewReader(badForm.Encode()))
+	reqBadZip.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqBadZip.AddCookie(cookie)
+	r.ServeHTTP(wBadZip, reqBadZip)
+	if wBadZip.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on unauthorized /download-zip-multi, got %d", wBadZip.Code)
+	}
+
+	// 4. Multi-zip downloads selected file and directory
+	zipForm := url.Values{}
+	zipForm.Add("paths", filepath.Join(serverDir, "one.txt"))
+	zipForm.Add("paths", filepath.Join(serverDir, "mods"))
+	wZip := httptest.NewRecorder()
+	reqZip, _ := http.NewRequest(http.MethodPost, "/download-zip-multi", strings.NewReader(zipForm.Encode()))
+	reqZip.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqZip.AddCookie(cookie)
+	r.ServeHTTP(wZip, reqZip)
+	if wZip.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /download-zip-multi, got %d (%s)", wZip.Code, wZip.Body.String())
+	}
+	zr, err := zip.NewReader(bytes.NewReader(wZip.Body.Bytes()), int64(wZip.Body.Len()))
+	if err != nil {
+		t.Fatalf("zip.NewReader: %v", err)
+	}
+	zipEntries := make(map[string]string)
+	for _, f := range zr.File {
+		rc, _ := f.Open()
+		b, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		zipEntries[f.Name] = string(b)
+	}
+	if zipEntries["one.txt"] != "111" || zipEntries["mods/m.txt"] != "mod" {
+		t.Fatalf("unexpected multi-zip contents: %+v", zipEntries)
+	}
+
+	// 5. Multi-delete removes selected entries and leaves unselected intact
+	delForm := url.Values{}
+	delForm.Set("current_dir", serverDir)
+	delForm.Add("paths", filepath.Join(serverDir, "one.txt"))
+	delForm.Add("paths", filepath.Join(serverDir, "mods"))
+	wDel := httptest.NewRecorder()
+	reqDel, _ := http.NewRequest(http.MethodPost, "/delete-multi", strings.NewReader(delForm.Encode()))
+	reqDel.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqDel.AddCookie(cookie)
+	r.ServeHTTP(wDel, reqDel)
+	if wDel.Code != http.StatusFound || !strings.Contains(wDel.Header().Get("Location"), "success=") {
+		t.Fatalf("expected success redirect on /delete-multi, got code=%d loc=%s", wDel.Code, wDel.Header().Get("Location"))
+	}
+	if _, err := os.Stat(filepath.Join(serverDir, "one.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected one.txt deleted")
+	}
+	if _, err := os.Stat(filepath.Join(serverDir, "mods")); !os.IsNotExist(err) {
+		t.Errorf("expected mods dir deleted")
+	}
+	if _, err := os.Stat(filepath.Join(serverDir, "two.txt")); err != nil {
+		t.Errorf("expected unselected two.txt to remain: %v", err)
+	}
+}

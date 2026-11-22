@@ -121,11 +121,11 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ### 11/22/2026
 
-- [ ]  limit backups. keep last 8 backups.
+- [ ] limit backups. keep last 8 backups.
 
-- [ ]  assert CRON daily backup working
+- [ ] assert CRON mc servers backup working
 
-- [ ] ensure cmd/worker CRON backup all mc server ext4 imgs files at /var/lib/mc-platform/images/<server-id>.img to S3 bucket
+- [ ] ensure worker CRON backup all mc servers ext4 imgs files at /var/lib/mc-platform/images/<server-id>.img to S3 bucket
 
 ---
 
