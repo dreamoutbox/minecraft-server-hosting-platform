@@ -21,6 +21,11 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/jobs"
 )
 
+const (
+	defaultServerRetentionDays = 7
+	serverExpiringSoonWindow   = 7 * 24 * time.Hour
+)
+
 //go:embed templates/*
 var templateFS embed.FS
 
@@ -264,7 +269,8 @@ func (s *Service) ListServers(c *gin.Context) {
 			continue
 		}
 		isExpired := srv.IsExpired(now)
-		if srv.IsExpiringSoon(now, serverExpiringSoonWindow) || (isExpired && srv.IsWithinRetention(now, defaultServerRetentionDays)) {
+		if srv.IsExpiringSoon(now, serverExpiringSoonWindow) ||
+			(isExpired && srv.IsWithinRetention(now, defaultServerRetentionDays)) {
 			expiringAlerts = append(expiringAlerts, ExpiringServerAlert{
 				ServerID:   srv.ID,
 				ServerName: srv.Name,
@@ -385,11 +391,6 @@ func (s *Service) ProcessBuyServer(c *gin.Context) {
 
 	c.Redirect(http.StatusSeeOther, cs.CheckoutURL)
 }
-
-const (
-	defaultServerRetentionDays = 7
-	serverExpiringSoonWindow   = 7 * 24 * time.Hour
-)
 
 // serverExpiryFlags computes expiration and extension eligibility flags for a server.
 //
