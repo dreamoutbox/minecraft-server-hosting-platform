@@ -675,6 +675,9 @@ func TestStaffAndAdminOpenFileManagerOnOtherUserServer(t *testing.T) {
 		if len(ensuredUsers) != 1 || ensuredUsers[0].ID != actor.user.ID || ensuredUsers[0].Email != actor.user.Email {
 			t.Errorf("%s expected EnsureUser(%d, %s), got %+v", actor.label, actor.user.ID, actor.user.Email, ensuredUsers)
 		}
+		if len(ensuredUsers) == 1 && (ensuredUsers[0].UID == nil || *ensuredUsers[0].UID != 1000 || ensuredUsers[0].GID == nil || *ensuredUsers[0].GID != 1000) {
+			t.Errorf("%s expected EnsureUser uid=1000 gid=1000, got uid=%v gid=%v", actor.label, ensuredUsers[0].UID, ensuredUsers[0].GID)
+		}
 		if len(grantedPerms) != 1 || grantedPerms[0].UserID != actor.user.ID || grantedPerms[0].ServerID != srv.ID {
 			t.Errorf("%s expected Allow(%d, %d), got %+v", actor.label, actor.user.ID, srv.ID, grantedPerms)
 		}

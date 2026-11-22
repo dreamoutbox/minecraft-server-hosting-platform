@@ -547,6 +547,9 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 			t.Errorf("call %d: expected %s, got %s", i, expectedCalls[i], callOrder[i])
 		}
 	}
+	if lastEnsureReq.UID == nil || *lastEnsureReq.UID != defaultMinecraftFileUID || lastEnsureReq.GID == nil || *lastEnsureReq.GID != defaultMinecraftFileGID {
+		t.Errorf("expected owner EnsureUser uid=%d gid=%d, got uid=%v gid=%v", defaultMinecraftFileUID, defaultMinecraftFileGID, lastEnsureReq.UID, lastEnsureReq.GID)
+	}
 
 	// Non-owner without allowNonOwner must be rejected.
 	if _, err := svc.OpenFileManagerURL(context.Background(), adminUser.ID, srv.ID, false); err == nil {
@@ -564,6 +567,9 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 	}
 	if lastEnsureReq.ID != adminUser.ID || lastEnsureReq.Email != adminUser.Email {
 		t.Errorf("expected fileserver EnsureUser for admin (%d, %s), got (%d, %s)", adminUser.ID, adminUser.Email, lastEnsureReq.ID, lastEnsureReq.Email)
+	}
+	if lastEnsureReq.UID == nil || *lastEnsureReq.UID != defaultMinecraftFileUID || lastEnsureReq.GID == nil || *lastEnsureReq.GID != defaultMinecraftFileGID {
+		t.Errorf("expected admin EnsureUser uid=%d gid=%d, got uid=%v gid=%v", defaultMinecraftFileUID, defaultMinecraftFileGID, lastEnsureReq.UID, lastEnsureReq.GID)
 	}
 	if lastPermReq.UserID != adminUser.ID || lastPermReq.ServerID != srv.ID {
 		t.Errorf("expected fileserver Allow(%d, %d), got (%d, %d)", adminUser.ID, srv.ID, lastPermReq.UserID, lastPermReq.ServerID)

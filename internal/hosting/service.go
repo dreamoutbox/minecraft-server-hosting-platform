@@ -26,6 +26,12 @@ type WorkerClientFactory func(baseURL string, apiKey string) worker.Client
 // FileServerClientFactory produces a fileserver management client given host credentials.
 type FileServerClientFactory func(baseURL string, apiKey string) fsclient.Client
 
+const (
+	// defaultMinecraftFileUID and defaultMinecraftFileGID match the UID/GID used by itzg/minecraft-server.
+	defaultMinecraftFileUID = 1000
+	defaultMinecraftFileGID = 1000
+)
+
 // Service coordinates server scheduling, port allocation, and host worker provisioning.
 type Service struct {
 	db                      *gorm.DB
@@ -608,8 +614,10 @@ func (s *Service) OpenFileManagerURL(ctx context.Context, actorUserID uint, serv
 		return "", fmt.Errorf("failed loading fileserver user: %w", err)
 	}
 
+	fileUID := defaultMinecraftFileUID
+	fileGID := defaultMinecraftFileGID
 	fsClient := s.fileServerClientFactory(host.FileServerBaseURL, host.APIKey)
-	if _, err := fsClient.EnsureUser(ctx, user.ID, user.Email, nil, nil); err != nil {
+	if _, err := fsClient.EnsureUser(ctx, user.ID, user.Email, &fileUID, &fileGID); err != nil {
 		return "", fmt.Errorf("failed provisioning fileserver user: %w", err)
 	}
 

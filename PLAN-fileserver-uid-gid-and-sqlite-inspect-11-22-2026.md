@@ -29,12 +29,12 @@ Modules:
   - [x] Add tests in `fileserver/internal/files/fs_test.go` and `fileserver/internal/files/handler_test.go` verifying ownership is applied on upload, create file, and create folder (using `os.Getuid()`/`os.Getgid()` so tests pass cleanly as both non-root and root, plus testing the nil-owner no-op path).
 - Done when: `cd fileserver && go vet ./... && go test ./... && go build ./cmd/...` passes; uploaded files, created files, and created folders get chowned to the user's `uid:gid` when configured.
 
-### Phase 3: Register fileserver users with `1000:1000` from API server [STATUS: TODO]
+### Phase 3: Register fileserver users with `1000:1000` from API server [STATUS: DONE]
 - Goal: Have `apiserver` register users on the node fileserver with `uid=1000, gid=1000` to match the `itzg/minecraft-server` container user.
 - Tasks:
-  - [ ] Define named constants `defaultMinecraftFileUID = 1000` and `defaultMinecraftFileGID = 1000` in `internal/hosting/service.go`.
-  - [ ] Update `hosting.Service.OpenFileManagerURL` in `internal/hosting/service.go` to pass `&uid, &gid` (`1000, 1000`) to `fsClient.EnsureUser`.
-  - [ ] Update `TestOpenFileManagerURLAndRevokeOnDelete` in `internal/hosting/hosting_test.go` and `TestStaffAndAdminOpenFileManagerOnOtherUserServer` in `internal/dashboard/admin_test.go` to assert `EnsureUser` receives `uid=1000` and `gid=1000`.
+  - [x] Define named constants `defaultMinecraftFileUID = 1000` and `defaultMinecraftFileGID = 1000` in `internal/hosting/service.go`.
+  - [x] Update `hosting.Service.OpenFileManagerURL` in `internal/hosting/service.go` to pass `&uid, &gid` (`1000, 1000`) to `fsClient.EnsureUser`.
+  - [x] Update `TestOpenFileManagerURLAndRevokeOnDelete` in `internal/hosting/hosting_test.go` and `TestStaffAndAdminOpenFileManagerOnOtherUserServer` in `internal/dashboard/admin_test.go` to assert `EnsureUser` receives `uid=1000` and `gid=1000`.
 - Done when: `go vet ./...`, `go test -p 1 ./...`, and `go build ./cmd/...` pass; mock fileserver assertions confirm `PUT /api/v1/users` includes `uid: 1000, gid: 1000`.
 
 ### Phase 4: Add dev shell script to inspect fileserver SQLite database [STATUS: TODO]
