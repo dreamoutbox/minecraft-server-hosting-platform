@@ -23,20 +23,74 @@ func TestEnsureUserIdempotent(t *testing.T) {
 	st := newTestStore(t, "/var/lib/mc-platform/mounts")
 	ctx := context.Background()
 
-	u1, created1, err := st.EnsureUser(ctx, 10, "Player@Example.COM")
+	u1, created1, err := st.EnsureUser(ctx, 10, "Player@Example.COM", nil, nil)
 	if err != nil {
 		t.Fatalf("EnsureUser 1 failed: %v", err)
 	}
 	if !created1 || u1.ID != 10 || u1.Email != "player@example.com" || u1.PasswordHash == "" {
 		t.Fatalf("unexpected first EnsureUser result: created=%v user=%+v", created1, u1)
 	}
+	if u1.UID != nil || u1.GID != nil {
+		t.Fatalf("expected nil UID/GID by default, got uid=%v gid=%v", u1.UID, u1.GID)
+	}
 
-	u2, created2, err := st.EnsureUser(ctx, 10, "player@example.com")
+	u2, created2, err := st.EnsureUser(ctx, 10, "player@example.com", nil, nil)
 	if err != nil {
 		t.Fatalf("EnsureUser 2 failed: %v", err)
 	}
 	if created2 || u2.ID != 10 || u2.PasswordHash != u1.PasswordHash {
 		t.Fatalf("expected idempotent EnsureUser without recreating password")
+	}
+}
+
+func TestEnsureUserUIDGIDLifecycle(t *testing.T) {
+	st := newTestStore(t, "/var/lib/mc-platform/mounts")
+	ctx := context.Background()
+
+	intPtr := func(v int) *int { return &v }
+
+	// Reject negative UID or GID
+	if _, _, err := st.EnsureUser(ctx, 11, "neg@example.com", intPtr(-1), intPtr(1000)); !errors.Is(err, ErrInvalidUIDGID) {
+		t.Fatalf("expected ErrInvalidUIDGID for negative uid, got %v", err)
+	}
+	if _, _, err := st.EnsureUser(ctx, 11, "neg@example.com", intPtr(1000), intPtr(-2)); !errors.Is(err, ErrInvalidUIDGID) {
+		t.Fatalf("expected ErrInvalidUIDGID for negative gid, got %v", err)
+	}
+
+	// Create with UID/GID
+	u1, created, err := st.EnsureUser(ctx, 12, "mc@example.com", intPtr(1000), intPtr(1000))
+	if err != nil {
+		t.Fatalf("EnsureUser with uid/gid failed: %v", err)
+	}
+	if !created || u1.UID == nil || *u1.UID != 1000 || u1.GID == nil || *u1.GID != 1000 {
+		t.Fatalf("expected created user with 1000:1000, got created=%v user=%+v", created, u1)
+	}
+
+	// Nil uid/gid on subsequent call preserves existing values
+	u2, created, err := st.EnsureUser(ctx, 12, "mc@example.com", nil, nil)
+	if err != nil {
+		t.Fatalf("EnsureUser with nil uid/gid failed: %v", err)
+	}
+	if created || u2.UID == nil || *u2.UID != 1000 || u2.GID == nil || *u2.GID != 1000 {
+		t.Fatalf("expected preserved 1000:1000, got created=%v user=%+v", created, u2)
+	}
+
+	// Non-nil changed values update existing user (including 0)
+	u3, created, err := st.EnsureUser(ctx, 12, "mc@example.com", intPtr(2000), intPtr(0))
+	if err != nil {
+		t.Fatalf("EnsureUser update uid/gid failed: %v", err)
+	}
+	if created || u3.UID == nil || *u3.UID != 2000 || u3.GID == nil || *u3.GID != 0 {
+		t.Fatalf("expected updated 2000:0, got created=%v user=%+v", created, u3)
+	}
+
+	// Reload via GetUser to confirm persistence in SQLite
+	loaded, err := st.GetUser(ctx, 12)
+	if err != nil {
+		t.Fatalf("GetUser failed: %v", err)
+	}
+	if loaded.UID == nil || *loaded.UID != 2000 || loaded.GID == nil || *loaded.GID != 0 {
+		t.Fatalf("expected persisted 2000:0, got %+v", loaded)
 	}
 }
 

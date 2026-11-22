@@ -45,7 +45,7 @@ func setupFilesTestRouter(t *testing.T) (*gin.Engine, *store.Store, string, stri
 	st := store.New(db, mountsDir)
 
 	ctx := context.Background()
-	if _, _, err := st.EnsureUser(ctx, 1, "owner@example.com"); err != nil {
+	if _, _, err := st.EnsureUser(ctx, 1, "owner@example.com", nil, nil); err != nil {
 		t.Fatalf("EnsureUser failed: %v", err)
 	}
 	if _, err := st.Allow(ctx, 1, 1); err != nil {
@@ -699,8 +699,8 @@ func TestDailyQuotaEnforcementAndReset(t *testing.T) {
 	}
 	st := store.New(db, mountsDir)
 	ctx := context.Background()
-	_, _, _ = st.EnsureUser(ctx, 1, "u1@example.com")
-	_, _, _ = st.EnsureUser(ctx, 2, "u2@example.com")
+	_, _, _ = st.EnsureUser(ctx, 1, "u1@example.com", nil, nil)
+	_, _, _ = st.EnsureUser(ctx, 2, "u2@example.com", nil, nil)
 	_, _ = st.Allow(ctx, 1, 1)
 	_, _ = st.Allow(ctx, 2, 2)
 
@@ -799,7 +799,8 @@ func TestDailyQuotaEnforcementAndReset(t *testing.T) {
 	reqBrowse, _ := http.NewRequest(http.MethodGet, "/files?path="+url.QueryEscape(server1Dir), nil)
 	reqBrowse.AddCookie(c1)
 	r.ServeHTTP(wBrowse, reqBrowse)
-	if !strings.Contains(wBrowse.Body.String(), "Up 60 B / 100 B") || !strings.Contains(wBrowse.Body.String(), "Down 60 B / 100 B") {
+	normalizedBrowse := strings.Join(strings.Fields(wBrowse.Body.String()), " ")
+	if !strings.Contains(normalizedBrowse, "Up 60 B / 100 B") || !strings.Contains(normalizedBrowse, "Down 60 B / 100 B") {
 		t.Errorf("expected quota usage badge in UI, got: %s", wBrowse.Body.String())
 	}
 

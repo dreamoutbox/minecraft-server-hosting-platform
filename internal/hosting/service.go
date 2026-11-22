@@ -609,7 +609,7 @@ func (s *Service) OpenFileManagerURL(ctx context.Context, actorUserID uint, serv
 	}
 
 	fsClient := s.fileServerClientFactory(host.FileServerBaseURL, host.APIKey)
-	if _, err := fsClient.EnsureUser(ctx, user.ID, user.Email); err != nil {
+	if _, err := fsClient.EnsureUser(ctx, user.ID, user.Email, nil, nil); err != nil {
 		return "", fmt.Errorf("failed provisioning fileserver user: %w", err)
 	}
 

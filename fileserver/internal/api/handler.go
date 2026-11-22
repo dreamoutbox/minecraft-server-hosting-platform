@@ -53,8 +53,17 @@ func (h *Handler) RegisterUser(c *gin.Context) {
 		return
 	}
 
-	user, created, err := h.store.EnsureUser(c.Request.Context(), req.ID, req.Email)
+	if (req.UID != nil && *req.UID < 0) || (req.GID != nil && *req.GID < 0) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": store.ErrInvalidUIDGID.Error()})
+		return
+	}
+
+	user, created, err := h.store.EnsureUser(c.Request.Context(), req.ID, req.Email, req.UID, req.GID)
 	if err != nil {
+		if errors.Is(err, store.ErrInvalidUIDGID) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -62,6 +71,8 @@ func (h *Handler) RegisterUser(c *gin.Context) {
 	c.JSON(http.StatusOK, client.EnsureUserResponse{
 		ID:      user.ID,
 		Email:   user.Email,
+		UID:     user.UID,
+		GID:     user.GID,
 		Created: created,
 	})
 }

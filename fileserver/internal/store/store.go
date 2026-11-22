@@ -25,6 +25,8 @@ var (
 	ErrPermissionDenied = errors.New("permission denied for directory")
 	// ErrTokenAlreadyUsed indicates a single-use login token was already redeemed.
 	ErrTokenAlreadyUsed = errors.New("login token has already been used")
+	// ErrInvalidUIDGID indicates a negative Unix UID or GID was supplied.
+	ErrInvalidUIDGID = errors.New("uid and gid must be non-negative")
 )
 
 const (
@@ -64,7 +66,7 @@ func OpenSQLite(dbPath string) (*gorm.DB, error) {
 		_ = db.Exec("PRAGMA busy_timeout=5000;").Error
 	}
 
-	if err := db.AutoMigrate(&authkit.User{}, &DirPermission{}, &UsedLoginToken{}, &TransferUsage{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &DirPermission{}, &UsedLoginToken{}, &TransferUsage{}); err != nil {
 		return nil, fmt.Errorf("failed running sqlite automigrate: %w", err)
 	}
 
@@ -105,18 +107,40 @@ func (s *Store) ServerDirPath(serverID uint) string {
 	return filepath.Join(s.mountsDir, strconv.FormatUint(uint64(serverID), 10))
 }
 
+// cloneIntPtr returns a fresh copy of an *int to avoid aliasing caller memory.
+func cloneIntPtr(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	copied := *v
+	return &copied
+}
+
+// intPtrDiffers reports whether incoming is non-nil and differs from current.
+func intPtrDiffers(current, incoming *int) bool {
+	if incoming == nil {
+		return false
+	}
+	return current == nil || *current != *incoming
+}
+
 // EnsureUser idempotently provisions a local user record matching the platform user ID.
 // When creating a new user, a random password is generated and hashed with bcrypt.
+// Non-nil uid/gid values are persisted on creation and updated on existing users when changed;
+// nil values leave existing uid/gid untouched.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
 //   - userID: Platform user primary key.
 //   - email: Account email address.
+//   - uid: Optional Unix user ID (>= 0) for file ownership.
+//   - gid: Optional Unix group ID (>= 0) for file ownership.
 //
 // Example usage:
 //
-//	user, created, err := st.EnsureUser(ctx, 1, "player@example.com")
-func (s *Store) EnsureUser(ctx context.Context, userID uint, email string) (*authkit.User, bool, error) {
+//	uid, gid := 1000, 1000
+//	user, created, err := st.EnsureUser(ctx, 1, "player@example.com", &uid, &gid)
+func (s *Store) EnsureUser(ctx context.Context, userID uint, email string, uid *int, gid *int) (*User, bool, error) {
 	if userID == 0 {
 		return nil, false, errors.New("user_id must be positive")
 	}
@@ -124,14 +148,29 @@ func (s *Store) EnsureUser(ctx context.Context, userID uint, email string) (*aut
 	if normalized == "" {
 		return nil, false, errors.New("email is required")
 	}
+	if (uid != nil && *uid < 0) || (gid != nil && *gid < 0) {
+		return nil, false, ErrInvalidUIDGID
+	}
 
-	var existing authkit.User
+	var existing User
 	err := s.db.WithContext(ctx).First(&existing, userID).Error
 	if err == nil {
+		changed := false
 		if existing.Email != normalized {
 			existing.Email = normalized
+			changed = true
+		}
+		if intPtrDiffers(existing.UID, uid) {
+			existing.UID = cloneIntPtr(uid)
+			changed = true
+		}
+		if intPtrDiffers(existing.GID, gid) {
+			existing.GID = cloneIntPtr(gid)
+			changed = true
+		}
+		if changed {
 			if saveErr := s.db.WithContext(ctx).Save(&existing).Error; saveErr != nil {
-				return nil, false, fmt.Errorf("failed updating user email: %w", saveErr)
+				return nil, false, fmt.Errorf("failed updating user: %w", saveErr)
 			}
 		}
 		return &existing, false, nil
@@ -149,16 +188,20 @@ func (s *Store) EnsureUser(ctx context.Context, userID uint, email string) (*aut
 		return nil, false, fmt.Errorf("failed hashing random password: %w", err)
 	}
 
-	user := authkit.User{
-		ID:           userID,
-		Email:        normalized,
-		PasswordHash: hashed,
-		Role:         authkit.UserRoleUser,
+	user := User{
+		User: authkit.User{
+			ID:           userID,
+			Email:        normalized,
+			PasswordHash: hashed,
+			Role:         authkit.UserRoleUser,
+		},
+		UID: cloneIntPtr(uid),
+		GID: cloneIntPtr(gid),
 	}
 
 	if err := s.db.WithContext(ctx).Create(&user).Error; err != nil {
 		// Handle concurrent creation race for the same user ID.
-		var raced authkit.User
+		var raced User
 		if lookupErr := s.db.WithContext(ctx).First(&raced, userID).Error; lookupErr == nil {
 			return &raced, false, nil
 		}
@@ -177,8 +220,8 @@ func (s *Store) EnsureUser(ctx context.Context, userID uint, email string) (*aut
 // Example usage:
 //
 //	user, err := st.GetUser(ctx, 1)
-func (s *Store) GetUser(ctx context.Context, userID uint) (*authkit.User, error) {
-	var user authkit.User
+func (s *Store) GetUser(ctx context.Context, userID uint) (*User, error) {
+	var user User
 	err := s.db.WithContext(ctx).First(&user, userID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrUserNotFound

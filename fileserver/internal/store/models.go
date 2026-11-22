@@ -1,6 +1,23 @@
 package store
 
-import "time"
+import (
+	"time"
+
+	"github.com/dreamoutbox/authkit"
+)
+
+// User extends authkit.User with optional Unix UID/GID ownership applied to files
+// uploaded or created by this user through the fileserver.
+type User struct {
+	authkit.User
+	UID *int `gorm:"column:uid" json:"uid,omitempty"`
+	GID *int `gorm:"column:gid" json:"gid,omitempty"`
+}
+
+// TableName pins store.User to the shared "users" table name in SQLite.
+func (User) TableName() string {
+	return "users"
+}
 
 // DirPermission grants a specific user permission to manage files in a server's mount directory.
 type DirPermission struct {

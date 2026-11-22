@@ -7,17 +7,17 @@ Modules:
 
 ## Phases
 
-### Phase 1: Add `uid` and `gid` to fileserver `users` table, store, API, and client [STATUS: TODO]
+### Phase 1: Add `uid` and `gid` to fileserver `users` table, store, API, and client [STATUS: DONE]
 - Goal: Persist optional Unix `uid` and `gid` per user in fileserver's SQLite `users` table and expose them through `PUT /api/v1/users` and `fileserver/client`.
 - Tasks:
-  - [ ] Define `store.User` in `fileserver/internal/store/models.go` embedding `authkit.User` with `UID *int` (`gorm:"column:uid"`) and `GID *int` (`gorm:"column:gid"`) and explicit `TableName() string { return "users" }` (keeps `shared/authkit.User` untouched for the main Postgres DB while adding `uid`/`gid` columns to fileserver SQLite).
-  - [ ] Update `OpenSQLite`, `EnsureUser`, and `GetUser` in `fileserver/internal/store/store.go` to use `store.User`:
+  - [x] Define `store.User` in `fileserver/internal/store/models.go` embedding `authkit.User` with `UID *int` (`gorm:"column:uid"`) and `GID *int` (`gorm:"column:gid"`) and explicit `TableName() string { return "users" }` (keeps `shared/authkit.User` untouched for the main Postgres DB while adding `uid`/`gid` columns to fileserver SQLite).
+  - [x] Update `OpenSQLite`, `EnsureUser`, and `GetUser` in `fileserver/internal/store/store.go` to use `store.User`:
     - Validate that provided `uid`/`gid` are non-negative (`>= 0`).
     - When creating a user, store provided `uid`/`gid`.
     - When updating an existing user, update `uid`/`gid` if non-nil and changed (preserving existing values when nil).
-  - [ ] Extend `client.EnsureUserRequest` and `client.EnsureUserResponse` in `fileserver/client/types.go` with `UID *int` and `GID *int` (`json:"uid,omitempty"`, `json:"gid,omitempty"`), and update `client.Client.EnsureUser` / `HTTPClient.EnsureUser` in `fileserver/client/client.go`.
-  - [ ] Update `api.Handler.RegisterUser` in `fileserver/internal/api/handler.go` to reject negative `uid`/`gid` with HTTP 400, pass `req.UID`/`req.GID` to `store.EnsureUser`, and return them in `EnsureUserResponse`.
-  - [ ] Update existing callers in `internal/hosting/service.go` (temporary nil or 1000:1000? Pass `nil, nil` in Phase 1 so Phase 1 compiles across the workspace, then wire `1000:1000` in Phase 3) and add unit tests in `fileserver/internal/store/store_test.go` and `fileserver/internal/api/handler_test.go`.
+  - [x] Extend `client.EnsureUserRequest` and `client.EnsureUserResponse` in `fileserver/client/types.go` with `UID *int` and `GID *int` (`json:"uid,omitempty"`, `json:"gid,omitempty"`), and update `client.Client.EnsureUser` / `HTTPClient.EnsureUser` in `fileserver/client/client.go`.
+  - [x] Update `api.Handler.RegisterUser` in `fileserver/internal/api/handler.go` to reject negative `uid`/`gid` with HTTP 400, pass `req.UID`/`req.GID` to `store.EnsureUser`, and return them in `EnsureUserResponse`.
+  - [x] Update existing callers in `internal/hosting/service.go` (temporary nil or 1000:1000? Pass `nil, nil` in Phase 1 so Phase 1 compiles across the workspace, then wire `1000:1000` in Phase 3) and add unit tests in `fileserver/internal/store/store_test.go` and `fileserver/internal/api/handler_test.go`.
 - Done when: `cd fileserver && go vet ./... && go test ./... && go build ./cmd/...` and root `go vet ./... && go build ./cmd/...` pass; SQLite `users` table has `uid`/`gid` columns and `PUT /api/v1/users` persists and updates them.
 
 ### Phase 2: Apply uploader `uid:gid` ownership on file upload and creation in fileserver [STATUS: TODO]

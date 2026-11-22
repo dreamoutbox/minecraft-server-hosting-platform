@@ -13,7 +13,7 @@ import (
 
 // Client defines management operations exposed by a node's fileserver daemon.
 type Client interface {
-	EnsureUser(ctx context.Context, userID uint, email string) (*EnsureUserResponse, error)
+	EnsureUser(ctx context.Context, userID uint, email string, uid *int, gid *int) (*EnsureUserResponse, error)
 	Allow(ctx context.Context, userID uint, serverID uint) error
 	Disallow(ctx context.Context, userID uint, serverID uint) error
 	RevokeServer(ctx context.Context, serverID uint) error
@@ -93,15 +93,20 @@ func (c *HTTPClient) doJSON(ctx context.Context, method, path string, reqBody in
 //   - ctx: Operation cancellation context.
 //   - userID: Platform user primary key.
 //   - email: User email address.
+//   - uid: Optional Unix user ID (>= 0) applied to files uploaded/created by this user.
+//   - gid: Optional Unix group ID (>= 0) applied to files uploaded/created by this user.
 //
 // Example usage:
 //
-//	res, err := c.EnsureUser(ctx, user.ID, user.Email)
-func (c *HTTPClient) EnsureUser(ctx context.Context, userID uint, email string) (*EnsureUserResponse, error) {
+//	uid, gid := 1000, 1000
+//	res, err := c.EnsureUser(ctx, user.ID, user.Email, &uid, &gid)
+func (c *HTTPClient) EnsureUser(ctx context.Context, userID uint, email string, uid *int, gid *int) (*EnsureUserResponse, error) {
 	var out EnsureUserResponse
 	err := c.doJSON(ctx, http.MethodPut, "/api/v1/users", EnsureUserRequest{
 		ID:    userID,
 		Email: email,
+		UID:   uid,
+		GID:   gid,
 	}, &out)
 	if err != nil {
 		return nil, err
