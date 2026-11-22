@@ -225,7 +225,7 @@ func TestAdminMenuSearchPaginationAndPlanCRUD(t *testing.T) {
 	}
 	wDashAdmin := doDashboardReq(r, http.MethodGet, "/dashboard", adminCookie, nil)
 	dashBody := wDashAdmin.Body.String()
-	if !strings.Contains(dashBody, ">|</li>") || strings.Contains(dashBody, "dropdown-toggle") {
+	if !strings.Contains(dashBody, `aria-hidden="true">|`) || strings.Contains(dashBody, "dropdown-toggle") {
 		t.Errorf("expected flat admin navbar separated with '|' and no dropdown")
 	}
 	for _, path := range []string{
