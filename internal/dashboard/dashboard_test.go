@@ -75,10 +75,25 @@ func (d *dashboardTestWorker) ImportVolume(ctx context.Context, volumeID string,
 }
 
 func (d *dashboardTestWorker) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
-	return &worker.UploadVolumeBackupResponse{SizeBytes: 0}, nil
+	d.mu.Lock()
+	data := append([]byte(nil), d.volumes[volumeID]...)
+	d.mu.Unlock()
+
+	sizeBytes, err := worker.PutPresignedBytes(ctx, presignedURL, data, "application/gzip")
+	if err != nil {
+		return nil, err
+	}
+	return &worker.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
 }
 
 func (d *dashboardTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
+	data, err := worker.GetPresignedBytes(ctx, presignedURL)
+	if err != nil {
+		return err
+	}
+	d.mu.Lock()
+	d.volumes[volumeID] = data
+	d.mu.Unlock()
 	return nil
 }
 

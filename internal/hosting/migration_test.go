@@ -80,10 +80,25 @@ func (m *multiHostWorkerClient) ImportVolume(ctx context.Context, volumeID strin
 }
 
 func (m *multiHostWorkerClient) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
-	return &worker.UploadVolumeBackupResponse{SizeBytes: 0}, nil
+	m.mu.Lock()
+	data := append([]byte(nil), m.volumes[volumeID]...)
+	m.mu.Unlock()
+
+	sizeBytes, err := worker.PutPresignedBytes(ctx, presignedURL, data, "application/gzip")
+	if err != nil {
+		return nil, err
+	}
+	return &worker.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
 }
 
 func (m *multiHostWorkerClient) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
+	data, err := worker.GetPresignedBytes(ctx, presignedURL)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.volumes[volumeID] = data
+	m.mu.Unlock()
 	return nil
 }
 

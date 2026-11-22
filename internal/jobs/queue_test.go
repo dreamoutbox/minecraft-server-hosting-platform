@@ -81,10 +81,30 @@ func (q *queueTestWorker) ImportVolume(ctx context.Context, volumeID string, r i
 }
 
 func (q *queueTestWorker) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
-	return &worker.UploadVolumeBackupResponse{SizeBytes: 0}, nil
+	q.mu.Lock()
+	if q.failExportVol > 0 {
+		q.failExportVol--
+		q.mu.Unlock()
+		return nil, errors.New("simulated export failure")
+	}
+	data := append([]byte(nil), q.volumes[volumeID]...)
+	q.mu.Unlock()
+
+	sizeBytes, err := worker.PutPresignedBytes(ctx, presignedURL, data, "application/gzip")
+	if err != nil {
+		return nil, err
+	}
+	return &worker.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
 }
 
 func (q *queueTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
+	b, err := worker.GetPresignedBytes(ctx, presignedURL)
+	if err != nil {
+		return err
+	}
+	q.mu.Lock()
+	q.volumes[volumeID] = b
+	q.mu.Unlock()
 	return nil
 }
 

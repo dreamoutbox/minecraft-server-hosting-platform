@@ -1,11 +1,9 @@
 package backup
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"strconv"
 	"time"
@@ -18,6 +16,14 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
 )
 
+const (
+	// DefaultMaxBackups is the default per-server count of completed backups retained.
+	DefaultMaxBackups = 8
+	// DefaultPresignTTL is the default validity duration for presigned S3 upload/download URLs.
+	DefaultPresignTTL = time.Hour
+	backupContentType = "application/gzip"
+)
+
 // WorkerClientFactory instantiates a worker client targeting a specific host.
 type WorkerClientFactory func(baseURL string, apiKey string) worker.Client
 
@@ -27,6 +33,8 @@ type Service struct {
 	storage             storage.StorageProvider
 	workerClientFactory WorkerClientFactory
 	cronRunner          *cron.Cron
+	maxBackups          int
+	presignTTL          time.Duration
 }
 
 // NewService instantiates a backup and disaster recovery coordination service.
@@ -51,6 +59,36 @@ func NewService(db *gorm.DB, storage storage.StorageProvider, factory WorkerClie
 		storage:             storage,
 		workerClientFactory: factory,
 		cronRunner:          cron.New(),
+		maxBackups:          DefaultMaxBackups,
+		presignTTL:          DefaultPresignTTL,
+	}
+}
+
+// SetMaxBackups configures the maximum number of completed backups retained per server.
+//
+// Arguments:
+//   - limit: Positive maximum number of completed snapshots to keep per server.
+//
+// Example usage:
+//
+//	svc.SetMaxBackups(8)
+func (s *Service) SetMaxBackups(limit int) {
+	if limit > 0 {
+		s.maxBackups = limit
+	}
+}
+
+// SetPresignTTL configures the expiration window for minted presigned S3 PUT/GET URLs.
+//
+// Arguments:
+//   - ttl: Positive validity duration for presigned URLs.
+//
+// Example usage:
+//
+//	svc.SetPresignTTL(time.Hour)
+func (s *Service) SetPresignTTL(ttl time.Duration) {
+	if ttl > 0 {
+		s.presignTTL = ttl
 	}
 }
 
@@ -88,7 +126,7 @@ func (s *Service) CreatePendingBackup(ctx context.Context, serverID uint) (*doma
 		return nil, fmt.Errorf("failed fetching server %d: %w", serverID, err)
 	}
 
-	storageKey := fmt.Sprintf("backups/server-%d/%d.tar", server.ID, time.Now().UnixNano())
+	storageKey := fmt.Sprintf("backups/server-%d/%d.tar.gz", server.ID, time.Now().UnixNano())
 	record := domain.BackupRecord{
 		ServerID:   server.ID,
 		StorageKey: storageKey,
@@ -148,29 +186,72 @@ func (s *Service) ExecuteBackupRecord(ctx context.Context, userID uint, serverID
 	volID := strconv.FormatUint(uint64(server.ID), 10)
 	wClient := s.workerClientFactory(server.Host.WorkerBaseURL, server.Host.APIKey)
 
-	tarStream, err := wClient.ExportVolume(ctx, volID)
+	putURL, err := s.storage.PresignPut(ctx, record.StorageKey, s.presignTTL, backupContentType)
 	if err != nil {
-		return markFailed(fmt.Errorf("failed exporting volume on worker: %w", err))
+		return markFailed(fmt.Errorf("failed generating presigned upload URL: %w", err))
 	}
-	defer func() { _ = tarStream.Close() }()
 
-	tarBytes, err := io.ReadAll(tarStream)
+	upResp, err := wClient.UploadVolumeBackup(ctx, volID, putURL)
 	if err != nil {
-		return markFailed(fmt.Errorf("failed reading exported tar bytes: %w", err))
+		return markFailed(fmt.Errorf("failed uploading backup archive from worker: %w", err))
 	}
 
-	if err := s.storage.Put(ctx, record.StorageKey, tarBytes); err != nil {
-		return markFailed(fmt.Errorf("failed storing backup archive: %w", err))
-	}
-
-	record.SizeBytes = int64(len(tarBytes))
+	record.SizeBytes = upResp.SizeBytes
 	record.Status = domain.BackupStatusCompleted
 	if err := s.db.WithContext(ctx).Save(&record).Error; err != nil {
 		return markFailed(fmt.Errorf("failed saving backup record: %w", err))
 	}
 
+	if pruneErr := s.pruneExcessBackups(ctx, server.ID); pruneErr != nil {
+		log.Printf("[WARN] failed pruning excess backups for server %d: %v", server.ID, pruneErr)
+	}
+
 	domain.RecordServerLog(ctx, s.db, server.ID, actorID, domain.ServerOpBackup, domain.ServerLogStatusSuccess, fmt.Sprintf("backup #%d completed (%d bytes)", record.ID, record.SizeBytes))
 	return &record, nil
+}
+
+// deleteStorageKeys removes all specified object keys from S3/object storage.
+func (s *Service) deleteStorageKeys(ctx context.Context, keys []string) error {
+	var errs []error
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if err := s.storage.Delete(ctx, key); err != nil {
+			errs = append(errs, fmt.Errorf("delete %s: %w", key, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// pruneExcessBackups deletes completed BackupRecord rows and S3 objects beyond s.maxBackups for serverID.
+func (s *Service) pruneExcessBackups(ctx context.Context, serverID uint) error {
+	if s.maxBackups <= 0 {
+		return nil
+	}
+
+	var completed []domain.BackupRecord
+	if err := s.db.WithContext(ctx).
+		Where("server_id = ? AND status = ?", serverID, domain.BackupStatusCompleted).
+		Order("created_at desc, id desc").
+		Find(&completed).Error; err != nil {
+		return fmt.Errorf("failed querying completed backups for pruning: %w", err)
+	}
+	if len(completed) <= s.maxBackups {
+		return nil
+	}
+
+	var errs []error
+	for _, old := range completed[s.maxBackups:] {
+		if err := s.deleteStorageKeys(ctx, []string{old.StorageKey}); err != nil {
+			errs = append(errs, fmt.Errorf("backup #%d storage cleanup: %w", old.ID, err))
+			continue
+		}
+		if err := s.db.WithContext(ctx).Delete(&old).Error; err != nil {
+			errs = append(errs, fmt.Errorf("backup #%d db delete: %w", old.ID, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // ValidateRestoreTarget verifies that backupRecordID exists and belongs to serverID.
@@ -227,11 +308,11 @@ func (s *Service) RestoreServer(ctx context.Context, serverID uint, backupRecord
 		return fmt.Errorf("server not found: %w", err)
 	}
 
-	// Pull archive payload from object storage
-	archiveBytes, err := s.storage.Get(ctx, record.StorageKey)
+	// Mint short-lived presigned GET URL so worker downloads archive without S3 credentials
+	getURL, err := s.storage.PresignGet(ctx, record.StorageKey, s.presignTTL)
 	if err != nil {
 		domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpRestore, domain.ServerLogStatusError, err.Error())
-		return fmt.Errorf("failed fetching archive from storage: %w", err)
+		return fmt.Errorf("failed generating presigned download URL: %w", err)
 	}
 
 	wClient := s.workerClientFactory(server.Host.WorkerBaseURL, server.Host.APIKey)
@@ -241,11 +322,11 @@ func (s *Service) RestoreServer(ctx context.Context, serverID uint, backupRecord
 		_ = wClient.StopContainer(ctx, server.ContainerID)
 	}
 
-	// Step 2: Unpack tar into volume
+	// Step 2: Worker downloads and unpacks archive into volume
 	volID := strconv.FormatUint(uint64(server.ID), 10)
-	if err := wClient.ImportVolume(ctx, volID, bytes.NewReader(archiveBytes)); err != nil {
+	if err := wClient.RestoreVolumeBackup(ctx, volID, getURL); err != nil {
 		domain.RecordServerLog(ctx, s.db, server.ID, server.UserID, domain.ServerOpRestore, domain.ServerLogStatusError, err.Error())
-		return fmt.Errorf("failed importing volume contents on worker: %w", err)
+		return fmt.Errorf("failed restoring volume contents on worker: %w", err)
 	}
 
 	// Step 3: Restart container

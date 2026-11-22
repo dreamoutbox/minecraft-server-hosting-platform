@@ -72,10 +72,27 @@ func (m *mockWorkerForBackup) ImportVolume(ctx context.Context, volumeID string,
 }
 
 func (m *mockWorkerForBackup) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
-	return &worker.UploadVolumeBackupResponse{SizeBytes: 0}, nil
+	m.mu.Lock()
+	m.exportedCall++
+	data := append([]byte(nil), m.volumeData[volumeID]...)
+	m.mu.Unlock()
+
+	sizeBytes, err := worker.PutPresignedBytes(ctx, presignedURL, data, backupContentType)
+	if err != nil {
+		return nil, err
+	}
+	return &worker.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
 }
 
 func (m *mockWorkerForBackup) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
+	buf, err := worker.GetPresignedBytes(ctx, presignedURL)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.importedCall++
+	m.volumeData[volumeID] = buf
+	m.mu.Unlock()
 	return nil
 }
 
@@ -319,4 +336,47 @@ func TestCronScheduling(t *testing.T) {
 	}
 
 	time.Sleep(1200 * time.Millisecond)
+}
+
+func TestBackupRetentionPrunesOldestBeyondMaxCount(t *testing.T) {
+	service, mockWorker, sp, server, _, _ := setupBackupTestEnv(t)
+	if service == nil {
+		return
+	}
+	service.SetMaxBackups(8)
+
+	ctx := context.Background()
+	volID := fmt.Sprintf("%d", server.ID)
+
+	var created []*domain.BackupRecord
+	for i := 1; i <= 10; i++ {
+		mockWorker.volumeData[volID] = []byte(fmt.Sprintf("snapshot-%02d", i))
+		rec, err := service.BackupServer(ctx, server.ID)
+		if err != nil {
+			t.Fatalf("BackupServer #%d failed: %v", i, err)
+		}
+		created = append(created, rec)
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	remaining, err := service.ListBackups(ctx, server.ID)
+	if err != nil {
+		t.Fatalf("ListBackups failed: %v", err)
+	}
+	if len(remaining) != 8 {
+		t.Fatalf("expected 8 backups retained, got %d", len(remaining))
+	}
+
+	// Oldest 2 backups must be pruned from both DB and storage
+	for _, old := range created[:2] {
+		if _, err := sp.Get(ctx, old.StorageKey); err == nil {
+			t.Errorf("expected pruned backup key %s to be deleted from storage", old.StorageKey)
+		}
+	}
+	// Newest 8 backups must remain accessible in storage
+	for _, kept := range created[2:] {
+		if _, err := sp.Get(ctx, kept.StorageKey); err != nil {
+			t.Errorf("expected retained backup key %s to exist in storage: %v", kept.StorageKey, err)
+		}
+	}
 }

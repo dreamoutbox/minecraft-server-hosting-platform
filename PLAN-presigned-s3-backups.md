@@ -67,15 +67,15 @@ Architecture decisions locked in before implementation:
   - [x] Add unit tests in `internal/worker/worker_test.go` covering single-part upload/restore, multi-part split + merge restore (using small `MaxPartBytes` e.g. 64 KiB), quiesce command ordering (`save-off` -> `save-all` -> `save-on`), and failure rollback leaving original `.img` intact.
 - Done when: `go test ./internal/worker/...` passes, multi-part `.img` round-trip matches original SHA-256 byte-for-byte, and `cmd/worker` still has zero AWS/S3 SDK imports.
 
-### Phase 6: Switch user `backup_records` to presigned `.tar.gz` and add keep-last-N pruning [STATUS: TODO]
+### Phase 6: Switch user `backup_records` to presigned `.tar.gz` and add keep-last-N pruning [STATUS: DONE]
 - Goal: Move manual server backups/restores onto the presigned `.tar.gz` worker flow and enforce the per-server backup limit (`BACKUP_MAX_COUNT`, default `8`).
 - Tasks:
-  - [ ] Add `SetMaxBackups(n int)` and `SetPresignTTL(d time.Duration)` (defaulting to `8` and `1h`) on `backup.Service` in `internal/backup/backup.go`.
-  - [ ] Update `CreatePendingBackup` to generate `.tar.gz` keys (`backups/server-<id>/<ts>.tar.gz`).
-  - [ ] Update `ExecuteBackupRecord` to mint a presigned `PUT` URL (`PresignPut`), call `wClient.UploadVolumeBackup`, persist `SizeBytes` + `BackupStatusCompleted`, and call a shared `pruneExcessBackups` helper that keeps the newest `maxBackups` completed `BackupRecord` rows per server and deletes older S3 objects + DB rows.
-  - [ ] Update `RestoreServer` to mint a presigned `GET` URL (`PresignGet`), stop container, call `wClient.RestoreVolumeBackup`, and restart container.
-  - [ ] Verify `internal/hosting/migration.go` remains compatible with `.tar.gz` archives returned by `BackupServer` (leveraging `ImportVolumeAuto` from Phase 4 or presigned restore).
-  - [ ] Update mocks and tests in `internal/backup/backup_test.go`, `internal/hosting/migration_test.go`, and `internal/jobs/queue_test.go`, adding a test that creating 10 backups prunes down to the newest 8 in both DB and storage.
+  - [x] Add `SetMaxBackups(n int)` and `SetPresignTTL(d time.Duration)` (defaulting to `8` and `1h`) on `backup.Service` in `internal/backup/backup.go`.
+  - [x] Update `CreatePendingBackup` to generate `.tar.gz` keys (`backups/server-<id>/<ts>.tar.gz`).
+  - [x] Update `ExecuteBackupRecord` to mint a presigned `PUT` URL (`PresignPut`), call `wClient.UploadVolumeBackup`, persist `SizeBytes` + `BackupStatusCompleted`, and call a shared `pruneExcessBackups` helper that keeps the newest `maxBackups` completed `BackupRecord` rows per server and deletes older S3 objects + DB rows.
+  - [x] Update `RestoreServer` to mint a presigned `GET` URL (`PresignGet`), stop container, call `wClient.RestoreVolumeBackup`, and restart container.
+  - [x] Verify `internal/hosting/migration.go` remains compatible with `.tar.gz` archives returned by `BackupServer` (leveraging `ImportVolumeAuto` from Phase 4 or presigned restore).
+  - [x] Update mocks and tests in `internal/backup/backup_test.go`, `internal/hosting/migration_test.go`, and `internal/jobs/queue_test.go`, adding a test that creating 10 backups prunes down to the newest 8 in both DB and storage.
 - Done when: `go test ./internal/backup/... ./internal/hosting/... ./internal/jobs/...` passes and backup pruning deletes both S3 objects and DB records beyond the configured limit.
 
 ### Phase 7: Implement ext4 image backup/restore service, job queue execution, and daily CRON in `cmd/jobworker` [STATUS: TODO]
