@@ -22,4 +22,4 @@
 
 - [ ] upload file immediately open browser file dialog. no "Upload File" bootstrap modal.
 
-- [ ] add button to refresh file list
+- [ ] file manager limit upload/download files. quota size = 5GB/day (changable with ENV)

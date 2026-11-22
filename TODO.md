@@ -54,10 +54,6 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
-- [ ] ensure cmd/worker CRON backup all mc server imgs files at /var/lib/mc-platform/images/<server-id>.img to S3 bucket
-
----
-
 ### Debug Utils
 
 - [x] add shell debug script to manually mount /var/lib/mc-platform/images/<server-id>.img for inspection.
@@ -120,6 +116,16 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 - [x] add copy address to "Connect Address" and "Connect IP Address"
 
 - [x] use `USE_MEOWICE_FLAGS` for mc container
+
+---
+
+### 11/22/2026
+
+- [ ]  limit backups. keep last 8 backups.
+
+- [ ]  assert CRON daily backup working
+
+- [ ] ensure cmd/worker CRON backup all mc server ext4 imgs files at /var/lib/mc-platform/images/<server-id>.img to S3 bucket
 
 ---
 
