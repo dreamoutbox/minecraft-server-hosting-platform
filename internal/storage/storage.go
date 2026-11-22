@@ -3,12 +3,17 @@ package storage
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -25,12 +30,14 @@ const (
 	StorageTypeMemory StorageType = "memory"
 )
 
-// StorageProvider defines operations for reading, writing, and listing object blobs.
+// StorageProvider defines operations for reading, writing, listing, and presigning object blobs.
 type StorageProvider interface {
 	Put(ctx context.Context, key string, data []byte) error
 	Get(ctx context.Context, key string) ([]byte, error)
 	Delete(ctx context.Context, key string) error
 	List(ctx context.Context, prefix string) ([]string, error)
+	PresignPut(ctx context.Context, key string, ttl time.Duration, contentType string) (string, error)
+	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
 }
 
 // S3Config encapsulates configuration settings required to connect to an S3-compatible service.
@@ -45,8 +52,9 @@ type S3Config struct {
 
 // S3StorageProvider implements StorageProvider against SeaweedFS (dev) or AWS S3 (prod).
 type S3StorageProvider struct {
-	client *s3.Client
-	bucket string
+	client        *s3.Client
+	presignClient *s3.PresignClient
+	bucket        string
 }
 
 // NewS3StorageProvider initializes an S3-compatible object storage provider.
@@ -121,8 +129,9 @@ func NewS3StorageProvider(ctx context.Context, cfg S3Config) (*S3StorageProvider
 	}
 
 	return &S3StorageProvider{
-		client: client,
-		bucket: cfg.Bucket,
+		client:        client,
+		presignClient: s3.NewPresignClient(client),
+		bucket:        cfg.Bucket,
 	}, nil
 }
 
@@ -225,10 +234,74 @@ func (s *S3StorageProvider) List(ctx context.Context, prefix string) ([]string, 
 	return keys, nil
 }
 
+// PresignPut mints a time-limited, single-object HTTP PUT URL scoped to the configured bucket and key.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - key: Target object key within the bucket.
+//   - ttl: Validity duration for starting the upload.
+//   - contentType: Optional MIME Content-Type bound to the upload (empty leaves it unbound).
+//
+// Example usage:
+//
+//	url, err := provider.PresignPut(ctx, "backups/server-1/world.tar.gz", time.Hour, "application/gzip")
+func (s *S3StorageProvider) PresignPut(ctx context.Context, key string, ttl time.Duration, contentType string) (string, error) {
+	if err := validatePresignArgs(key, ttl); err != nil {
+		return "", err
+	}
+	input := &s3.PutObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+	req, err := s.presignClient.PresignPutObject(ctx, input, s3.WithPresignExpires(ttl))
+	if err != nil {
+		return "", fmt.Errorf("failed presigning PUT for %s: %w", key, err)
+	}
+	return req.URL, nil
+}
+
+// PresignGet mints a time-limited, single-object HTTP GET URL scoped to the configured bucket and key.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - key: Object key within the bucket to allow downloading.
+//   - ttl: Validity duration for starting the download.
+//
+// Example usage:
+//
+//	url, err := provider.PresignGet(ctx, "backups/server-1/world.tar.gz", time.Hour)
+func (s *S3StorageProvider) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	if err := validatePresignArgs(key, ttl); err != nil {
+		return "", err
+	}
+	req, err := s.presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(ttl))
+	if err != nil {
+		return "", fmt.Errorf("failed presigning GET for %s: %w", key, err)
+	}
+	return req.URL, nil
+}
+
+type memoryPresignedGrant struct {
+	method      string
+	key         string
+	contentType string
+	expiresAt   time.Time
+}
+
 // MemoryStorageProvider offers an in-memory implementation for testing without network dependencies.
 type MemoryStorageProvider struct {
-	mu   sync.RWMutex
-	data map[string][]byte
+	mu         sync.RWMutex
+	data       map[string][]byte
+	grants     map[string]memoryPresignedGrant
+	serverAddr string
+	httpSrv    *http.Server
+	listener   net.Listener
 }
 
 // NewMemoryStorageProvider instantiates an in-memory storage provider.
@@ -241,8 +314,30 @@ type MemoryStorageProvider struct {
 //	memProvider := storage.NewMemoryStorageProvider()
 func NewMemoryStorageProvider() *MemoryStorageProvider {
 	return &MemoryStorageProvider{
-		data: make(map[string][]byte),
+		data:   make(map[string][]byte),
+		grants: make(map[string]memoryPresignedGrant),
 	}
+}
+
+// Close shuts down the optional local presign HTTP listener started for in-memory presigned URLs.
+//
+// Arguments:
+//   - None.
+//
+// Example usage:
+//
+//	defer memProvider.Close()
+func (m *MemoryStorageProvider) Close() error {
+	m.mu.Lock()
+	srv := m.httpSrv
+	m.httpSrv = nil
+	m.listener = nil
+	m.serverAddr = ""
+	m.mu.Unlock()
+	if srv != nil {
+		return srv.Close()
+	}
+	return nil
 }
 
 func (m *MemoryStorageProvider) Put(ctx context.Context, key string, data []byte) error {
@@ -283,6 +378,150 @@ func (m *MemoryStorageProvider) List(ctx context.Context, prefix string) ([]stri
 		}
 	}
 	return keys, nil
+}
+
+// PresignPut mints a local loopback PUT URL enforcing token scope, method, content type, and TTL.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - key: Target object key.
+//   - ttl: Expiration window for the presigned token.
+//   - contentType: Optional expected Content-Type header.
+//
+// Example usage:
+//
+//	url, err := memProvider.PresignPut(ctx, "backups/server-1/world.tar.gz", time.Minute, "application/gzip")
+func (m *MemoryStorageProvider) PresignPut(ctx context.Context, key string, ttl time.Duration, contentType string) (string, error) {
+	return m.mintGrant(http.MethodPut, key, ttl, contentType)
+}
+
+// PresignGet mints a local loopback GET URL enforcing token scope, method, and TTL.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - key: Target object key.
+//   - ttl: Expiration window for the presigned token.
+//
+// Example usage:
+//
+//	url, err := memProvider.PresignGet(ctx, "backups/server-1/world.tar.gz", time.Minute)
+func (m *MemoryStorageProvider) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	return m.mintGrant(http.MethodGet, key, ttl, "")
+}
+
+func (m *MemoryStorageProvider) mintGrant(method, key string, ttl time.Duration, contentType string) (string, error) {
+	if err := validatePresignArgs(key, ttl); err != nil {
+		return "", err
+	}
+	addr, err := m.ensurePresignServer()
+	if err != nil {
+		return "", err
+	}
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", fmt.Errorf("failed generating presign token: %w", err)
+	}
+	token := hex.EncodeToString(tokenBytes)
+
+	m.mu.Lock()
+	m.grants[token] = memoryPresignedGrant{
+		method:      method,
+		key:         key,
+		contentType: contentType,
+		expiresAt:   time.Now().Add(ttl),
+	}
+	m.mu.Unlock()
+
+	return fmt.Sprintf("http://%s/objects/%s", addr, token), nil
+}
+
+func (m *MemoryStorageProvider) ensurePresignServer() (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.serverAddr != "" {
+		return m.serverAddr, nil
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", fmt.Errorf("failed starting memory presign listener: %w", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/objects/", m.handlePresignedHTTP)
+	srv := &http.Server{Handler: mux}
+
+	m.listener = ln
+	m.httpSrv = srv
+	m.serverAddr = ln.Addr().String()
+
+	go func() {
+		_ = srv.Serve(ln)
+	}()
+
+	return m.serverAddr, nil
+}
+
+func (m *MemoryStorageProvider) handlePresignedHTTP(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimPrefix(r.URL.Path, "/objects/")
+	if token == "" || strings.Contains(token, "/") {
+		http.Error(w, "invalid presigned token", http.StatusForbidden)
+		return
+	}
+
+	m.mu.RLock()
+	grant, ok := m.grants[token]
+	m.mu.RUnlock()
+	if !ok {
+		http.Error(w, "unknown presigned token", http.StatusForbidden)
+		return
+	}
+	if time.Now().After(grant.expiresAt) {
+		http.Error(w, "presigned url expired", http.StatusForbidden)
+		return
+	}
+	if r.Method != grant.method {
+		http.Error(w, "method not allowed for presigned url", http.StatusForbidden)
+		return
+	}
+
+	switch grant.method {
+	case http.MethodPut:
+		if grant.contentType != "" && r.Header.Get("Content-Type") != grant.contentType {
+			http.Error(w, "content-type mismatch", http.StatusForbidden)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed reading body", http.StatusBadRequest)
+			return
+		}
+		if err := m.Put(r.Context(), grant.key, body); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	case http.MethodGet:
+		data, err := m.Get(r.Context(), grant.key)
+		if err != nil {
+			http.Error(w, "object not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+	default:
+		http.Error(w, "unsupported method", http.StatusForbidden)
+	}
+}
+
+func validatePresignArgs(key string, ttl time.Duration) error {
+	if strings.TrimSpace(key) == "" {
+		return errors.New("presign object key must not be empty")
+	}
+	if ttl <= 0 {
+		return errors.New("presign TTL must be positive")
+	}
+	return nil
 }
 
 // NewStorageProviderFromEnv inspects environment variables and constructs the appropriate provider.

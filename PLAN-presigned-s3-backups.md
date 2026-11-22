@@ -26,13 +26,13 @@ Architecture decisions locked in before implementation:
   - [x] Add unit tests in `internal/config/config_test.go` covering defaults, renamed env var, and invalid cron/duration/count values.
 - Done when: `go test ./internal/config/...` and `go build ./cmd/...` pass, and no stale `RETENTION_DAYS` references remain outside `TODO.md` or historical docs.
 
-### Phase 2: Add presigned PUT/GET URL generation to `internal/storage` [STATUS: TODO]
+### Phase 2: Add presigned PUT/GET URL generation to `internal/storage` [STATUS: DONE]
 - Goal: Allow orchestrator/jobworker to mint object-scoped, time-limited presigned PUT and GET URLs for S3/SeaweedFS and in-memory test storage.
 - Tasks:
-  - [ ] Extend `storage.StorageProvider` in `internal/storage/storage.go` with `PresignPut(ctx context.Context, key string, ttl time.Duration, contentType string) (string, error)` and `PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)`.
-  - [ ] Implement `PresignPut` and `PresignGet` on `S3StorageProvider` using `s3.NewPresignClient(s.client)` with `s3.WithPresignExpires(ttl)`, scoped strictly to the configured bucket and single key.
-  - [ ] Implement `PresignPut` and `PresignGet` on `MemoryStorageProvider` backed by a lightweight local HTTP handler (started lazily or via helper) so unit tests exercise real HTTP PUT/GET against presigned URLs with expiry and method enforcement.
-  - [ ] Add unit and SeaweedFS integration tests in `internal/storage/storage_test.go` verifying presigned PUT upload, presigned GET download, expired URL rejection, and method restriction (e.g. GET/DELETE rejected on a PUT-only URL).
+  - [x] Extend `storage.StorageProvider` in `internal/storage/storage.go` with `PresignPut(ctx context.Context, key string, ttl time.Duration, contentType string) (string, error)` and `PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)`.
+  - [x] Implement `PresignPut` and `PresignGet` on `S3StorageProvider` using `s3.NewPresignClient(s.client)` with `s3.WithPresignExpires(ttl)`, scoped strictly to the configured bucket and single key.
+  - [x] Implement `PresignPut` and `PresignGet` on `MemoryStorageProvider` backed by a lightweight local HTTP handler (started lazily or via helper) so unit tests exercise real HTTP PUT/GET against presigned URLs with expiry and method enforcement.
+  - [x] Add unit and SeaweedFS integration tests in `internal/storage/storage_test.go` verifying presigned PUT upload, presigned GET download, expired URL rejection, and method restriction (e.g. GET/DELETE rejected on a PUT-only URL).
 - Done when: `go test ./internal/storage/...` passes (both memory tests and SeaweedFS integration test when SeaweedFS is running).
 
 ### Phase 3: Add `ServerImageBackup` model and image backup/restore job enums [STATUS: TODO]
