@@ -121,6 +121,8 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ### 11/22/2026
 
+- [ ] change env `RETENTION_DAYS` to `SERVER_EXPIRED_DATA_RETENTION_DAYS`
+
 - [ ] limit backups. keep last 8 backups.
 
 - [ ] assert CRON mc servers backup working

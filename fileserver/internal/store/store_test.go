@@ -118,3 +118,69 @@ func TestConsumeLoginTokenSingleUse(t *testing.T) {
 		t.Fatalf("expected ErrTokenAlreadyUsed on replay, got %v", err)
 	}
 }
+
+func TestTransferUsageUpsertAndRollover(t *testing.T) {
+	st := newTestStore(t, "/var/lib/mc-platform/mounts")
+	ctx := context.Background()
+
+	day1 := time.Now().UTC().Format(UsageDayFormat)
+	day2 := time.Now().UTC().AddDate(0, 0, 1).Format(UsageDayFormat)
+
+	// Missing row returns zero usage
+	u0, err := st.GetUsage(ctx, 1, day1)
+	if err != nil {
+		t.Fatalf("GetUsage initial failed: %v", err)
+	}
+	if u0.UploadBytes != 0 || u0.DownloadBytes != 0 {
+		t.Fatalf("expected zero usage, got %+v", u0)
+	}
+
+	// Accumulate uploads and downloads on day1
+	if err := st.AddUsage(ctx, 1, day1, TransferDirectionUpload, 100); err != nil {
+		t.Fatalf("AddUsage upload 1: %v", err)
+	}
+	if err := st.AddUsage(ctx, 1, day1, TransferDirectionUpload, 250); err != nil {
+		t.Fatalf("AddUsage upload 2: %v", err)
+	}
+	if err := st.AddUsage(ctx, 1, day1, TransferDirectionDownload, 500); err != nil {
+		t.Fatalf("AddUsage download 1: %v", err)
+	}
+
+	u1, err := st.GetUsage(ctx, 1, day1)
+	if err != nil {
+		t.Fatalf("GetUsage day1 failed: %v", err)
+	}
+	if u1.UploadBytes != 350 || u1.DownloadBytes != 500 {
+		t.Fatalf("expected upload=350 download=500, got %+v", u1)
+	}
+
+	// Day rollover isolates day2 and other users
+	uNext, err := st.GetUsage(ctx, 1, day2)
+	if err != nil {
+		t.Fatalf("GetUsage day2 failed: %v", err)
+	}
+	if uNext.UploadBytes != 0 || uNext.DownloadBytes != 0 {
+		t.Fatalf("expected zero usage on day2, got %+v", uNext)
+	}
+
+	uOther, err := st.GetUsage(ctx, 2, day1)
+	if err != nil {
+		t.Fatalf("GetUsage user 2 failed: %v", err)
+	}
+	if uOther.UploadBytes != 0 || uOther.DownloadBytes != 0 {
+		t.Fatalf("expected zero usage for user 2, got %+v", uOther)
+	}
+
+	// Old rows beyond retention are pruned on write
+	oldDay := time.Now().UTC().AddDate(0, 0, -(usageRetentionDays + 5)).Format(UsageDayFormat)
+	if err := st.AddUsage(ctx, 1, oldDay, TransferDirectionUpload, 42); err != nil {
+		t.Fatalf("AddUsage oldDay: %v", err)
+	}
+	uOld, err := st.GetUsage(ctx, 1, oldDay)
+	if err != nil {
+		t.Fatalf("GetUsage oldDay: %v", err)
+	}
+	if uOld.UploadBytes != 0 {
+		t.Fatalf("expected expired usage row to be pruned, got %+v", uOld)
+	}
+}

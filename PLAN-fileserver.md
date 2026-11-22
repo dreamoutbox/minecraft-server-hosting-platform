@@ -25,15 +25,15 @@ Order: independent UI items first, then the quota feature (backend + store + con
   - [x] Tests in `handler_test.go` / `fs_test.go`: multi-delete, multi-zip, rejection of paths outside the permitted dir (path traversal), empty selection.
 - Done when: `go test ./...` passes including the new tests; manual check: select-all, partial selection, bulk delete and bulk zip work and the bar hides when nothing is selected.
 
-### Phase 3: Quota config and usage store [STATUS: TODO]
+### Phase 3: Quota config and usage store [STATUS: DONE]
 - Goal: persist per-user daily transfer usage and expose the configurable limit.
 - Tasks:
-  - [ ] `internal/config/config.go`: add `FILESERVER_DAILY_QUOTA_MB` (default 5120 = 5GB, `0`/unset-to-default semantics decided below), parsed with the existing `parsePositiveInt` pattern; add `DailyQuotaBytes` to `Config`. Use a named constant for the default.
-  - [ ] `internal/store/models.go`: add `TransferUsage` model (`UserID`, `Day` date string `YYYY-MM-DD` in UTC, `UploadBytes`, `DownloadBytes`; unique index on user+day); add to AutoMigrate in `OpenSQLite`.
-  - [ ] `internal/store/store.go`: add `GetUsage(ctx, userID, day)`, and `AddUsage(ctx, userID, day, direction, bytes)` using an atomic upsert (`ON CONFLICT DO UPDATE`). Use a `TransferDirection` enum (upload/download).
-  - [ ] Add cleanup of rows older than N days (reuse the pattern used for expired `UsedLoginToken`, if present).
-  - [ ] Tests: `config_test.go` (default, override, invalid) and `store_test.go` (upsert accumulates, day rollover isolates).
-  - [ ] Add env var to `docker-compose.app.yml` (`FILESERVER_DAILY_QUOTA_MB`), `template.env`, and `docs/fileserver-deployment.md`.
+  - [x] `internal/config/config.go`: add `FILESERVER_DAILY_QUOTA_MB` (default 5120 = 5GB, `0`/unset-to-default semantics decided below), parsed with the existing `parsePositiveInt` pattern; add `DailyQuotaBytes` to `Config`. Use a named constant for the default.
+  - [x] `internal/store/models.go`: add `TransferUsage` model (`UserID`, `Day` date string `YYYY-MM-DD` in UTC, `UploadBytes`, `DownloadBytes`; unique index on user+day); add to AutoMigrate in `OpenSQLite`.
+  - [x] `internal/store/store.go`: add `GetUsage(ctx, userID, day)`, and `AddUsage(ctx, userID, day, direction, bytes)` using an atomic upsert (`ON CONFLICT DO UPDATE`). Use a `TransferDirection` enum (upload/download).
+  - [x] Add cleanup of rows older than N days (reuse the pattern used for expired `UsedLoginToken`, if present).
+  - [x] Tests: `config_test.go` (default, override, invalid) and `store_test.go` (upsert accumulates, day rollover isolates).
+  - [x] Add env var to `docker-compose.app.yml` (`FILESERVER_DAILY_QUOTA_MB`), `template.env`, and `docs/fileserver-deployment.md`.
 - Done when: `go test ./...` passes; no handler behavior change yet; env var documented.
 
 ### Phase 4: Enforce quota on upload and download [STATUS: TODO]

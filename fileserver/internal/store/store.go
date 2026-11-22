@@ -27,7 +27,12 @@ var (
 	ErrTokenAlreadyUsed = errors.New("login token has already been used")
 )
 
-const randomPasswordEntropyBytes = 32
+const (
+	randomPasswordEntropyBytes = 32
+	usageRetentionDays         = 30
+	// UsageDayFormat is the UTC date layout used to bucket daily transfer usage.
+	UsageDayFormat = "2006-01-02"
+)
 
 // OpenSQLite opens (or creates) the fileserver SQLite database and applies schema migrations.
 //
@@ -59,7 +64,7 @@ func OpenSQLite(dbPath string) (*gorm.DB, error) {
 		_ = db.Exec("PRAGMA busy_timeout=5000;").Error
 	}
 
-	if err := db.AutoMigrate(&authkit.User{}, &DirPermission{}, &UsedLoginToken{}); err != nil {
+	if err := db.AutoMigrate(&authkit.User{}, &DirPermission{}, &UsedLoginToken{}, &TransferUsage{}); err != nil {
 		return nil, fmt.Errorf("failed running sqlite automigrate: %w", err)
 	}
 
@@ -348,4 +353,89 @@ func (s *Store) ConsumeLoginToken(ctx context.Context, jti string, expiresAt tim
 		}
 		return nil
 	})
+}
+
+// GetUsage returns the recorded upload and download bytes for userID on day (YYYY-MM-DD UTC).
+// Returns zeroed usage when no transfers have been recorded yet for that day.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Target user ID.
+//   - day: UTC date string formatted as UsageDayFormat ("2006-01-02").
+//
+// Example usage:
+//
+//	usage, err := st.GetUsage(ctx, 1, time.Now().UTC().Format(store.UsageDayFormat))
+func (s *Store) GetUsage(ctx context.Context, userID uint, day string) (TransferUsage, error) {
+	var usage TransferUsage
+	err := s.db.WithContext(ctx).
+		Where("user_id = ? AND day = ?", userID, day).
+		First(&usage).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return TransferUsage{UserID: userID, Day: day}, nil
+	}
+	if err != nil {
+		return TransferUsage{}, fmt.Errorf("failed querying transfer usage: %w", err)
+	}
+	return usage, nil
+}
+
+// AddUsage atomically increments a user's daily upload or download byte counter and prunes old rows.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Target user ID.
+//   - day: UTC date string formatted as UsageDayFormat ("2006-01-02").
+//   - dir: TransferDirectionUpload or TransferDirectionDownload.
+//   - deltaBytes: Non-negative number of bytes transferred.
+//
+// Example usage:
+//
+//	err := st.AddUsage(ctx, 1, "2026-11-22", store.TransferDirectionUpload, 1024)
+func (s *Store) AddUsage(ctx context.Context, userID uint, day string, dir TransferDirection, deltaBytes int64) error {
+	if userID == 0 {
+		return errors.New("user_id must be positive")
+	}
+	if strings.TrimSpace(day) == "" {
+		return errors.New("day is required")
+	}
+	if deltaBytes < 0 {
+		return errors.New("delta bytes cannot be negative")
+	}
+	if deltaBytes == 0 {
+		return nil
+	}
+
+	var uploadDelta, downloadDelta int64
+	switch dir {
+	case TransferDirectionUpload:
+		uploadDelta = deltaBytes
+	case TransferDirectionDownload:
+		downloadDelta = deltaBytes
+	default:
+		return fmt.Errorf("invalid transfer direction: %q", dir)
+	}
+
+	record := TransferUsage{
+		UserID:        userID,
+		Day:           day,
+		UploadBytes:   uploadDelta,
+		DownloadBytes: downloadDelta,
+	}
+
+	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "day"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"upload_bytes":   gorm.Expr("upload_bytes + ?", uploadDelta),
+			"download_bytes": gorm.Expr("download_bytes + ?", downloadDelta),
+		}),
+	}).Create(&record).Error
+	if err != nil {
+		return fmt.Errorf("failed recording transfer usage: %w", err)
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -usageRetentionDays).Format(UsageDayFormat)
+	_ = s.db.WithContext(ctx).Where("day < ?", cutoff).Delete(&TransferUsage{}).Error
+
+	return nil
 }

@@ -11,7 +11,8 @@ The standalone file server (`fileserver/cmd/fileserver`) runs on each hosting no
 | `FILESERVER_MOUNTS_DIR` | `/var/lib/mc-platform/mounts` | Base directory containing `<server-id>` mount folders |
 | `FILESERVER_API_KEY` | `dev-worker-key` | Bearer API key matching the host's `APIKey` in the main server |
 | `FILESERVER_JWT_SECRET` | `dev-fileserver-jwt-secret-change-in-prod` | HMAC secret for single-use login tokens and session cookies |
-| `FILESERVER_MAX_UPLOAD_MB` | `100` | Maximum upload request size in MB |
+| `FILESERVER_MAX_UPLOAD_MB` | `2048` | Maximum single upload request size in MB |
+| `FILESERVER_DAILY_QUOTA_MB` | `5120` | Daily per-user upload and download quota in MB (`0` = unlimited) |
 | `FILESERVER_COOKIE_SECURE` | `false` | Set `true` when serving over HTTPS in production |
 
 ## Docker Container Example

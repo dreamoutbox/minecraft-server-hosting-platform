@@ -16,3 +16,22 @@ type UsedLoginToken struct {
 	JTI       string    `gorm:"primaryKey;type:varchar(64)"`
 	ExpiresAt time.Time `gorm:"index;not null"`
 }
+
+// TransferDirection identifies whether transferred bytes count against upload or download quota.
+type TransferDirection string
+
+const (
+	// TransferDirectionUpload counts bytes uploaded by a user.
+	TransferDirectionUpload TransferDirection = "upload"
+	// TransferDirectionDownload counts bytes downloaded by a user.
+	TransferDirectionDownload TransferDirection = "download"
+)
+
+// TransferUsage tracks per-user daily upload and download byte totals keyed by UTC day (YYYY-MM-DD).
+type TransferUsage struct {
+	ID            uint   `gorm:"primaryKey"`
+	UserID        uint   `gorm:"not null;uniqueIndex:idx_usage_user_day"`
+	Day           string `gorm:"type:varchar(10);not null;uniqueIndex:idx_usage_user_day;index"`
+	UploadBytes   int64  `gorm:"not null;default:0"`
+	DownloadBytes int64  `gorm:"not null;default:0"`
+}

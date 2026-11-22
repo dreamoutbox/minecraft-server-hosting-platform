@@ -103,6 +103,7 @@ services:
       FILESERVER_API_KEY: ${FILESERVER_API_KEY:-dev-worker-key}
       FILESERVER_JWT_SECRET: ${FILESERVER_JWT_SECRET:-dev-fileserver-jwt-secret-change-in-prod}
       FILESERVER_MAX_UPLOAD_MB: "${FILESERVER_MAX_UPLOAD_MB:-2048}"
+      FILESERVER_DAILY_QUOTA_MB: "${FILESERVER_DAILY_QUOTA_MB:-5120}"
     ports:
       - "9100:9100"
     volumes:
