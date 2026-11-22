@@ -38,3 +38,4 @@ docker run -d \
 - **TLS / HTTPS:** Terminate TLS with a reverse proxy (Caddy/Nginx) in front of `:9100` so login tokens and `fs_session` cookies are encrypted in transit, and set `FILESERVER_COOKIE_SECURE=true`.
 - **Host Registration:** Set `Host.FileServerBaseURL` to the node's public HTTPS URL (for example `https://files-node1.example.com`). Both the browser redirect and `cmd/server` management calls use this URL.
 - **Standalone Mode:** `fileserver` has no PostgreSQL dependency; `cmd/server` provisions users and permissions over HTTP using `FILESERVER_API_KEY`.
+- **Daily Transfer Quota:** `FILESERVER_DAILY_QUOTA_MB` (default `5120`, i.e., 5 GB) caps each user's daily uploads and daily downloads separately per UTC day (`00:00 UTC` reset). Transfers exceeding the remaining quota return HTTP `429 Too Many Requests`. Set to `0` to disable quota enforcement.

@@ -54,7 +54,7 @@ func setupFilesTestRouter(t *testing.T) (*gin.Engine, *store.Store, string, stri
 
 	secret := "files-handler-secret"
 	r := gin.New()
-	h := NewHandler(st, secret, 10*1024*1024, false)
+	h := NewHandler(st, secret, 10*1024*1024, 5*1024*1024*1024, false)
 	h.RegisterRoutes(r)
 
 	return r, st, secret, serverDir, otherDir
@@ -677,5 +677,136 @@ func TestMultiSelectDeleteAndZipDownload(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(serverDir, "two.txt")); err != nil {
 		t.Errorf("expected unselected two.txt to remain: %v", err)
+	}
+}
+
+func TestDailyQuotaEnforcementAndReset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tmp := t.TempDir()
+	mountsDir := filepath.Join(tmp, "mounts")
+	server1Dir := filepath.Join(mountsDir, "1")
+	server2Dir := filepath.Join(mountsDir, "2")
+	if err := os.MkdirAll(server1Dir, 0755); err != nil {
+		t.Fatalf("mkdir server1: %v", err)
+	}
+	if err := os.MkdirAll(server2Dir, 0755); err != nil {
+		t.Fatalf("mkdir server2: %v", err)
+	}
+
+	db, err := store.OpenSQLite(filepath.Join(tmp, "quota.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	st := store.New(db, mountsDir)
+	ctx := context.Background()
+	_, _, _ = st.EnsureUser(ctx, 1, "u1@example.com")
+	_, _, _ = st.EnsureUser(ctx, 2, "u2@example.com")
+	_, _ = st.Allow(ctx, 1, 1)
+	_, _ = st.Allow(ctx, 2, 2)
+
+	secret := "quota-secret"
+	const dailyQuota int64 = 100 // 100 bytes per day per direction
+	h := NewHandler(st, secret, 10*1024*1024, dailyQuota, false)
+	currentTime := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	h.nowFn = func() time.Time { return currentTime }
+
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	loginUser := func(uid uint, email string) *http.Cookie {
+		tok, _, _, err := authkit.GenerateLoginToken(uid, email, authkit.UserRoleUser, secret, 60*time.Second)
+		if err != nil {
+			t.Fatalf("GenerateLoginToken: %v", err)
+		}
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/login?token="+url.QueryEscape(tok), nil)
+		r.ServeHTTP(w, req)
+		c := extractSessionCookie(w.Result())
+		if c == nil {
+			t.Fatalf("expected cookie for user %d", uid)
+		}
+		return c
+	}
+
+	uploadFile := func(cookie *http.Cookie, dir, name string, data []byte) *httptest.ResponseRecorder {
+		body := &bytes.Buffer{}
+		mw := multipart.NewWriter(body)
+		_ = mw.WriteField("path", dir)
+		part, _ := mw.CreateFormFile("file", name)
+		_, _ = part.Write(data)
+		_ = mw.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodPost, "/upload", body)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		req.AddCookie(cookie)
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	c1 := loginUser(1, "u1@example.com")
+	c2 := loginUser(2, "u2@example.com")
+
+	// 1. Upload 60 bytes succeeds and records usage
+	w1 := uploadFile(c1, server1Dir, "a.txt", bytes.Repeat([]byte("a"), 60))
+	if w1.Code != http.StatusFound {
+		t.Fatalf("expected 302 for 60B upload, got %d (%s)", w1.Code, w1.Body.String())
+	}
+	u1, _ := st.GetUsage(ctx, 1, "2026-11-22")
+	if u1.UploadBytes != 60 {
+		t.Fatalf("expected 60 upload bytes recorded, got %d", u1.UploadBytes)
+	}
+
+	// 2. Upload 50 more bytes exceeds 100B quota -> 429 and partial file cleaned up
+	w2 := uploadFile(c1, server1Dir, "b.txt", bytes.Repeat([]byte("b"), 50))
+	if w2.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for over-quota upload, got %d (%s)", w2.Code, w2.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(server1Dir, "b.txt")); !os.IsNotExist(err) {
+		t.Fatalf("over-quota partial file b.txt should not exist on disk")
+	}
+
+	// 3. User 2 has independent quota and can still upload 60 bytes
+	wU2 := uploadFile(c2, server2Dir, "c.txt", bytes.Repeat([]byte("c"), 60))
+	if wU2.Code != http.StatusFound {
+		t.Fatalf("expected user 2 upload to succeed with independent quota, got %d", wU2.Code)
+	}
+
+	// 4. Download 60 bytes succeeds and records download usage
+	wDL1 := httptest.NewRecorder()
+	reqDL1, _ := http.NewRequest(http.MethodGet, "/download?path="+url.QueryEscape(filepath.Join(server1Dir, "a.txt")), nil)
+	reqDL1.AddCookie(c1)
+	r.ServeHTTP(wDL1, reqDL1)
+	if wDL1.Code != http.StatusOK || wDL1.Body.Len() != 60 {
+		t.Fatalf("expected 200 and 60B download, got code=%d len=%d", wDL1.Code, wDL1.Body.Len())
+	}
+	u1AfterDL, _ := st.GetUsage(ctx, 1, "2026-11-22")
+	if u1AfterDL.DownloadBytes != 60 {
+		t.Fatalf("expected 60 download bytes recorded, got %d", u1AfterDL.DownloadBytes)
+	}
+
+	// 5. Second 60B download exceeds 100B download quota -> 429
+	wDL2 := httptest.NewRecorder()
+	reqDL2, _ := http.NewRequest(http.MethodGet, "/download?path="+url.QueryEscape(filepath.Join(server1Dir, "a.txt")), nil)
+	reqDL2.AddCookie(c1)
+	r.ServeHTTP(wDL2, reqDL2)
+	if wDL2.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for over-quota download, got %d", wDL2.Code)
+	}
+
+	// 6. Browse shows quota badge in header
+	wBrowse := httptest.NewRecorder()
+	reqBrowse, _ := http.NewRequest(http.MethodGet, "/files?path="+url.QueryEscape(server1Dir), nil)
+	reqBrowse.AddCookie(c1)
+	r.ServeHTTP(wBrowse, reqBrowse)
+	if !strings.Contains(wBrowse.Body.String(), "Up 60 B / 100 B") || !strings.Contains(wBrowse.Body.String(), "Down 60 B / 100 B") {
+		t.Errorf("expected quota usage badge in UI, got: %s", wBrowse.Body.String())
+	}
+
+	// 7. Next UTC day resets quota
+	currentTime = currentTime.Add(24 * time.Hour)
+	wNextDay := uploadFile(c1, server1Dir, "nextday.txt", bytes.Repeat([]byte("n"), 80))
+	if wNextDay.Code != http.StatusFound {
+		t.Fatalf("expected upload to succeed after UTC day rollover, got %d (%s)", wNextDay.Code, wNextDay.Body.String())
 	}
 }

@@ -18,8 +18,8 @@
 
 - [x] determine if file is text file. and allow open to edit. disallow edit binary file or large file.
 
-- [ ] add checkbox for select multiple files.
+- [x] add checkbox for select multiple files.
 
-- [ ] upload file immediately open browser file dialog. no "Upload File" bootstrap modal.
+- [x] upload file immediately open browser file dialog. no "Upload File" bootstrap modal.
 
-- [ ] file manager limit upload/download files. quota size = 5GB/day (changable with ENV)
+- [x] file manager limit upload/download files. quota size = 5GB/day (changable with ENV)

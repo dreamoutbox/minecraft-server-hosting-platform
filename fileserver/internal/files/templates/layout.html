@@ -12,6 +12,13 @@
         <div class="container">
             <a class="navbar-brand fw-bold" href="/files">Node File Manager</a>
             <div class="ms-auto d-flex align-items-center gap-3">
+                {{if .Quota}}
+                {{if .Quota.Enabled}}
+                <span class="badge bg-secondary fw-normal" title="Daily transfer usage (resets 00:00 UTC)">
+                    Up {{.Quota.UploadUsed}} / {{.Quota.LimitFormatted}} &middot; Down {{.Quota.DownloadUsed}} / {{.Quota.LimitFormatted}}
+                </span>
+                {{end}}
+                {{end}}
                 {{if .UserEmail}}
                 <span class="text-white-50 small">{{.UserEmail}}</span>
                 <form method="POST" action="/logout" class="m-0">

@@ -36,17 +36,17 @@ Order: independent UI items first, then the quota feature (backend + store + con
   - [x] Add env var to `docker-compose.app.yml` (`FILESERVER_DAILY_QUOTA_MB`), `template.env`, and `docs/fileserver-deployment.md`.
 - Done when: `go test ./...` passes; no handler behavior change yet; env var documented.
 
-### Phase 4: Enforce quota on upload and download [STATUS: TODO]
+### Phase 4: Enforce quota on upload and download [STATUS: DONE]
 - Goal: block transfers beyond the daily limit and record usage.
 - Tasks:
-  - [ ] Pass `DailyQuotaBytes` into `files.NewHandler` (update `cmd/fileserver/main.go` and test constructors).
-  - [ ] Add a shared helper in `internal/files/` (`checkQuota` / `recordUsage`) used by `Upload`, `Download`, `DownloadZip`, and the Phase 2 multi-zip route.
-  - [ ] Upload: reject up front using `Content-Length` when it exceeds remaining quota; record actual bytes written after the copy completes (a streamed/chunked upload without `Content-Length` is capped by wrapping the body reader with the remaining quota).
-  - [ ] Download: check remaining quota before sending; for single files use the file size; for zips count bytes actually streamed via a counting writer, since the final size is unknown up front.
-  - [ ] Return HTTP 429 with a clear message (error page via `renderError` or redirect message) when exceeded.
-  - [ ] Show remaining/used quota in the page header (`Browse` passes it to the template).
-  - [ ] Tests in `handler_test.go`: under-quota succeeds and records bytes; over-quota upload and download rejected with 429; next-day reset; usage counted per user.
-  - [ ] Update `docs/fileserver-deployment.md` with behavior description.
+  - [x] Pass `DailyQuotaBytes` into `files.NewHandler` (update `cmd/fileserver/main.go` and test constructors).
+  - [x] Add a shared helper in `internal/files/` (`checkQuota` / `recordUsage`) used by `Upload`, `Download`, `DownloadZip`, and the Phase 2 multi-zip route.
+  - [x] Upload: reject up front using `Content-Length` when it exceeds remaining quota; record actual bytes written after the copy completes (a streamed/chunked upload without `Content-Length` is capped by wrapping the body reader with the remaining quota).
+  - [x] Download: check remaining quota before sending; for single files use the file size; for zips count bytes actually streamed via a counting writer, since the final size is unknown up front.
+  - [x] Return HTTP 429 with a clear message (error page via `renderError` or redirect message) when exceeded.
+  - [x] Show remaining/used quota in the page header (`Browse` passes it to the template).
+  - [x] Tests in `handler_test.go`: under-quota succeeds and records bytes; over-quota upload and download rejected with 429; next-day reset; usage counted per user.
+  - [x] Update `docs/fileserver-deployment.md` with behavior description.
 - Done when: `go test ./...` passes; manual check with `FILESERVER_DAILY_QUOTA_MB=1`: a 2MB upload is rejected, downloads stop after the limit, usage shows in the UI; tick the three items in `TODO-fileserver.md`.
 
 ## Unknowns, risks, assumptions

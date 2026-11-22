@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -39,31 +40,36 @@ type Breadcrumb struct {
 
 // Handler serves the browser login endpoint and file manager HTML UI.
 type Handler struct {
-	store          *store.Store
-	jwtSecret      string
-	maxUploadBytes int64
-	cookieSecure   bool
-	tmpl           map[string]*template.Template
+	store           *store.Store
+	jwtSecret       string
+	maxUploadBytes  int64
+	dailyQuotaBytes int64
+	cookieSecure    bool
+	nowFn           func() time.Time
+	tmpl            map[string]*template.Template
 }
 
 // NewHandler constructs a file manager HTTP handler.
 //
 // Arguments:
-//   - st: Fileserver SQLite store for permissions and token replay protection.
+//   - st: Fileserver SQLite store for permissions, usage tracking, and token replay protection.
 //   - jwtSecret: HMAC secret used to verify login tokens and sign session cookies.
 //   - maxUploadBytes: Maximum allowed multipart upload body size in bytes.
+//   - dailyQuotaBytes: Per-user daily upload/download quota in bytes (0 disables quota enforcement).
 //   - cookieSecure: Whether session cookies set the Secure attribute.
 //
 // Example usage:
 //
-//	h := files.NewHandler(st, cfg.JWTSecret, cfg.MaxUploadBytes, cfg.CookieSecure)
-func NewHandler(st *store.Store, jwtSecret string, maxUploadBytes int64, cookieSecure bool) *Handler {
+//	h := files.NewHandler(st, cfg.JWTSecret, cfg.MaxUploadBytes, cfg.DailyQuotaBytes, cfg.CookieSecure)
+func NewHandler(st *store.Store, jwtSecret string, maxUploadBytes int64, dailyQuotaBytes int64, cookieSecure bool) *Handler {
 	h := &Handler{
-		store:          st,
-		jwtSecret:      jwtSecret,
-		maxUploadBytes: maxUploadBytes,
-		cookieSecure:   cookieSecure,
-		tmpl:           make(map[string]*template.Template),
+		store:           st,
+		jwtSecret:       jwtSecret,
+		maxUploadBytes:  maxUploadBytes,
+		dailyQuotaBytes: dailyQuotaBytes,
+		cookieSecure:    cookieSecure,
+		nowFn:           time.Now,
+		tmpl:            make(map[string]*template.Template),
 	}
 	h.loadTemplates()
 	return h
@@ -189,6 +195,8 @@ func (h *Handler) Browse(c *gin.Context) {
 		return
 	}
 
+	quota := h.buildQuotaDisplay(c.Request.Context(), userID)
+
 	requestedPath := strings.TrimSpace(c.Query("path"))
 	if requestedPath == "" {
 		perms, err := h.store.ListUserPermissions(c.Request.Context(), userID)
@@ -198,6 +206,7 @@ func (h *Handler) Browse(c *gin.Context) {
 		}
 		h.renderView(c, http.StatusOK, "files.html", map[string]interface{}{
 			"Permissions": perms,
+			"Quota":       quota,
 		})
 		return
 	}
@@ -215,6 +224,7 @@ func (h *Handler) Browse(c *gin.Context) {
 			"ParentPath":  computeParentPath(perm.DirPath, rel),
 			"Breadcrumbs": buildBreadcrumbs(perm, rel),
 			"FlashError":  err.Error(),
+			"Quota":       quota,
 		})
 		return
 	}
@@ -230,6 +240,7 @@ func (h *Handler) Browse(c *gin.Context) {
 		"ParentPath":  computeParentPath(perm.DirPath, rel),
 		"Breadcrumbs": buildBreadcrumbs(perm, rel),
 		"Entries":     entries,
+		"Quota":       quota,
 	})
 }
 
@@ -267,9 +278,15 @@ func (h *Handler) Download(c *gin.Context) {
 	}
 	defer cleanup()
 
+	if _, _, ok := h.checkQuota(c, userID, store.TransferDirectionDownload, info.Size()); !ok {
+		return
+	}
+
 	fileName := filepath.Base(rel)
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
-	http.ServeContent(c.Writer, c.Request, fileName, info.ModTime(), f)
+	cw := &countingResponseWriter{ResponseWriter: c.Writer}
+	http.ServeContent(cw, c.Request, fileName, info.ModTime(), f)
+	h.recordUsage(c.Request.Context(), userID, store.TransferDirectionDownload, cw.written)
 }
 
 // DownloadZip streams a permitted directory and its subdirectories as a zip archive.
@@ -304,10 +321,14 @@ func (h *Handler) DownloadZip(c *gin.Context) {
 	}
 	defer cleanup()
 
+	if _, _, ok := h.checkQuota(c, userID, store.TransferDirectionDownload, 0); !ok {
+		return
+	}
+
 	c.Header("Content-Type", "application/zip")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", zipName))
 	c.Status(http.StatusOK)
-	h.streamZipResponse(c, writeZip, requestedPath)
+	h.streamZipResponse(c, userID, writeZip, requestedPath)
 }
 
 // DownloadZipMulti streams multiple selected files and directories as a single zip archive.
@@ -357,16 +378,22 @@ func (h *Handler) DownloadZipMulti(c *gin.Context) {
 	}
 	defer cleanup()
 
+	if _, _, ok := h.checkQuota(c, userID, store.TransferDirectionDownload, 0); !ok {
+		return
+	}
+
 	c.Header("Content-Type", "application/zip")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", zipName))
 	c.Status(http.StatusOK)
-	h.streamZipResponse(c, writeZip, "selected")
+	h.streamZipResponse(c, userID, writeZip, "selected")
 }
 
-func (h *Handler) streamZipResponse(c *gin.Context, writeZip func(io.Writer) error, label string) {
-	if err := writeZip(c.Writer); err != nil {
+func (h *Handler) streamZipResponse(c *gin.Context, userID uint, writeZip func(io.Writer) error, label string) {
+	cw := &countingWriter{w: c.Writer}
+	if err := writeZip(cw); err != nil {
 		log.Printf("[WARN] failed streaming zip for %s: %v", label, err)
 	}
+	h.recordUsage(c.Request.Context(), userID, store.TransferDirectionDownload, cw.n)
 }
 
 // Upload streams an uploaded multipart file directly into the authorized target directory
@@ -385,6 +412,15 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 
+	remaining, limited, ok := h.checkQuota(c, userID, store.TransferDirectionUpload, 0)
+	if !ok {
+		return
+	}
+	if limited && c.Request.ContentLength > 0 && c.Request.ContentLength > remaining+multipartOverheadAllowanceBytes {
+		h.renderQuotaExceeded(c, store.TransferDirectionUpload)
+		return
+	}
+
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, h.maxUploadBytes)
 
 	mr, err := c.Request.MultipartReader()
@@ -394,12 +430,13 @@ func (h *Handler) Upload(c *gin.Context) {
 	}
 
 	var (
-		dirPath     string
-		sawPath     bool
-		uploaded    bool
-		tmpFile     *os.File
-		tmpFilePath string
-		tmpFilename string
+		dirPath       string
+		sawPath       bool
+		uploaded      bool
+		uploadedBytes int64
+		tmpFile       *os.File
+		tmpFilePath   string
+		tmpFilename   string
 	)
 	defer func() {
 		if tmpFile != nil {
@@ -437,19 +474,25 @@ func (h *Handler) Upload(c *gin.Context) {
 				_ = part.Close()
 				continue
 			}
+			qr := &quotaLimitReader{r: part, limit: remaining, limited: limited}
 			if sawPath {
 				perm, rel, authErr := h.authorizePath(c, userID, dirPath)
 				if authErr != nil {
 					_ = part.Close()
 					return
 				}
-				saveErr := SaveUploadedFile(perm.DirPath, rel, filename, part)
+				saveErr := SaveUploadedFile(perm.DirPath, rel, filename, qr)
 				_ = part.Close()
 				if saveErr != nil {
+					if errors.Is(saveErr, errQuotaExceeded) {
+						h.renderQuotaExceeded(c, store.TransferDirectionUpload)
+						return
+					}
 					redirectUploadError(c, dirPath, saveErr)
 					return
 				}
 				uploaded = true
+				uploadedBytes = qr.read
 			} else {
 				// Fallback if client sent 'file' before 'path' in multipart body.
 				tmpFile, err = os.CreateTemp("", "fileserver-upload-*")
@@ -460,11 +503,16 @@ func (h *Handler) Upload(c *gin.Context) {
 				}
 				tmpFilePath = tmpFile.Name()
 				tmpFilename = filename
-				if _, copyErr := io.Copy(tmpFile, part); copyErr != nil {
+				if _, copyErr := io.Copy(tmpFile, qr); copyErr != nil {
 					_ = part.Close()
+					if errors.Is(copyErr, errQuotaExceeded) {
+						h.renderQuotaExceeded(c, store.TransferDirectionUpload)
+						return
+					}
 					redirectUploadError(c, dirPath, copyErr)
 					return
 				}
+				uploadedBytes = qr.read
 				_ = part.Close()
 			}
 
@@ -498,6 +546,7 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 
+	h.recordUsage(c.Request.Context(), userID, store.TransferDirectionUpload, uploadedBytes)
 	redirectWithMessage(c, dirPath, "File uploaded successfully", "")
 }
 
