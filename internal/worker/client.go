@@ -20,6 +20,8 @@ type Client interface {
 	ImportVolume(ctx context.Context, volumeID string, r io.Reader) error
 	UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*UploadVolumeBackupResponse, error)
 	RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error
+	UploadImageBackup(ctx context.Context, volumeID string, req UploadImageBackupRequest) (*UploadImageBackupResponse, error)
+	RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*RestoreImageBackupResponse, error)
 	CreateContainer(ctx context.Context, req CreateContainerRequest) (*CreateContainerResponse, error)
 	StopContainer(ctx context.Context, containerID string) error
 	DeleteContainer(ctx context.Context, containerID string) error
@@ -283,6 +285,74 @@ func (c *HTTPClient) RestoreVolumeBackup(ctx context.Context, volumeID string, p
 		return fmt.Errorf("restore volume backup failed with code %d: %s", resp.StatusCode, string(b))
 	}
 	return nil
+}
+
+// UploadImageBackup instructs the worker to tar.gz-split volumeID's ext4 .img file and upload parts via presigned PUT URLs.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - volumeID: Server/volume identifier.
+//   - req: Presigned PUT URLs, optional part size cap, and optional running container ID to quiesce.
+//
+// Example usage:
+//
+//	res, err := client.UploadImageBackup(ctx, "42", worker.UploadImageBackupRequest{PresignedURLs: putURLs})
+func (c *HTTPClient) UploadImageBackup(ctx context.Context, volumeID string, req UploadImageBackupRequest) (*UploadImageBackupResponse, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.doRequestWithClient(ctx, c.transferClient, http.MethodPost, fmt.Sprintf("/volumes/%s/image-backup", volumeID), bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("upload image backup failed with code %d: %s", resp.StatusCode, string(b))
+	}
+
+	var res UploadImageBackupResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("failed decoding upload image backup response: %w", err)
+	}
+	return &res, nil
+}
+
+// RestoreImageBackup instructs the worker to download and merge tar.gz parts from presigned GET URLs to restore volumeID's ext4 .img file.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - volumeID: Server/volume identifier.
+//   - presignedURLs: Ordered presigned S3 GET URLs for parts 1..N.
+//
+// Example usage:
+//
+//	res, err := client.RestoreImageBackup(ctx, "42", getURLs)
+func (c *HTTPClient) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*RestoreImageBackupResponse, error) {
+	payload, err := json.Marshal(RestoreImageBackupRequest{PresignedURLs: presignedURLs})
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.doRequestWithClient(ctx, c.transferClient, http.MethodPost, fmt.Sprintf("/volumes/%s/image-restore", volumeID), bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("restore image backup failed with code %d: %s", resp.StatusCode, string(b))
+	}
+
+	var res RestoreImageBackupResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("failed decoding restore image backup response: %w", err)
+	}
+	return &res, nil
 }
 
 // CreateContainer launches a container on the host with configured resources and port forwarding.

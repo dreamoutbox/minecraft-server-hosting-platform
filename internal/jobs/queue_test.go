@@ -88,6 +88,14 @@ func (q *queueTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID stri
 	return nil
 }
 
+func (q *queueTestWorker) UploadImageBackup(ctx context.Context, volumeID string, req worker.UploadImageBackupRequest) (*worker.UploadImageBackupResponse, error) {
+	return &worker.UploadImageBackupResponse{}, nil
+}
+
+func (q *queueTestWorker) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*worker.RestoreImageBackupResponse, error) {
+	return &worker.RestoreImageBackupResponse{}, nil
+}
+
 func (q *queueTestWorker) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

@@ -63,6 +63,12 @@ func (s *spyVolumeManager) UploadVolumeBackup(ctx context.Context, volumeID stri
 func (s *spyVolumeManager) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
 	return nil
 }
+func (s *spyVolumeManager) UploadImageBackup(ctx context.Context, volumeID string, presignedURLs []string, maxPartBytes int64) (*worker.UploadImageBackupResponse, error) {
+	return &worker.UploadImageBackupResponse{}, nil
+}
+func (s *spyVolumeManager) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (int64, error) {
+	return 0, nil
+}
 func (s *spyVolumeManager) GetVolumePath(volumeID string) (string, bool) { return "", false }
 
 func TestShutdownWorkerOrder(t *testing.T) {

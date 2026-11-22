@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -363,6 +364,86 @@ func (h *Handler) RestoreVolumeBackup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "restored", "volume_id": id})
 }
 
+// UploadImageBackup quiesces a running server (save-off, save-all, sync), tar.gz-splits its ext4
+// .img file into <= 1 GiB parts, and uploads each part to the provided presigned S3 PUT URLs.
+//
+// Arguments:
+//   - c: Active Gin request context with URL param 'id' and UploadImageBackupRequest JSON body.
+//
+// Example usage:
+//
+//	POST /volumes/:id/image-backup
+func (h *Handler) UploadImageBackup(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing volume id"})
+		return
+	}
+
+	var req UploadImageBackupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid image backup request: " + err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+	if req.ContainerID != "" {
+		// Pause world saves and flush pending chunks before reading the live ext4 image.
+		if _, err := h.containers.ExecCommand(ctx, req.ContainerID, "1000", "save-off"); err != nil {
+			log.Printf("[WARN] save-off failed for container %s before image backup: %v", req.ContainerID, err)
+		} else {
+			defer func() {
+				if _, err := h.containers.ExecCommand(context.Background(), req.ContainerID, "1000", "save-on"); err != nil {
+					log.Printf("[WARN] save-on failed for container %s after image backup: %v", req.ContainerID, err)
+				}
+			}()
+		}
+		if _, err := h.containers.ExecCommand(ctx, req.ContainerID, "1000", "save-all"); err != nil {
+			log.Printf("[WARN] save-all failed for container %s before image backup: %v", req.ContainerID, err)
+		}
+	}
+	unix.Sync()
+
+	res, err := h.volumes.UploadImageBackup(ctx, id, req.PresignedURLs, req.MaxPartBytes)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
+// RestoreImageBackup downloads ordered tar.gz parts from presigned GET URLs, merges and extracts
+// them, and atomically replaces the server's ext4 .img file.
+//
+// Arguments:
+//   - c: Active Gin request context with URL param 'id' and RestoreImageBackupRequest JSON body.
+//
+// Example usage:
+//
+//	POST /volumes/:id/image-restore
+func (h *Handler) RestoreImageBackup(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing volume id"})
+		return
+	}
+
+	var req RestoreImageBackupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid image restore request: " + err.Error()})
+		return
+	}
+
+	sizeBytes, err := h.volumes.RestoreImageBackup(c.Request.Context(), id, req.PresignedURLs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, RestoreImageBackupResponse{SizeBytes: sizeBytes})
+}
+
 // GetStatus reports host health, active container count, and disk capacity.
 //
 // Arguments:
@@ -442,5 +523,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, apiKey string) {
 		authorized.POST("/volumes/:id/import", h.ImportVolume)
 		authorized.POST("/volumes/:id/backup-upload", h.UploadVolumeBackup)
 		authorized.POST("/volumes/:id/backup-restore", h.RestoreVolumeBackup)
+		authorized.POST("/volumes/:id/image-backup", h.UploadImageBackup)
+		authorized.POST("/volumes/:id/image-restore", h.RestoreImageBackup)
 	}
 }

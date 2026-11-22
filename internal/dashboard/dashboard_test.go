@@ -82,6 +82,14 @@ func (d *dashboardTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID 
 	return nil
 }
 
+func (d *dashboardTestWorker) UploadImageBackup(ctx context.Context, volumeID string, req worker.UploadImageBackupRequest) (*worker.UploadImageBackupResponse, error) {
+	return &worker.UploadImageBackupResponse{}, nil
+}
+
+func (d *dashboardTestWorker) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*worker.RestoreImageBackupResponse, error) {
+	return &worker.RestoreImageBackupResponse{}, nil
+}
+
 func (d *dashboardTestWorker) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

@@ -88,3 +88,27 @@ type UploadVolumeBackupResponse struct {
 type RestoreVolumeBackupRequest struct {
 	PresignedURL string `json:"presigned_url" binding:"required"`
 }
+
+// UploadImageBackupRequest instructs the worker to tar.gz and split a server's ext4 .img file and upload parts via presigned PUT URLs.
+type UploadImageBackupRequest struct {
+	PresignedURLs []string `json:"presigned_urls" binding:"required,min=1"`
+	MaxPartBytes  int64    `json:"max_part_bytes,omitempty"`
+	ContainerID   string   `json:"container_id,omitempty"`
+}
+
+// UploadImageBackupResponse reports how many parts and bytes were uploaded for an ext4 image backup.
+type UploadImageBackupResponse struct {
+	PartsUploaded int     `json:"parts_uploaded"`
+	PartSizes     []int64 `json:"part_sizes"`
+	TotalBytes    int64   `json:"total_bytes"`
+}
+
+// RestoreImageBackupRequest instructs the worker to download, merge, decompress, and atomically restore a server's ext4 .img file.
+type RestoreImageBackupRequest struct {
+	PresignedURLs []string `json:"presigned_urls" binding:"required,min=1"`
+}
+
+// RestoreImageBackupResponse reports the restored ext4 .img file size in bytes.
+type RestoreImageBackupResponse struct {
+	SizeBytes int64 `json:"size_bytes"`
+}

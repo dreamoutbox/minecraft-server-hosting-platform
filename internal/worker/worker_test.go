@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -22,7 +25,9 @@ import (
 
 // mockContainerManager simulates container operations in testing environments.
 type mockContainerManager struct {
-	containers map[string]ContainerStatus
+	mu           sync.Mutex
+	containers   map[string]ContainerStatus
+	execCommands []string
 }
 
 func newMockContainerManager() *mockContainerManager {
@@ -73,6 +78,9 @@ func (m *mockContainerManager) GetLogs(ctx context.Context, containerID string, 
 }
 
 func (m *mockContainerManager) ExecCommand(ctx context.Context, containerID string, user string, command string) (*ExecCommandResponse, error) {
+	m.mu.Lock()
+	m.execCommands = append(m.execCommands, command)
+	m.mu.Unlock()
 	return &ExecCommandResponse{
 		ContainerID: containerID,
 		Command:     command,
@@ -701,5 +709,163 @@ func TestPresignedVolumeBackupUploadAndRestore(t *testing.T) {
 	gotLegacy, err := os.ReadFile(filepath.Join(mountDir, "server.properties"))
 	if err != nil || string(gotLegacy) != string(legacyContent) {
 		t.Fatalf("legacy restored server.properties = %q (err=%v), want %q", string(gotLegacy), err, string(legacyContent))
+	}
+}
+
+func TestPresignedImageBackupMultiPartAndRestore(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	vm := NewLocalVolumeManager(tmpDir, false)
+	cm := newMockContainerManager()
+	handler := NewHandler(cm, vm, 10, tmpDir)
+	router := gin.New()
+	handler.RegisterRoutes(router, "worker-secret")
+
+	workerSrv := httptest.NewServer(router)
+	defer workerSrv.Close()
+	wClient := NewClient(workerSrv.URL, "worker-secret")
+
+	// Create an incompressible 200 KiB .img file so 64 KiB part cap guarantees multiple parts.
+	imagesDir := filepath.Join(tmpDir, "images")
+	if err := os.MkdirAll(imagesDir, 0755); err != nil {
+		t.Fatalf("failed creating images dir: %v", err)
+	}
+	imgPath := filepath.Join(imagesDir, "77.img")
+	originalData := make([]byte, 200*1024)
+	if _, err := rand.Read(originalData); err != nil {
+		t.Fatalf("failed generating random image bytes: %v", err)
+	}
+	if err := os.WriteFile(imgPath, originalData, 0644); err != nil {
+		t.Fatalf("failed writing .img file: %v", err)
+	}
+	origHash := sha256.Sum256(originalData)
+
+	var mu sync.Mutex
+	objects := make(map[string][]byte)
+	s3Srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.Method {
+		case http.MethodPut:
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			objects[r.URL.Path] = body
+			w.WriteHeader(http.StatusOK)
+		case http.MethodGet:
+			data, ok := objects[r.URL.Path]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(data)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+	defer s3Srv.Close()
+
+	// Pre-mint 6 presigned PUT URLs (more than needed; unused ones stay absent in S3).
+	var putURLs []string
+	for i := 1; i <= 6; i++ {
+		putURLs = append(putURLs, fmt.Sprintf("%s/image-backups/server-77/snap1/part-%03d.tar.gz", s3Srv.URL, i))
+	}
+
+	const partCap int64 = 64 * 1024
+	upResp, err := wClient.UploadImageBackup(ctx, "77", UploadImageBackupRequest{
+		PresignedURLs: putURLs,
+		MaxPartBytes:  partCap,
+		ContainerID:   "ctr-77",
+	})
+	if err != nil {
+		t.Fatalf("UploadImageBackup failed: %v", err)
+	}
+	if upResp.PartsUploaded < 3 {
+		t.Fatalf("expected >= 3 parts for 200 KiB incompressible image with 64 KiB cap, got %d", upResp.PartsUploaded)
+	}
+	if len(upResp.PartSizes) != upResp.PartsUploaded {
+		t.Fatalf("PartSizes len %d != PartsUploaded %d", len(upResp.PartSizes), upResp.PartsUploaded)
+	}
+	var sumSizes int64
+	for i, sz := range upResp.PartSizes {
+		if sz <= 0 || sz > partCap {
+			t.Errorf("part %d size %d out of bounds (0, %d]", i+1, sz, partCap)
+		}
+		sumSizes += sz
+	}
+	if sumSizes != upResp.TotalBytes {
+		t.Errorf("sum of part sizes %d != TotalBytes %d", sumSizes, upResp.TotalBytes)
+	}
+
+	// Verify quiesce command ordering on running container
+	wantCmds := []string{"save-off", "save-all", "save-on"}
+	cm.mu.Lock()
+	gotCmds := append([]string(nil), cm.execCommands...)
+	cm.mu.Unlock()
+	if !reflect.DeepEqual(gotCmds, wantCmds) {
+		t.Errorf("quiesce commands = %v, want %v", gotCmds, wantCmds)
+	}
+
+	// Overwrite live .img with garbage to simulate corruption
+	corrupted := []byte("corrupted-disk-image")
+	if err := os.WriteFile(imgPath, corrupted, 0644); err != nil {
+		t.Fatalf("failed corrupting image: %v", err)
+	}
+
+	// Verify corrupt download does NOT clobber existing .img
+	mu.Lock()
+	objects["/image-backups/server-77/broken/part-001.tar.gz"] = []byte("not-a-gzip-archive")
+	mu.Unlock()
+	if _, err := wClient.RestoreImageBackup(ctx, "77", []string{s3Srv.URL + "/image-backups/server-77/broken/part-001.tar.gz"}); err == nil {
+		t.Fatal("expected RestoreImageBackup to fail on corrupt archive")
+	}
+	stillCorrupted, _ := os.ReadFile(imgPath)
+	if !bytes.Equal(stillCorrupted, corrupted) {
+		t.Fatal("failed RestoreImageBackup modified existing .img file")
+	}
+
+	// Restore valid multi-part archive via presigned GET URLs
+	usedURLs := putURLs[:upResp.PartsUploaded]
+	restoreResp, err := wClient.RestoreImageBackup(ctx, "77", usedURLs)
+	if err != nil {
+		t.Fatalf("RestoreImageBackup failed: %v", err)
+	}
+	if restoreResp.SizeBytes != int64(len(originalData)) {
+		t.Errorf("restored SizeBytes = %d, want %d", restoreResp.SizeBytes, len(originalData))
+	}
+
+	restoredBytes, err := os.ReadFile(imgPath)
+	if err != nil {
+		t.Fatalf("failed reading restored image: %v", err)
+	}
+	restoredHash := sha256.Sum256(restoredBytes)
+	if restoredHash != origHash {
+		t.Fatalf("restored .img SHA-256 mismatch: got %x, want %x", restoredHash, origHash)
+	}
+
+	// Also verify single-part sparse/compressible .img fits in 1 part
+	smallImgPath := filepath.Join(imagesDir, "78.img")
+	compressible := bytes.Repeat([]byte("A"), 256*1024)
+	if err := os.WriteFile(smallImgPath, compressible, 0644); err != nil {
+		t.Fatalf("failed writing compressible image: %v", err)
+	}
+	singlePut := []string{
+		s3Srv.URL + "/image-backups/server-78/snap1/part-001.tar.gz",
+		s3Srv.URL + "/image-backups/server-78/snap1/part-002.tar.gz",
+	}
+	singleResp, err := wClient.UploadImageBackup(ctx, "78", UploadImageBackupRequest{
+		PresignedURLs: singlePut,
+		MaxPartBytes:  partCap,
+	})
+	if err != nil {
+		t.Fatalf("single-part UploadImageBackup failed: %v", err)
+	}
+	if singleResp.PartsUploaded != 1 {
+		t.Errorf("expected 1 part for highly compressible 256 KiB image, got %d", singleResp.PartsUploaded)
 	}
 }

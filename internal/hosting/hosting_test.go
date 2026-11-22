@@ -78,6 +78,14 @@ func (m *mockWorkerClient) RestoreVolumeBackup(ctx context.Context, volumeID str
 	return nil
 }
 
+func (m *mockWorkerClient) UploadImageBackup(ctx context.Context, volumeID string, req worker.UploadImageBackupRequest) (*worker.UploadImageBackupResponse, error) {
+	return &worker.UploadImageBackupResponse{}, nil
+}
+
+func (m *mockWorkerClient) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*worker.RestoreImageBackupResponse, error) {
+	return &worker.RestoreImageBackupResponse{}, nil
+}
+
 func (m *mockWorkerClient) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
 	id := fmt.Sprintf("ctr-server-%d", req.ServerID)
 	m.createdContainers[id] = req
