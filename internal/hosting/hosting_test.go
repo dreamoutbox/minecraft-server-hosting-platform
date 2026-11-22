@@ -445,6 +445,9 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 	_ = domain.SeedPlans(db)
 
 	var callOrder []string
+	var lastEnsureReq fsclient.EnsureUserRequest
+	var lastPermReq fsclient.PermissionRequest
+	var lastTokenPath string
 	var revokedServerID string
 	var failRevoke bool
 
@@ -456,12 +459,15 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/users":
 			callOrder = append(callOrder, "ensure_user")
-			_ = json.NewEncoder(w).Encode(fsclient.EnsureUserResponse{ID: 1, Email: "u@example.com", Created: true})
+			_ = json.NewDecoder(r.Body).Decode(&lastEnsureReq)
+			_ = json.NewEncoder(w).Encode(fsclient.EnsureUserResponse{ID: lastEnsureReq.ID, Email: lastEnsureReq.Email, Created: true})
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/permissions":
 			callOrder = append(callOrder, "allow")
+			_ = json.NewDecoder(r.Body).Decode(&lastPermReq)
 			_ = json.NewEncoder(w).Encode(fsclient.PermissionResponse{Allowed: true})
 		case r.Method == http.MethodPost && r.URL.Path[len(r.URL.Path)-len("/login-token"):] == "/login-token":
 			callOrder = append(callOrder, "login_token")
+			lastTokenPath = r.URL.Path
 			_ = json.NewEncoder(w).Encode(fsclient.LoginTokenResponse{Token: "tok-abc", ExpiresAt: time.Now().Add(time.Minute)})
 		case r.Method == http.MethodDelete && r.URL.Path != "":
 			if failRevoke {
@@ -495,8 +501,16 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 		PasswordHash: "hashed",
 		Role:         domain.UserRoleUser,
 	}
+	adminUser := domain.User{
+		Email:        fmt.Sprintf("fs-admin-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hashed",
+		Role:         domain.UserRoleAdmin,
+	}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&adminUser).Error; err != nil {
+		t.Fatalf("create admin user: %v", err)
 	}
 
 	var plan domain.Plan
@@ -515,7 +529,7 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 		t.Fatalf("CreateServer: %v", err)
 	}
 
-	openURL, err := svc.OpenFileManagerURL(context.Background(), user.ID, srv.ID)
+	openURL, err := svc.OpenFileManagerURL(context.Background(), user.ID, srv.ID, false)
 	if err != nil {
 		t.Fatalf("OpenFileManagerURL: %v", err)
 	}
@@ -532,6 +546,31 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 		if callOrder[i] != expectedCalls[i] {
 			t.Errorf("call %d: expected %s, got %s", i, expectedCalls[i], callOrder[i])
 		}
+	}
+
+	// Non-owner without allowNonOwner must be rejected.
+	if _, err := svc.OpenFileManagerURL(context.Background(), adminUser.ID, srv.ID, false); err == nil {
+		t.Fatalf("expected unauthorized error when allowNonOwner is false")
+	}
+
+	// Staff/admin with allowNonOwner=true must provision and grant access to the admin user, not the server owner.
+	callOrder = nil
+	adminOpenURL, err := svc.OpenFileManagerURL(context.Background(), adminUser.ID, srv.ID, true)
+	if err != nil {
+		t.Fatalf("OpenFileManagerURL (admin): %v", err)
+	}
+	if len(adminOpenURL) <= len(expectedPrefix) || adminOpenURL[:len(expectedPrefix)] != expectedPrefix {
+		t.Fatalf("unexpected admin openURL: %s", adminOpenURL)
+	}
+	if lastEnsureReq.ID != adminUser.ID || lastEnsureReq.Email != adminUser.Email {
+		t.Errorf("expected fileserver EnsureUser for admin (%d, %s), got (%d, %s)", adminUser.ID, adminUser.Email, lastEnsureReq.ID, lastEnsureReq.Email)
+	}
+	if lastPermReq.UserID != adminUser.ID || lastPermReq.ServerID != srv.ID {
+		t.Errorf("expected fileserver Allow(%d, %d), got (%d, %d)", adminUser.ID, srv.ID, lastPermReq.UserID, lastPermReq.ServerID)
+	}
+	expectedTokenPath := fmt.Sprintf("/api/v1/users/%d/login-token", adminUser.ID)
+	if lastTokenPath != expectedTokenPath {
+		t.Errorf("expected login token path %s, got %s", expectedTokenPath, lastTokenPath)
 	}
 
 	// Verify DeleteServer revokes fileserver permissions and tolerates fileserver errors.
@@ -555,4 +594,5 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 
 	db.Delete(&host)
 	db.Delete(&user)
+	db.Delete(&adminUser)
 }

@@ -19,14 +19,14 @@ Build & test commands:
   - [x] Add tests in `internal/dashboard/admin_test.go` (and/or `internal/dashboard/dashboard_test.go`) verifying both staff and admin can trigger backup, restore, send console command, update settings, start/stop, and delete another user's server while a regular non-owner user is still rejected.
 - Done when: `go vet ./...`, `go test -p 1 ./...`, and `go build ./cmd/...` pass; tests cover staff and admin performing all listed server actions on another user's server and regular non-owner denial remains enforced.
 
-### Phase 2: Fix staff/admin Manage Files access on another user's server [STATUS: TODO]
+### Phase 2: Fix staff/admin Manage Files access on another user's server [STATUS: DONE]
 - Goal: Allow staff and admin users clicking "Manage Files" on another user's server to provision themselves on the node fileserver, receive directory permission for that server, and log in as themselves.
 - Tasks:
-  - [ ] Update `hosting.Service.OpenFileManagerURL` in `internal/hosting/service.go` to accept the requesting `actorUserID` and an `allowNonOwner bool` (staff/admin) flag:
+  - [x] Update `hosting.Service.OpenFileManagerURL` in `internal/hosting/service.go` to accept the requesting `actorUserID` and an `allowNonOwner bool` (staff/admin) flag:
     - Bypass ownership check (`getServerAndHost(ctx, 0, serverID)`) when `allowNonOwner` is true; otherwise enforce ownership (`getServerAndHost(ctx, actorUserID, serverID)`).
     - Load `actorUserID` (not `server.UserID`) from `users` so `fsClient.EnsureUser`, `fsClient.Allow(ctx, actor.ID, server.ID)`, and `fsClient.CreateLoginToken(ctx, actor.ID)` grant and authenticate the requesting staff/admin user directly on the fileserver.
-  - [ ] Update `dashboard.Service.OpenFileManager` in `internal/dashboard/dashboard.go` to pass `userID` and `authkit.GetUserRoleFromContext(c).IsStaffOrAdmin()`.
-  - [ ] Update existing `TestOpenFileManagerURLAndRevokeOnDelete` in `internal/hosting/hosting_test.go` and add tests in `internal/hosting/hosting_test.go` and `internal/dashboard/admin_test.go` verifying:
+  - [x] Update `dashboard.Service.OpenFileManager` in `internal/dashboard/dashboard.go` to pass `userID` and `authkit.GetUserRoleFromContext(c).IsStaffOrAdmin()`.
+  - [x] Update existing `TestOpenFileManagerURLAndRevokeOnDelete` in `internal/hosting/hosting_test.go` and add tests in `internal/hosting/hosting_test.go` and `internal/dashboard/admin_test.go` verifying:
     - Staff and admin opening Manage Files on another user's server call fileserver `EnsureUser`, `Allow`, and `CreateLoginToken` with the **requesting staff/admin's** user ID/email and the target `server.ID`.
     - Regular non-owner user is still rejected with `unauthorized access to server`.
 - Done when: `go vet ./...`, `go test -p 1 ./...`, and `go build ./cmd/...` pass; mock fileserver assertions confirm staff/admin receives permission for the target server and redirects with a valid login token.

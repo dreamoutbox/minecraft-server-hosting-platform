@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/authkit"
+	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
@@ -567,5 +569,118 @@ func TestStaffAndAdminCrossUserServerActions(t *testing.T) {
 				t.Errorf("%s expected non-zero UserID on queued delete job", tc.label)
 			}
 		})
+	}
+}
+
+func TestStaffAndAdminOpenFileManagerOnOtherUserServer(t *testing.T) {
+	r, dashSvc, _ := setupDashboardTestEnv(t)
+	if r == nil {
+		return
+	}
+
+	var ensuredUsers []fsclient.EnsureUserRequest
+	var grantedPerms []fsclient.PermissionRequest
+	var tokenPaths []string
+	fakeFS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodPut && req.URL.Path == "/api/v1/users":
+			var body fsclient.EnsureUserRequest
+			_ = json.NewDecoder(req.Body).Decode(&body)
+			ensuredUsers = append(ensuredUsers, body)
+			_ = json.NewEncoder(w).Encode(fsclient.EnsureUserResponse{ID: body.ID, Email: body.Email, Created: true})
+		case req.Method == http.MethodPut && req.URL.Path == "/api/v1/permissions":
+			var body fsclient.PermissionRequest
+			_ = json.NewDecoder(req.Body).Decode(&body)
+			grantedPerms = append(grantedPerms, body)
+			_ = json.NewEncoder(w).Encode(fsclient.PermissionResponse{UserID: body.UserID, ServerID: body.ServerID, Allowed: true})
+		case req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/login-token"):
+			tokenPaths = append(tokenPaths, req.URL.Path)
+			_ = json.NewEncoder(w).Encode(fsclient.LoginTokenResponse{Token: "staff-admin-tok", ExpiresAt: time.Now().Add(time.Minute)})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer fakeFS.Close()
+
+	suffix := time.Now().UnixNano()
+	owner := domain.User{Email: fmt.Sprintf("fs-owner-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}
+	other := domain.User{Email: fmt.Sprintf("fs-other-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}
+	staff := domain.User{Email: fmt.Sprintf("fs-staff-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleStaff}
+	admin := domain.User{Email: fmt.Sprintf("fs-admin-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleAdmin}
+	for _, u := range []*domain.User{&owner, &other, &staff, &admin} {
+		if err := dashSvc.db.Create(u).Error; err != nil {
+			t.Fatalf("failed creating user: %v", err)
+		}
+	}
+
+	var plan domain.Plan
+	if err := dashSvc.db.Order("id asc").First(&plan).Error; err != nil {
+		t.Fatalf("expected seeded plan: %v", err)
+	}
+	var host domain.Host
+	if err := dashSvc.db.First(&host).Error; err != nil {
+		t.Fatalf("expected seeded host: %v", err)
+	}
+	prevFSURL := host.FileServerBaseURL
+	dashSvc.db.Model(&domain.Host{}).Where("id = ?", host.ID).Update("file_server_base_url", fakeFS.URL)
+
+	srv := domain.Server{
+		UserID:        owner.ID,
+		PlanID:        plan.ID,
+		HostID:        host.ID,
+		Name:          fmt.Sprintf("FSServer-%d", suffix),
+		Status:        domain.ServerStatusRunning,
+		Port:          25755,
+		ServerType:    domain.ServerTypeVanilla,
+		ServerVersion: "LATEST",
+	}
+	if err := dashSvc.db.Create(&srv).Error; err != nil {
+		t.Fatalf("failed creating server: %v", err)
+	}
+
+	t.Cleanup(func() {
+		dashSvc.db.Model(&domain.Host{}).Where("id = ?", host.ID).Update("file_server_base_url", prevFSURL)
+		dashSvc.db.Delete(&domain.Server{}, srv.ID)
+		dashSvc.db.Delete(&domain.User{}, []uint{owner.ID, other.ID, staff.ID, admin.ID})
+	})
+
+	otherTokens, _ := authkit.GenerateTokenPair(other.ID, other.Email, other.Role, dashSvc.jwtSecret)
+	staffTokens, _ := authkit.GenerateTokenPair(staff.ID, staff.Email, staff.Role, dashSvc.jwtSecret)
+	adminTokens, _ := authkit.GenerateTokenPair(admin.ID, admin.Email, admin.Role, dashSvc.jwtSecret)
+
+	// Non-owner regular user must be rejected.
+	wDenied := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/files/open", srv.ID), &http.Cookie{Name: "token", Value: otherTokens.AccessToken}, nil)
+	if wDenied.Code != http.StatusFound || !strings.Contains(wDenied.Header().Get("Location"), "error=unauthorized+access+to+server") {
+		t.Fatalf("expected unauthorized redirect for non-owner, got code=%d loc=%s", wDenied.Code, wDenied.Header().Get("Location"))
+	}
+
+	// Both staff and admin receive fileserver access provisioned under their own account.
+	for _, actor := range []struct {
+		label string
+		user  domain.User
+		token string
+	}{
+		{"staff", staff, staffTokens.AccessToken},
+		{"admin", admin, adminTokens.AccessToken},
+	} {
+		ensuredUsers = nil
+		grantedPerms = nil
+		tokenPaths = nil
+
+		w := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/files/open", srv.ID), &http.Cookie{Name: "token", Value: actor.token}, nil)
+		loc := w.Header().Get("Location")
+		if w.Code != http.StatusFound || !strings.HasPrefix(loc, fakeFS.URL+"/login?") || !strings.Contains(loc, "token=staff-admin-tok") {
+			t.Fatalf("%s open file manager failed: code=%d loc=%s", actor.label, w.Code, loc)
+		}
+		if len(ensuredUsers) != 1 || ensuredUsers[0].ID != actor.user.ID || ensuredUsers[0].Email != actor.user.Email {
+			t.Errorf("%s expected EnsureUser(%d, %s), got %+v", actor.label, actor.user.ID, actor.user.Email, ensuredUsers)
+		}
+		if len(grantedPerms) != 1 || grantedPerms[0].UserID != actor.user.ID || grantedPerms[0].ServerID != srv.ID {
+			t.Errorf("%s expected Allow(%d, %d), got %+v", actor.label, actor.user.ID, srv.ID, grantedPerms)
+		}
+		expectedTokPath := fmt.Sprintf("/api/v1/users/%d/login-token", actor.user.ID)
+		if len(tokenPaths) != 1 || tokenPaths[0] != expectedTokPath {
+			t.Errorf("%s expected login token path %s, got %v", actor.label, expectedTokPath, tokenPaths)
+		}
 	}
 }

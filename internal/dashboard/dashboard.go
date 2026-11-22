@@ -937,13 +937,14 @@ func serverRedirectURL(serverID uint, subpath, flashKey, message string) string 
 //	GET /dashboard/servers/:id/files/open
 func (s *Service) OpenFileManager(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
+	allowNonOwner := authkit.GetUserRoleFromContext(c).IsStaffOrAdmin()
 	serverIDVal, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || serverIDVal == 0 {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
 		return
 	}
 
-	targetURL, err := s.hostingSvc.OpenFileManagerURL(c.Request.Context(), userID, uint(serverIDVal))
+	targetURL, err := s.hostingSvc.OpenFileManagerURL(c.Request.Context(), userID, uint(serverIDVal), allowNonOwner)
 	if err != nil {
 		c.Redirect(http.StatusFound, fmt.Sprintf("/dashboard/servers/%d?error=%s", serverIDVal, url.QueryEscape(err.Error())))
 		return

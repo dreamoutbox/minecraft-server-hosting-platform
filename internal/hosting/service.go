@@ -573,19 +573,24 @@ func buildContainerRequest(server *domain.Server, plan *domain.Plan, mountPath s
 	}
 }
 
-// OpenFileManagerURL provisions the user and directory permission on the target node's
+// OpenFileManagerURL provisions the requesting user and directory permission on the target node's
 // fileserver, requests a short-lived login token, and constructs the redirect URL.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
-//   - userID: Account ID requesting file manager access.
+//   - actorUserID: Account ID requesting file manager access (provisioned on the fileserver).
 //   - serverID: Target game server ID.
+//   - allowNonOwner: When true (staff/admin), bypasses server ownership check and grants access to actorUserID.
 //
 // Example usage:
 //
-//	redirectURL, err := svc.OpenFileManagerURL(ctx, user.ID, 42)
-func (s *Service) OpenFileManagerURL(ctx context.Context, userID uint, serverID uint) (string, error) {
-	server, host, err := s.getServerAndHost(ctx, userID, serverID)
+//	redirectURL, err := svc.OpenFileManagerURL(ctx, user.ID, 42, false)
+func (s *Service) OpenFileManagerURL(ctx context.Context, actorUserID uint, serverID uint, allowNonOwner bool) (string, error) {
+	ownerCheckID := actorUserID
+	if allowNonOwner {
+		ownerCheckID = 0
+	}
+	server, host, err := s.getServerAndHost(ctx, ownerCheckID, serverID)
 	if err != nil {
 		return "", err
 	}
@@ -594,9 +599,13 @@ func (s *Service) OpenFileManagerURL(ctx context.Context, userID uint, serverID 
 		return "", fmt.Errorf("fileserver URL is not configured for host %s", host.Hostname)
 	}
 
+	targetUserID := actorUserID
+	if targetUserID == 0 {
+		targetUserID = server.UserID
+	}
 	var user domain.User
-	if err := s.db.WithContext(ctx).First(&user, server.UserID).Error; err != nil {
-		return "", fmt.Errorf("failed loading server owner: %w", err)
+	if err := s.db.WithContext(ctx).First(&user, targetUserID).Error; err != nil {
+		return "", fmt.Errorf("failed loading fileserver user: %w", err)
 	}
 
 	fsClient := s.fileServerClientFactory(host.FileServerBaseURL, host.APIKey)
