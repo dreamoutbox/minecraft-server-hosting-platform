@@ -97,16 +97,16 @@ Architecture decisions locked in before implementation:
   - [x] Add unit tests in `internal/backup/backup_test.go` and `internal/jobs/queue_test.go` covering CRON enqueueing of running+stopped servers (skipping pending/provisioning/migrating/error), job execution, multi-part pruning (8-backup limit), and image restore job execution.
 - Done when: `go test ./...` and `go build ./cmd/...` pass, and starting `cmd/jobworker` logs the active `CRON_MC_SERVER_DATA_BACKUP` schedule, `BACKUP_MAX_COUNT`, and `BACKUP_PRESIGN_TTL`.
 
-### Phase 8: Add admin image-backup endpoints on `cmd/apiserver` and restore shell script [STATUS: TODO]
+### Phase 8: Add admin image-backup endpoints on `cmd/apiserver` and restore shell script [STATUS: DONE]
 - Goal: Expose admin-only HTTP endpoints on `cmd/apiserver` to list/trigger/restore ext4 image backups and provide a standalone shell script to invoke image restore.
 - Tasks:
-  - [ ] Add admin-only routes in `internal/backup/handler.go` (protected by `authkit.AuthMiddleware` + admin role guard):
+  - [x] Add admin-only routes in `internal/backup/handler.go` (protected by `authkit.AuthMiddleware` + admin role guard):
     - `GET /api/v1/admin/servers/:id/image-backups` — list `ServerImageBackup` records for a server.
     - `POST /api/v1/admin/servers/:id/image-backups` — enqueue an immediate `JobTypeBackupImage` job (`202 Accepted`).
     - `POST /api/v1/admin/servers/:id/image-backups/:backup_id/restore` — enqueue a `JobTypeRestoreImage` job (`202 Accepted` with job ID).
-  - [ ] Add executable shell script `scripts/restore-image-backup.sh` (`chmod +x`): accepts `<server_id> [image_backup_id]`, logs in or uses `ADMIN_TOKEN` against `APP_BASE_URL` (default `http://localhost:8080`), selects the latest completed image backup if `image_backup_id` is omitted, triggers `POST /api/v1/admin/servers/<server_id>/image-backups/<backup_id>/restore`, and polls `GET /api/v1/jobs/<job_id>` until completion or failure.
-  - [ ] Add HTTP route tests in `internal/backup/backup_test.go` verifying admin access succeeds and non-admin users receive `403 Forbidden`.
-  - [ ] Update `TODO.md` checkboxes for completed items.
+  - [x] Add executable shell script `scripts/restore-image-backup.sh` (`chmod +x`): accepts `<server_id> [image_backup_id]`, logs in or uses `ADMIN_TOKEN` against `APP_BASE_URL` (default `http://localhost:8080`), selects the latest completed image backup if `image_backup_id` is omitted, triggers `POST /api/v1/admin/servers/<server_id>/image-backups/<backup_id>/restore`, and polls `GET /api/v1/jobs/<job_id>` until completion or failure.
+  - [x] Add HTTP route tests in `internal/backup/backup_test.go` verifying admin access succeeds and non-admin users receive `403 Forbidden`.
+  - [x] Update `TODO.md` checkboxes for completed items.
 - Done when: `go test ./...` passes, `shellcheck scripts/restore-image-backup.sh` (or `bash -n`) passes, and a full local Docker Compose run (`apiserver` + `jobworker` + `worker` + `seaweedfs`) verifies triggering an ext4 `.img` backup, seeing the uploaded `.tar.gz` part(s) in S3, pruning beyond 8 backups, and restoring via `scripts/restore-image-backup.sh`.
 
 ---

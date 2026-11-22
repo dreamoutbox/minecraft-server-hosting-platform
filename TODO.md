@@ -121,21 +121,21 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ### 11/22/2026
 
-- [ ] change env `RETENTION_DAYS` to `SERVER_EXPIRED_DATA_RETENTION_DAYS`
+- [x] change env `RETENTION_DAYS` to `SERVER_EXPIRED_DATA_RETENTION_DAYS`
 
-- [ ] add backup env config: `CRON_MC_SERVER_DATA_BACKUP` (default `0 5 * * *`, local TZ), presigned URL TTL (default `1h`), and max backups per server (default `8`)
+- [x] add backup env config: `CRON_MC_SERVER_DATA_BACKUP` (default `0 5 * * *`, local TZ), presigned URL TTL (default `1h`), and max backups per server (default `8`)
 
-- [ ] switch user backups (`backup_records`) to `tar.gz` of mounted files (`/var/lib/mc-platform/mounts/<server-id>`) uploaded/restored by `cmd/worker` via presigned PUT/GET URLs (`cmd/worker` never accesses S3 directly)
+- [x] switch user backups (`backup_records`) to `tar.gz` of mounted files (`/var/lib/mc-platform/mounts/<server-id>`) uploaded/restored by `cmd/worker` via presigned PUT/GET URLs (`cmd/worker` never accesses S3 directly)
 
-- [ ] implement CRON node ext4 `.img` backups (separate `server_image_backups` table):
-    - [ ] `jobworker` CRON enqueues jobs in `server_jobs` for all provisioned servers (`running` + `stopped`; skip `pending`/`provisioning`/`migrating`/`error`)
-    - [ ] quiesce running servers (`save-all` + `sync`), `tar.gz` `/var/lib/mc-platform/images/<server-id>.img`, split compressed stream into <=1 GiB parts if over 1 GiB, and upload via presigned PUT URLs from `jobworker`
+- [x] implement CRON node ext4 `.img` backups (separate `server_image_backups` table):
+    - [x] `jobworker` CRON enqueues jobs in `server_jobs` for all provisioned servers (`running` + `stopped`; skip `pending`/`provisioning`/`migrating`/`error`)
+    - [x] quiesce running servers (`save-all` + `sync`), `tar.gz` `/var/lib/mc-platform/images/<server-id>.img`, split compressed stream into <=1 GiB parts if over 1 GiB, and upload via presigned PUT URLs from `jobworker`
 
-- [ ] enforce backup retention limit: keep last N (default 8) completed backups per server independently for both `backup_records` and `server_image_backups` (prune older S3 objects + DB rows)
+- [x] enforce backup retention limit: keep last N (default 8) completed backups per server independently for both `backup_records` and `server_image_backups` (prune older S3 objects + DB rows)
 
-- [ ] add admin-only `.img` restore endpoint on `cmd/apiserver` + shell script (`curl` apiserver -> `jobworker` generates presigned GET URLs -> `cmd/worker` downloads, merges/uncompresses parts, and restores `.img`)
+- [x] add admin-only `.img` restore endpoint on `cmd/apiserver` + shell script (`curl` apiserver -> `jobworker` generates presigned GET URLs -> `cmd/worker` downloads, merges/uncompresses parts, and restores `.img`)
 
-- [ ] assert CRON mc servers backup, restore, and retention pruning work end-to-end
+- [x] assert CRON mc servers backup, restore, and retention pruning work end-to-end
 
 ---
 

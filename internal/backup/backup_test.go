@@ -479,3 +479,76 @@ func TestBackupRetentionPrunesOldestBeyondMaxCount(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminImageBackupHTTPRoutes(t *testing.T) {
+	service, mockWorker, _, server, user, userToken := setupBackupTestEnv(t)
+	if service == nil {
+		return
+	}
+
+	volID := fmt.Sprintf("%d", server.ID)
+	mockWorker.volumeData[volID] = []byte("admin-ext4-image-bytes")
+
+	jwtSecret := "backup-secret-key"
+	adminTokens, err := authkit.GenerateTokenPair(user.ID, "admin@example.com", domain.UserRoleAdmin, jwtSecret)
+	if err != nil {
+		t.Fatalf("failed generating admin token: %v", err)
+	}
+
+	handler := NewHandler(service)
+	r := gin.New()
+	handler.RegisterRoutes(r, jwtSecret)
+
+	// Non-admin must receive 403 Forbidden on all admin image-backup routes
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, fmt.Sprintf("/api/v1/admin/servers/%d/image-backups", server.ID)},
+		{http.MethodPost, fmt.Sprintf("/api/v1/admin/servers/%d/image-backups", server.ID)},
+		{http.MethodPost, fmt.Sprintf("/api/v1/admin/servers/%d/image-backups/1/restore", server.ID)},
+	} {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(tc.method, tc.path, nil)
+		req.Header.Set("Authorization", "Bearer "+userToken)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("non-admin %s %s expected 403, got %d (%s)", tc.method, tc.path, w.Code, w.Body.String())
+		}
+	}
+
+	// Admin POST creates image backup
+	wCreate := httptest.NewRecorder()
+	reqCreate, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/admin/servers/%d/image-backups", server.ID), nil)
+	reqCreate.Header.Set("Authorization", "Bearer "+adminTokens.AccessToken)
+	r.ServeHTTP(wCreate, reqCreate)
+	if wCreate.Code != http.StatusCreated {
+		t.Fatalf("admin create image backup failed: %d (%s)", wCreate.Code, wCreate.Body.String())
+	}
+	var created domain.ServerImageBackup
+	if err := json.Unmarshal(wCreate.Body.Bytes(), &created); err != nil || created.ID == 0 {
+		t.Fatalf("unexpected create image backup response: %s (err=%v)", wCreate.Body.String(), err)
+	}
+
+	// Admin GET lists image backups
+	wList := httptest.NewRecorder()
+	reqList, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/admin/servers/%d/image-backups", server.ID), nil)
+	reqList.Header.Set("Authorization", "Bearer "+adminTokens.AccessToken)
+	r.ServeHTTP(wList, reqList)
+	if wList.Code != http.StatusOK {
+		t.Fatalf("admin list image backups failed: %d (%s)", wList.Code, wList.Body.String())
+	}
+
+	// Admin POST restores image backup
+	mockWorker.volumeData[volID] = []byte("corrupted")
+	wRestore := httptest.NewRecorder()
+	reqRestore, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/admin/servers/%d/image-backups/%d/restore", server.ID, created.ID), nil)
+	reqRestore.Header.Set("Authorization", "Bearer "+adminTokens.AccessToken)
+	r.ServeHTTP(wRestore, reqRestore)
+	if wRestore.Code != http.StatusOK {
+		t.Fatalf("admin restore image backup failed: %d (%s)", wRestore.Code, wRestore.Body.String())
+	}
+	if got := string(mockWorker.volumeData[volID]); got != "admin-ext4-image-bytes" {
+		t.Errorf("restored bytes = %q, want %q", got, "admin-ext4-image-bytes")
+	}
+}
