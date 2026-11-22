@@ -3,6 +3,7 @@ package domain
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 // getTestDSN returns the PostgreSQL connection string for integration testing.
@@ -274,5 +275,36 @@ func TestServerImageBackupPartKeysHelpers(t *testing.T) {
 	}
 	if len(keys) != 0 {
 		t.Errorf("expected empty keys, got %v", keys)
+	}
+}
+
+func TestServerIsExpiringSoon(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	window := 7 * 24 * time.Hour
+
+	past := now.Add(-time.Hour)
+	atNow := now
+	inThreeDays := now.Add(3 * 24 * time.Hour)
+	atBoundary := now.Add(window)
+	inTenDays := now.Add(10 * 24 * time.Hour)
+
+	cases := []struct {
+		name      string
+		expiresAt *time.Time
+		want      bool
+	}{
+		{"nil expires_at", nil, false},
+		{"already expired", &past, false},
+		{"exact now", &atNow, false},
+		{"within window", &inThreeDays, true},
+		{"exact boundary", &atBoundary, true},
+		{"beyond window", &inTenDays, false},
+	}
+
+	for _, tc := range cases {
+		srv := Server{ExpiresAt: tc.expiresAt}
+		if got := srv.IsExpiringSoon(now, window); got != tc.want {
+			t.Errorf("%s: IsExpiringSoon = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

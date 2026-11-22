@@ -317,6 +317,23 @@ func (s Server) IsWithinRetention(now time.Time, retentionDays int) bool {
 	return now.Before(cutoff)
 }
 
+// IsExpiringSoon reports whether a non-expired server will expire within the given warning window.
+// Servers with nil ExpiresAt or already expired return false.
+//
+// Arguments:
+//   - now: Current timestamp.
+//   - window: Look-ahead duration before ExpiresAt that triggers an expiring-soon warning.
+//
+// Example usage:
+//
+//	if server.IsExpiringSoon(time.Now(), 7*24*time.Hour) { ... }
+func (s Server) IsExpiringSoon(now time.Time, window time.Duration) bool {
+	if s.ExpiresAt == nil || window <= 0 {
+		return false
+	}
+	return s.ExpiresAt.After(now) && s.ExpiresAt.Sub(now) <= window
+}
+
 // OrderType identifies the purpose of a Stripe Checkout order.
 type OrderType string
 

@@ -240,6 +240,14 @@ func (s *Service) Logout(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/login?success=Logged+out+successfully")
 }
 
+// ExpiringServerAlert represents a dashboard warning entry for a server that is expiring soon or recently expired.
+type ExpiringServerAlert struct {
+	ServerID   uint
+	ServerName string
+	ExpiresAt  time.Time
+	IsExpired  bool
+}
+
 // ListServers displays all game servers owned by the authenticated user.
 func (s *Service) ListServers(c *gin.Context) {
 	userID, _ := authkit.GetUserIDFromContext(c)
@@ -249,8 +257,26 @@ func (s *Service) ListServers(c *gin.Context) {
 		return
 	}
 
+	now := time.Now()
+	var expiringAlerts []ExpiringServerAlert
+	for _, srv := range servers {
+		if srv.ExpiresAt == nil {
+			continue
+		}
+		isExpired := srv.IsExpired(now)
+		if srv.IsExpiringSoon(now, serverExpiringSoonWindow) || (isExpired && srv.IsWithinRetention(now, defaultServerRetentionDays)) {
+			expiringAlerts = append(expiringAlerts, ExpiringServerAlert{
+				ServerID:   srv.ID,
+				ServerName: srv.Name,
+				ExpiresAt:  *srv.ExpiresAt,
+				IsExpired:  isExpired,
+			})
+		}
+	}
+
 	s.renderView(c, "servers_list.html", map[string]interface{}{
-		"Servers": servers,
+		"Servers":         servers,
+		"ExpiringServers": expiringAlerts,
 	})
 }
 
@@ -360,7 +386,10 @@ func (s *Service) ProcessBuyServer(c *gin.Context) {
 	c.Redirect(http.StatusSeeOther, cs.CheckoutURL)
 }
 
-const defaultServerRetentionDays = 7
+const (
+	defaultServerRetentionDays = 7
+	serverExpiringSoonWindow   = 7 * 24 * time.Hour
+)
 
 // serverExpiryFlags computes expiration and extension eligibility flags for a server.
 //
@@ -417,14 +446,16 @@ func (s *Service) ShowServerDetail(c *gin.Context) {
 		return
 	}
 
-	isExpired, canExtend := serverExpiryFlags(server, time.Now())
+	now := time.Now()
+	isExpired, canExtend := serverExpiryFlags(server, now)
 	s.renderView(c, "server_detail.html", map[string]interface{}{
-		"ActiveTab":     "overview",
-		"Server":        server,
-		"LiveStatus":    liveStatus,
-		"IsExpired":     isExpired,
-		"CanExtend":     canExtend,
-		"RetentionDays": defaultServerRetentionDays,
+		"ActiveTab":      "overview",
+		"Server":         server,
+		"LiveStatus":     liveStatus,
+		"IsExpired":      isExpired,
+		"IsExpiringSoon": server.IsExpiringSoon(now, serverExpiringSoonWindow),
+		"CanExtend":      canExtend,
+		"RetentionDays":  defaultServerRetentionDays,
 	})
 }
 

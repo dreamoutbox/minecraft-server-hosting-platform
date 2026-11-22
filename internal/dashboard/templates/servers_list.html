@@ -13,6 +13,27 @@
     </div>
 </div>
 
+{{if .ExpiringServers}}
+<div class="alert alert-warning shadow-sm border-0 mb-4" role="alert">
+    <div class="fw-bold mb-2">Server Expiration Notice</div>
+    <ul class="list-unstyled mb-0 d-flex flex-column gap-2">
+        {{range .ExpiringServers}}
+        <li class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span>
+                <strong>{{.ServerName}}</strong>
+                {{if .IsExpired}}
+                expired on <strong>{{.ExpiresAt.Format "2006-01-02 15:04"}}</strong>. Extend before data is permanently deleted.
+                {{else}}
+                is about to expire on <strong>{{.ExpiresAt.Format "2006-01-02 15:04"}}</strong>.
+                {{end}}
+            </span>
+            <a href="/dashboard/servers/{{.ServerID}}/settings#extend-server" class="btn btn-sm btn-warning">Extend Server</a>
+        </li>
+        {{end}}
+    </ul>
+</div>
+{{end}}
+
 {{if .Servers}}
 <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
     {{range .Servers}}

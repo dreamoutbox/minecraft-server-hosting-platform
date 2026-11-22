@@ -718,3 +718,104 @@ func TestExtendServerPanelInSettings(t *testing.T) {
 		t.Errorf("expected settings page to render Extend 30 Days form pointing to %s", extendAction)
 	}
 }
+
+func TestDashboardExpiringServerAlerts(t *testing.T) {
+	r, dashSvc, _ := setupDashboardTestEnv(t)
+	if r == nil {
+		return
+	}
+
+	suffix := time.Now().UnixNano()
+	owner := domain.User{
+		Email:        fmt.Sprintf("expiring-alert-%d@example.com", suffix),
+		PasswordHash: "hash",
+		Role:         domain.UserRoleUser,
+	}
+	if err := dashSvc.db.Create(&owner).Error; err != nil {
+		t.Fatalf("failed creating user: %v", err)
+	}
+	var plan domain.Plan
+	if err := dashSvc.db.Order("id asc").First(&plan).Error; err != nil {
+		t.Fatalf("expected seeded plan: %v", err)
+	}
+	var host domain.Host
+	if err := dashSvc.db.First(&host).Error; err != nil {
+		t.Fatalf("expected seeded host: %v", err)
+	}
+
+	soonAt := time.Now().Add(48 * time.Hour)
+	expiredAt := time.Now().Add(-24 * time.Hour)
+	farAt := time.Now().Add(30 * 24 * time.Hour)
+
+	srvSoon := domain.Server{
+		UserID: owner.ID, PlanID: plan.ID, HostID: host.ID,
+		Name: fmt.Sprintf("SoonSrv-%d", suffix), Status: domain.ServerStatusRunning,
+		Port: 25757, ServerType: domain.ServerTypeVanilla, ServerVersion: "LATEST",
+		ExpiresAt: &soonAt,
+	}
+	srvExpired := domain.Server{
+		UserID: owner.ID, PlanID: plan.ID, HostID: host.ID,
+		Name: fmt.Sprintf("ExpiredSrv-%d", suffix), Status: domain.ServerStatusStopped,
+		Port: 25758, ServerType: domain.ServerTypeVanilla, ServerVersion: "LATEST",
+		ExpiresAt: &expiredAt,
+	}
+	srvFar := domain.Server{
+		UserID: owner.ID, PlanID: plan.ID, HostID: host.ID,
+		Name: fmt.Sprintf("FarSrv-%d", suffix), Status: domain.ServerStatusRunning,
+		Port: 25759, ServerType: domain.ServerTypeVanilla, ServerVersion: "LATEST",
+		ExpiresAt: &farAt,
+	}
+	srvNoExpiry := domain.Server{
+		UserID: owner.ID, PlanID: plan.ID, HostID: host.ID,
+		Name: fmt.Sprintf("NoExpirySrv-%d", suffix), Status: domain.ServerStatusRunning,
+		Port: 25760, ServerType: domain.ServerTypeVanilla, ServerVersion: "LATEST",
+		ExpiresAt: nil,
+	}
+	for _, s := range []*domain.Server{&srvSoon, &srvExpired, &srvFar, &srvNoExpiry} {
+		if err := dashSvc.db.Create(s).Error; err != nil {
+			t.Fatalf("failed creating server %s: %v", s.Name, err)
+		}
+	}
+	t.Cleanup(func() {
+		dashSvc.db.Delete(&domain.Server{}, []uint{srvSoon.ID, srvExpired.ID, srvFar.ID, srvNoExpiry.ID})
+		dashSvc.db.Delete(&domain.User{}, owner.ID)
+	})
+
+	tokens, _ := authkit.GenerateTokenPair(owner.ID, owner.Email, owner.Role, dashSvc.jwtSecret)
+	cookie := &http.Cookie{Name: "token", Value: tokens.AccessToken}
+
+	// Main dashboard list shows alert banner with links for soon + expired servers, not far/no-expiry servers.
+	wList := doDashboardReq(r, http.MethodGet, "/dashboard", cookie, nil)
+	if wList.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /dashboard, got %d", wList.Code)
+	}
+	listBody := wList.Body.String()
+	if !strings.Contains(listBody, "Server Expiration Notice") {
+		t.Fatalf("expected Server Expiration Notice alert on /dashboard")
+	}
+	soonLink := fmt.Sprintf("/dashboard/servers/%d/settings#extend-server", srvSoon.ID)
+	expiredLink := fmt.Sprintf("/dashboard/servers/%d/settings#extend-server", srvExpired.ID)
+	farLink := fmt.Sprintf("/dashboard/servers/%d/settings#extend-server", srvFar.ID)
+	noExpiryLink := fmt.Sprintf("/dashboard/servers/%d/settings#extend-server", srvNoExpiry.ID)
+	if !strings.Contains(listBody, soonLink) {
+		t.Errorf("expected expiring-soon server link %s in dashboard alert", soonLink)
+	}
+	if !strings.Contains(listBody, expiredLink) {
+		t.Errorf("expected expired-within-retention server link %s in dashboard alert", expiredLink)
+	}
+	if strings.Contains(listBody, farLink) {
+		t.Errorf("did not expect far-future server link %s in dashboard alert", farLink)
+	}
+	if strings.Contains(listBody, noExpiryLink) {
+		t.Errorf("did not expect no-expiry server link %s in dashboard alert", noExpiryLink)
+	}
+
+	// Server detail page also shows warning banner with link for expiring-soon server.
+	wDetail := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/servers/%d", srvSoon.ID), cookie, nil)
+	if wDetail.Code != http.StatusOK {
+		t.Fatalf("expected 200 on expiring-soon server detail, got %d", wDetail.Code)
+	}
+	if !strings.Contains(wDetail.Body.String(), soonLink) {
+		t.Errorf("expected expiring-soon warning link %s on server detail page", soonLink)
+	}
+}

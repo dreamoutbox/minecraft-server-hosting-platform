@@ -41,14 +41,14 @@ Build & test commands:
   - [x] Add/update dashboard tests verifying the Extend Server panel renders on `/dashboard/servers/:id/settings` with `id="extend-server"` and the `Extend 30 Days` form is no longer rendered on `/dashboard/servers/:id`.
 - Done when: `go vet ./...`, `go test -p 1 ./...`, and `go build ./cmd/...` pass; `/dashboard/servers/:id/settings#extend-server` displays the Extend Server panel and submits to `POST /dashboard/servers/:id/extend`.
 
-### Phase 4: Add expiring-server alert on web dashboard with link to Extend Server panel [STATUS: TODO]
+### Phase 4: Add expiring-server alert on web dashboard with link to Extend Server panel [STATUS: DONE]
 - Goal: Warn users on the main dashboard when any of their servers is about to expire (or already expired within retention) with a direct link to that server's Settings > Extend Server panel.
 - Tasks:
-  - [ ] Add `Server.IsExpiringSoon(now time.Time, window time.Duration) bool` on `domain.Server` in `internal/domain/models.go` (true when `ExpiresAt != nil && ExpiresAt.After(now) && ExpiresAt.Sub(now) <= window`) with unit tests in `internal/domain/db_test.go` (or `models_test.go`).
-  - [ ] Define a named warning threshold constant in `internal/dashboard/dashboard.go` (e.g. `serverExpiringSoonWindow = 7 * 24 * time.Hour`) and compute `ExpiringServers` (expiring soon or expired within retention) in `ListServers`.
-  - [ ] Render a Bootstrap alert banner at the top of `internal/dashboard/templates/servers_list.html` when `ExpiringServers` is non-empty, showing each server's name, expiry timestamp/status, and a link to `/dashboard/servers/{{.ID}}/settings#extend-server`.
-  - [ ] Also show an expiring-soon warning notice on `internal/dashboard/templates/server_detail.html` linking to `/dashboard/servers/{{.Server.ID}}/settings#extend-server` when the server is about to expire.
-  - [ ] Add tests in `internal/dashboard/dashboard_test.go` verifying the alert appears for servers expiring within the warning window (with link to `/dashboard/servers/<id>/settings#extend-server`), appears for expired-within-retention servers, and does not appear for servers with `ExpiresAt == nil` or expiring well beyond the window.
+  - [x] Add `Server.IsExpiringSoon(now time.Time, window time.Duration) bool` on `domain.Server` in `internal/domain/models.go` (true when `ExpiresAt != nil && ExpiresAt.After(now) && ExpiresAt.Sub(now) <= window`) with unit tests in `internal/domain/db_test.go` (or `models_test.go`).
+  - [x] Define a named warning threshold constant in `internal/dashboard/dashboard.go` (e.g. `serverExpiringSoonWindow = 7 * 24 * time.Hour`) and compute `ExpiringServers` (expiring soon or expired within retention) in `ListServers`.
+  - [x] Render a Bootstrap alert banner at the top of `internal/dashboard/templates/servers_list.html` when `ExpiringServers` is non-empty, showing each server's name, expiry timestamp/status, and a link to `/dashboard/servers/{{.ID}}/settings#extend-server`.
+  - [x] Also show an expiring-soon warning notice on `internal/dashboard/templates/server_detail.html` linking to `/dashboard/servers/{{.Server.ID}}/settings#extend-server` when the server is about to expire.
+  - [x] Add tests in `internal/dashboard/dashboard_test.go` verifying the alert appears for servers expiring within the warning window (with link to `/dashboard/servers/<id>/settings#extend-server`), appears for expired-within-retention servers, and does not appear for servers with `ExpiresAt == nil` or expiring well beyond the window.
 - Done when: `go vet ./...`, `go test -p 1 ./...`, and `go build ./cmd/...` pass; dashboard list and detail pages render the expiring alert with working `#extend-server` links; tick lines 142-148 in `TODO.md`.
 
 ## Unknowns, risks, assumptions

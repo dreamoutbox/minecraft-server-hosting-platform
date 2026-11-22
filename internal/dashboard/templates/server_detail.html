@@ -73,6 +73,11 @@
                 <a href="/dashboard/servers/{{.Server.ID}}/settings#extend-server" class="btn btn-sm btn-danger">Extend Server</a>
                 {{end}}
             </div>
+            {{else if .IsExpiringSoon}}
+            <div class="alert alert-warning py-2 px-3 mb-2 w-100 small d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <span>This server is about to expire on <strong>{{.Server.ExpiresAt.Format "2006-01-02 15:04"}}</strong>.</span>
+                <a href="/dashboard/servers/{{.Server.ID}}/settings#extend-server" class="btn btn-sm btn-warning">Extend Server</a>
+            </div>
             {{else if .Server.ExpiresAt}}
             <div class="text-muted small w-100 mb-1">
                 Expires: <strong>{{.Server.ExpiresAt.Format "2006-01-02 15:04"}}</strong>
