@@ -16,6 +16,7 @@ type BackupJobQueue interface {
 	EnqueueBackup(ctx context.Context, userID uint, serverID uint) (*domain.BackupRecord, *domain.ServerJob, error)
 	EnqueueRestore(ctx context.Context, userID uint, serverID uint, backupID uint) (*domain.ServerJob, error)
 	EnqueueImageBackup(ctx context.Context, userID uint, serverID uint) (*domain.ServerImageBackup, *domain.ServerJob, error)
+	EnqueueAllImageBackups(ctx context.Context) ([]*domain.ServerJob, error)
 	EnqueueImageRestore(ctx context.Context, userID uint, serverID uint, imageBackupID uint) (*domain.ServerJob, error)
 }
 
@@ -226,6 +227,44 @@ func (h *Handler) CreateImageBackup(c *gin.Context) {
 	c.JSON(http.StatusCreated, record)
 }
 
+// CreateAllImageBackups enqueues immediate ext4 disk image backups for all provisioned (running/stopped) servers (admin-only).
+//
+// Arguments:
+//   - c: Active Gin request context.
+//
+// Example usage:
+//
+//	POST /api/v1/admin/image-backups
+func (h *Handler) CreateAllImageBackups(c *gin.Context) {
+	if h.jobQueue != nil {
+		queuedJobs, err := h.jobQueue.EnqueueAllImageBackups(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if queuedJobs == nil {
+			queuedJobs = []*domain.ServerJob{}
+		}
+		c.JSON(http.StatusAccepted, gin.H{
+			"jobs":     queuedJobs,
+			"enqueued": len(queuedJobs),
+			"message":  "image backups queued",
+		})
+		return
+	}
+
+	userID, _ := authkit.GetUserIDFromContext(c)
+	records, err := h.service.BackupAllServerImages(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"image_backups": records,
+		"count":         len(records),
+	})
+}
+
 // RestoreImageBackup restores a server's ext4 disk image from a completed ServerImageBackup (admin-only).
 //
 // Arguments:
@@ -304,6 +343,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 		backups.POST("", h.CreateBackup)
 		backups.GET("", h.ListBackups)
 		backups.POST("/:backup_id/restore", h.RestoreBackup)
+	}
+
+	adminAllImageBackups := r.Group("/api/v1/admin/image-backups")
+	adminAllImageBackups.Use(authkit.AuthMiddleware(jwtSecret), requireAdminRole())
+	{
+		adminAllImageBackups.POST("", h.CreateAllImageBackups)
 	}
 
 	adminImageBackups := r.Group("/api/v1/admin/servers/:id/image-backups")

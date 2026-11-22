@@ -152,6 +152,43 @@ func (s *Service) ExecuteImageBackupRecord(ctx context.Context, userID uint, ser
 	return &record, nil
 }
 
+// BackupAllServerImages synchronously backs up ext4 .img files for all provisioned (running or stopped) servers.
+// Used as a synchronous fallback when no async job queue is attached.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//   - userID: Initiating admin user ID (0 defaults to each server's owner).
+//
+// Example usage:
+//
+//	records, err := svc.BackupAllServerImages(ctx, adminID)
+func (s *Service) BackupAllServerImages(ctx context.Context, userID uint) ([]domain.ServerImageBackup, error) {
+	var servers []domain.Server
+	if err := s.db.WithContext(ctx).
+		Where("status IN (?)", []domain.ServerStatus{domain.ServerStatusRunning, domain.ServerStatusStopped}).
+		Order("id asc").
+		Find(&servers).Error; err != nil {
+		return nil, fmt.Errorf("failed listing provisioned servers: %w", err)
+	}
+
+	var results []domain.ServerImageBackup
+	var errs []error
+	for _, srv := range servers {
+		pending, err := s.CreatePendingImageBackup(ctx, srv.ID)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("server %d: %w", srv.ID, err))
+			continue
+		}
+		rec, err := s.ExecuteImageBackupRecord(ctx, userID, srv.ID, pending.ID)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("server %d: %w", srv.ID, err))
+			continue
+		}
+		results = append(results, *rec)
+	}
+	return results, errors.Join(errs...)
+}
+
 // ListImageBackups returns all ext4 image backup records for a server ordered newest-first.
 //
 // Arguments:

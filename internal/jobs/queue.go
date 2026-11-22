@@ -777,24 +777,26 @@ func (s *Service) StartLifecycleCron(ctx context.Context, interval time.Duration
 	}
 }
 
-// EnqueueScheduledImageBackups scans all provisioned servers (running and stopped) and enqueues
-// ext4 image backup jobs in server_jobs, skipping any server that already has one queued.
+// EnqueueAllImageBackups scans all provisioned servers (running and stopped) and enqueues
+// ext4 image backup jobs in server_jobs, returning every newly created job and skipping
+// any server that already has an image backup pending or running.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
 //
 // Example usage:
 //
-//	count, err := jobSvc.EnqueueScheduledImageBackups(ctx)
-func (s *Service) EnqueueScheduledImageBackups(ctx context.Context) (int, error) {
+//	jobsList, err := jobSvc.EnqueueAllImageBackups(ctx)
+func (s *Service) EnqueueAllImageBackups(ctx context.Context) ([]*domain.ServerJob, error) {
 	var servers []domain.Server
 	if err := s.db.WithContext(ctx).
 		Where("status IN (?)", []domain.ServerStatus{domain.ServerStatusRunning, domain.ServerStatusStopped}).
+		Order("id asc").
 		Find(&servers).Error; err != nil {
-		return 0, fmt.Errorf("failed querying provisioned servers for image backup sweep: %w", err)
+		return nil, fmt.Errorf("failed querying provisioned servers for image backup sweep: %w", err)
 	}
 
-	enqueued := 0
+	var queued []*domain.ServerJob
 	for _, srv := range servers {
 		if ctx.Err() != nil {
 			break
@@ -805,10 +807,27 @@ func (s *Service) EnqueueScheduledImageBackups(ctx context.Context) (int, error)
 			continue
 		}
 		if job != nil {
-			enqueued++
+			queued = append(queued, job)
 		}
 	}
-	return enqueued, nil
+	return queued, nil
+}
+
+// EnqueueScheduledImageBackups scans all provisioned servers (running and stopped) and enqueues
+// ext4 image backup jobs in server_jobs, returning the count of newly enqueued jobs.
+//
+// Arguments:
+//   - ctx: Operation cancellation context.
+//
+// Example usage:
+//
+//	count, err := jobSvc.EnqueueScheduledImageBackups(ctx)
+func (s *Service) EnqueueScheduledImageBackups(ctx context.Context) (int, error) {
+	queued, err := s.EnqueueAllImageBackups(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return len(queued), nil
 }
 
 // StartImageBackupCron schedules daily (or custom cronSpec) ext4 image backup enqueue sweeps

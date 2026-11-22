@@ -137,6 +137,16 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] assert CRON mc servers backup, restore, and retention pruning work end-to-end
 
+- [x] script to manually trigger admin ext4 imgs backup and restore.
+
+- [ ] fix admin can't manage files on another user server. error "unauthorized access to server". should give access admin to server when click on manage file tab
+
+- [ ] fix admin can't backup, restore, send command to server, change settings, delete server on another user server. error "unauthorized access to server"
+
+- [ ] move extend server button to new panel in server settings page
+
+- [ ] web dashboard add alert if user server is about to expire. add link to navigate to server settings page > extend server panel. 
+
 ---
 
 # BACKLOG

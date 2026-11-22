@@ -504,6 +504,7 @@ func TestAdminImageBackupHTTPRoutes(t *testing.T) {
 		method string
 		path   string
 	}{
+		{http.MethodPost, "/api/v1/admin/image-backups"},
 		{http.MethodGet, fmt.Sprintf("/api/v1/admin/servers/%d/image-backups", server.ID)},
 		{http.MethodPost, fmt.Sprintf("/api/v1/admin/servers/%d/image-backups", server.ID)},
 		{http.MethodPost, fmt.Sprintf("/api/v1/admin/servers/%d/image-backups/1/restore", server.ID)},
@@ -550,5 +551,14 @@ func TestAdminImageBackupHTTPRoutes(t *testing.T) {
 	}
 	if got := string(mockWorker.volumeData[volID]); got != "admin-ext4-image-bytes" {
 		t.Errorf("restored bytes = %q, want %q", got, "admin-ext4-image-bytes")
+	}
+
+	// Admin POST /api/v1/admin/image-backups backs up all provisioned servers
+	wAll := httptest.NewRecorder()
+	reqAll, _ := http.NewRequest(http.MethodPost, "/api/v1/admin/image-backups", nil)
+	reqAll.Header.Set("Authorization", "Bearer "+adminTokens.AccessToken)
+	r.ServeHTTP(wAll, reqAll)
+	if wAll.Code != http.StatusCreated {
+		t.Fatalf("admin create all image backups failed: %d (%s)", wAll.Code, wAll.Body.String())
 	}
 }
