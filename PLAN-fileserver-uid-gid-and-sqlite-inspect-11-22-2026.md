@@ -37,14 +37,14 @@ Modules:
   - [x] Update `TestOpenFileManagerURLAndRevokeOnDelete` in `internal/hosting/hosting_test.go` and `TestStaffAndAdminOpenFileManagerOnOtherUserServer` in `internal/dashboard/admin_test.go` to assert `EnsureUser` receives `uid=1000` and `gid=1000`.
 - Done when: `go vet ./...`, `go test -p 1 ./...`, and `go build ./cmd/...` pass; mock fileserver assertions confirm `PUT /api/v1/users` includes `uid: 1000, gid: 1000`.
 
-### Phase 4: Add dev shell script to inspect fileserver SQLite database [STATUS: TODO]
+### Phase 4: Add dev shell script to inspect fileserver SQLite database [STATUS: DONE]
 - Goal: Provide a standalone dev shell script that lists all tables and rows in the fileserver SQLite database for quick local debugging.
 - Tasks:
-  - [ ] Create `fileserver/dev-inspect-sqlite.sh` (`#!/usr/bin/env bash`, `set -euo pipefail`, `chmod +x`):
+  - [x] Create `fileserver/dev-inspect-sqlite.sh` (`#!/usr/bin/env bash`, `set -euo pipefail`, `chmod +x`):
     - Accepts optional SQLite file path argument (or `--container <name>`, defaulting to `mc_fileserver` / `/data/fileserver.db` via `docker cp` into a temp dir cleaned up on `EXIT` trap when no local path is given).
     - Inspects the database using `sqlite3` (preferred, with `-header -column`) or a fallback helper if `sqlite3` is unavailable, printing every user table name, row count, and all rows.
-  - [ ] Verify script syntax with `bash -n fileserver/dev-inspect-sqlite.sh` and `shellcheck fileserver/dev-inspect-sqlite.sh`, and run it against a temporary SQLite DB populated by `store.OpenSQLite` to confirm formatted output.
-  - [ ] Tick lines 27 and 29 in `fileserver/TODO-fileserver.md`.
+  - [x] Verify script syntax with `bash -n fileserver/dev-inspect-sqlite.sh` and `shellcheck fileserver/dev-inspect-sqlite.sh`, and run it against a temporary SQLite DB populated by `store.OpenSQLite` to confirm formatted output.
+  - [x] Tick lines 27 and 29 in `fileserver/TODO-fileserver.md`.
 - Done when: `bash -n` and `shellcheck` pass, running `fileserver/dev-inspect-sqlite.sh <temp-db>` prints all tables (`users`, `dir_permissions`, `used_login_tokens`, `transfer_usages`) and rows cleanly, and `fileserver/TODO-fileserver.md` is updated.
 
 ## Unknowns, risks, assumptions
