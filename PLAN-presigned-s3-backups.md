@@ -35,13 +35,13 @@ Architecture decisions locked in before implementation:
   - [x] Add unit and SeaweedFS integration tests in `internal/storage/storage_test.go` verifying presigned PUT upload, presigned GET download, expired URL rejection, and method restriction (e.g. GET/DELETE rejected on a PUT-only URL).
 - Done when: `go test ./internal/storage/...` passes (both memory tests and SeaweedFS integration test when SeaweedFS is running).
 
-### Phase 3: Add `ServerImageBackup` model and image backup/restore job enums [STATUS: TODO]
+### Phase 3: Add `ServerImageBackup` model and image backup/restore job enums [STATUS: DONE]
 - Goal: Persist ext4 image backup metadata (including multi-part S3 keys) and queue job/operation types in PostgreSQL.
 - Tasks:
-  - [ ] Add `ServerImageBackup` struct (`server_image_backups` table) to `internal/domain/models.go` with `ID`, `ServerID`, `StoragePrefix`, `PartKeys` (JSON array of S3 keys), `PartCount`, `SizeBytes`, `Status` (`BackupStatus`), `CreatedAt`, `UpdatedAt`, plus helper methods to encode/decode `PartKeys`.
-  - [ ] Register `&ServerImageBackup{}` in `domain.AutoMigrate` (`internal/domain/db.go`).
-  - [ ] Add `JobTypeBackupImage` (`"backup_image"`), `JobTypeRestoreImage` (`"restore_image"`), `ServerOpImageBackup` (`"image_backup"`), and `ServerOpImageRestore` (`"image_restore"`) constants in `internal/domain/models.go`.
-  - [ ] Add nullable indexed `ImageBackupID *uint` field to `domain.ServerJob` so backup/restore jobs cleanly reference `server_image_backups`.
+  - [x] Add `ServerImageBackup` struct (`server_image_backups` table) to `internal/domain/models.go` with `ID`, `ServerID`, `StoragePrefix`, `PartKeys` (JSON array of S3 keys), `PartCount`, `SizeBytes`, `Status` (`BackupStatus`), `CreatedAt`, `UpdatedAt`, plus helper methods to encode/decode `PartKeys`.
+  - [x] Register `&ServerImageBackup{}` in `domain.AutoMigrate` (`internal/domain/db.go`).
+  - [x] Add `JobTypeBackupImage` (`"backup_image"`), `JobTypeRestoreImage` (`"restore_image"`), `ServerOpImageBackup` (`"image_backup"`), and `ServerOpImageRestore` (`"image_restore"`) constants in `internal/domain/models.go`.
+  - [x] Add nullable indexed `ImageBackupID *uint` field to `domain.ServerJob` so backup/restore jobs cleanly reference `server_image_backups`.
 - Done when: `go test ./internal/domain/...` and `go build ./...` pass with the updated schema and enums.
 
 ### Phase 4: Add worker presigned `.tar.gz` volume backup/restore endpoints [STATUS: TODO]

@@ -246,3 +246,33 @@ func TestSeedDefaultHostUpdatesExistingHost(t *testing.T) {
 		t.Errorf("SeedDefaultHost did not update all fields: %+v", updated)
 	}
 }
+
+func TestServerImageBackupPartKeysHelpers(t *testing.T) {
+	var rec ServerImageBackup
+	want := []string{
+		"image-backups/server-1/100/part-001.tar.gz",
+		"image-backups/server-1/100/part-002.tar.gz",
+	}
+	if err := rec.SetPartKeys(want); err != nil {
+		t.Fatalf("SetPartKeys failed: %v", err)
+	}
+	if rec.PartCount != len(want) {
+		t.Fatalf("PartCount = %d, want %d", rec.PartCount, len(want))
+	}
+	got, err := rec.GetPartKeys()
+	if err != nil {
+		t.Fatalf("GetPartKeys failed: %v", err)
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("GetPartKeys = %v, want %v", got, want)
+	}
+
+	empty := ServerImageBackup{}
+	keys, err := empty.GetPartKeys()
+	if err != nil {
+		t.Fatalf("GetPartKeys on empty failed: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("expected empty keys, got %v", keys)
+	}
+}

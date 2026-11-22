@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -153,6 +154,8 @@ const (
 	ServerOpDelete          ServerOperationType = "delete"
 	ServerOpBackup          ServerOperationType = "backup"
 	ServerOpRestore         ServerOperationType = "restore"
+	ServerOpImageBackup     ServerOperationType = "image_backup"
+	ServerOpImageRestore    ServerOperationType = "image_restore"
 	ServerOpConsoleCommand  ServerOperationType = "console_command"
 	ServerOpExpireStop      ServerOperationType = "expire_stop"
 	ServerOpRetentionDelete ServerOperationType = "retention_delete"
@@ -166,7 +169,7 @@ const (
 	ServerLogStatusError   ServerLogStatus = "error"
 )
 
-// JobType identifies background queue tasks processed asynchronously by cmd/apiserver.
+// JobType identifies background queue tasks processed asynchronously by cmd/jobworker.
 type JobType string
 
 const (
@@ -174,6 +177,8 @@ const (
 	JobTypeDeleteServer JobType = "delete_server"
 	JobTypeBackup       JobType = "backup"
 	JobTypeRestore      JobType = "restore"
+	JobTypeBackupImage  JobType = "backup_image"
+	JobTypeRestoreImage JobType = "restore_image"
 )
 
 // JobStatus tracks execution state for queued jobs in PostgreSQL.
@@ -374,6 +379,59 @@ type BackupRecord struct {
 	UpdatedAt  time.Time    `json:"updated_at"`
 }
 
+// ServerImageBackup tracks a disaster-recovery ext4 disk image archive split into <= 1 GiB tar.gz parts in S3.
+type ServerImageBackup struct {
+	ID            uint         `gorm:"primaryKey" json:"id"`
+	ServerID      uint         `gorm:"index;not null" json:"server_id"`
+	StoragePrefix string       `gorm:"not null" json:"storage_prefix"`
+	PartKeys      string       `gorm:"type:text;not null;default:'[]'" json:"part_keys"`
+	PartCount     int          `gorm:"not null;default:0" json:"part_count"`
+	SizeBytes     int64        `gorm:"not null;default:0" json:"size_bytes"`
+	Status        BackupStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
+	CreatedAt     time.Time    `json:"created_at"`
+	UpdatedAt     time.Time    `json:"updated_at"`
+}
+
+// GetPartKeys decodes the ordered S3 object keys stored in PartKeys JSON.
+//
+// Arguments:
+//   - None (reads receiver's PartKeys JSON field).
+//
+// Example usage:
+//
+//	keys, err := imgBackup.GetPartKeys()
+func (b *ServerImageBackup) GetPartKeys() ([]string, error) {
+	if strings.TrimSpace(b.PartKeys) == "" {
+		return nil, nil
+	}
+	var keys []string
+	if err := json.Unmarshal([]byte(b.PartKeys), &keys); err != nil {
+		return nil, fmt.Errorf("failed decoding image backup part keys: %w", err)
+	}
+	return keys, nil
+}
+
+// SetPartKeys encodes an ordered slice of S3 object keys into PartKeys JSON and updates PartCount.
+//
+// Arguments:
+//   - keys: Ordered S3 keys representing the archive parts.
+//
+// Example usage:
+//
+//	err := imgBackup.SetPartKeys([]string{"image-backups/server-1/123/part-001.tar.gz"})
+func (b *ServerImageBackup) SetPartKeys(keys []string) error {
+	if keys == nil {
+		keys = []string{}
+	}
+	encoded, err := json.Marshal(keys)
+	if err != nil {
+		return fmt.Errorf("failed encoding image backup part keys: %w", err)
+	}
+	b.PartKeys = string(encoded)
+	b.PartCount = len(keys)
+	return nil
+}
+
 // ServerOperationLog persists audited create/stop/delete/backup/restore outcomes in PostgreSQL.
 type ServerOperationLog struct {
 	ID        uint                `gorm:"primaryKey" json:"id"`
@@ -387,18 +445,19 @@ type ServerOperationLog struct {
 
 // ServerJob represents a queued asynchronous server lifecycle or backup task with retry support.
 type ServerJob struct {
-	ID          uint       `gorm:"primaryKey" json:"id"`
-	Type        JobType    `gorm:"type:varchar(32);not null;index" json:"type"`
-	Status      JobStatus  `gorm:"type:varchar(32);not null;default:'pending';index" json:"status"`
-	UserID      uint       `gorm:"index;not null" json:"user_id"`
-	ServerID    uint       `gorm:"index;not null" json:"server_id"`
-	BackupID    *uint      `gorm:"index" json:"backup_id,omitempty"`
-	Attempts    int        `gorm:"not null;default:0" json:"attempts"`
-	MaxAttempts int        `gorm:"not null;default:3" json:"max_attempts"`
-	LastError   string     `gorm:"type:text" json:"last_error,omitempty"`
-	NextRunAt   time.Time  `gorm:"index;not null" json:"next_run_at"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID            uint       `gorm:"primaryKey" json:"id"`
+	Type          JobType    `gorm:"type:varchar(32);not null;index" json:"type"`
+	Status        JobStatus  `gorm:"type:varchar(32);not null;default:'pending';index" json:"status"`
+	UserID        uint       `gorm:"index;not null" json:"user_id"`
+	ServerID      uint       `gorm:"index;not null" json:"server_id"`
+	BackupID      *uint      `gorm:"index" json:"backup_id,omitempty"`
+	ImageBackupID *uint      `gorm:"index" json:"image_backup_id,omitempty"`
+	Attempts      int        `gorm:"not null;default:0" json:"attempts"`
+	MaxAttempts   int        `gorm:"not null;default:3" json:"max_attempts"`
+	LastError     string     `gorm:"type:text" json:"last_error,omitempty"`
+	NextRunAt     time.Time  `gorm:"index;not null" json:"next_run_at"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
