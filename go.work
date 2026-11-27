@@ -3,10 +3,8 @@ go 1.27.1
 use (
 	.
 	./fileserver
-	./go-stripe-kit
 )
 
 replace (
 	github.com/dreamoutbox/fileserver v0.0.0 => ./fileserver
-	github.com/dreamoutbox/go-stripe-kit v0.0.0 => ./go-stripe-kit
 )

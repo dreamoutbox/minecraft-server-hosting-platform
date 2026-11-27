@@ -3,7 +3,6 @@ FROM golang:1.27-alpine AS builder
 WORKDIR /app
 COPY go.work go.mod go.sum ./
 COPY fileserver/go.* ./fileserver/
-COPY go-stripe-kit/go.* ./go-stripe-kit/
 RUN go mod download
 
 COPY . .
