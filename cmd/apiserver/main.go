@@ -15,11 +15,11 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/jobs"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/middleware"
 	jobqueue "github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/config"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/gin_middlewares"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/hosting"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
@@ -42,7 +42,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobqueue.Service) {
 	r := gin.Default()
-	r.Use(middleware.RequestIDMiddleware())
+	r.Use(gin_middlewares.RequestIDMiddleware())
 
 	r.GET("/health", func(c *gin.Context) {
 		sqlDB, err := db.DB()
@@ -64,7 +64,7 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobqueue.Servic
 	authHandler := authhandler.NewHandler(db, cfg.JWTSecret)
 	authHandler.SetAccessTokenTTL(cfg.JWTAccessTTL)
 	authGroup := r.Group("/api/v1/auth")
-	authGroup.Use(middleware.RateLimitMiddleware(10, 20))
+	authGroup.Use(gin_middlewares.RateLimitMiddleware(10, 20))
 	authHandler.RegisterRoutes(authGroup)
 
 	workerFactory := func(baseURL string, apiKey string) nodemanagerclient.Client {

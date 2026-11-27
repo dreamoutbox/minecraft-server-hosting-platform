@@ -1,4 +1,4 @@
-package middleware
+package gin_middlewares
 
 import (
 	"net/http"
@@ -6,36 +6,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"golang.org/x/time/rate"
 )
-
-// RequestIDHeader defines the standard HTTP header used for distributed tracing.
-const RequestIDHeader = "X-Request-ID"
-
-// ContextRequestIDKey is the Gin context key storing the correlation ID.
-const ContextRequestIDKey = "request_id"
-
-// RequestIDMiddleware injects a unique tracing correlation ID into incoming requests and response headers.
-//
-// Arguments:
-//   - None.
-//
-// Example usage:
-//
-//	router.Use(middleware.RequestIDMiddleware())
-func RequestIDMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		reqID := c.GetHeader(RequestIDHeader)
-		if reqID == "" {
-			reqID = uuid.New().String()
-		}
-
-		c.Set(ContextRequestIDKey, reqID)
-		c.Header(RequestIDHeader, reqID)
-		c.Next()
-	}
-}
 
 // clientLimiter tracks rate limits for an individual IP address.
 type clientLimiter struct {
@@ -59,7 +31,7 @@ type IPRateLimiter struct {
 //
 // Example usage:
 //
-//	limiter := middleware.NewIPRateLimiter(5, 10)
+//	limiter := gin_middlewares.NewIPRateLimiter(5, 10)
 func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
 	limiter := &IPRateLimiter{
 		clients: make(map[string]*clientLimiter),
@@ -108,7 +80,7 @@ func (i *IPRateLimiter) getLimiter(ip string) *rate.Limiter {
 //
 // Example usage:
 //
-//	sensitiveRoutes.Use(middleware.RateLimitMiddleware(5, 10))
+//	sensitiveRoutes.Use(gin_middlewares.RateLimitMiddleware(5, 10))
 func RateLimitMiddleware(r rate.Limit, b int) gin.HandlerFunc {
 	limiter := NewIPRateLimiter(r, b)
 

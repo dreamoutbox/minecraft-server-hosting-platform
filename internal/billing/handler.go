@@ -8,7 +8,7 @@ import (
 	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/middleware"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/gin_middlewares"
 )
 
 // Handler serves HTTP endpoints for billing orders, payment history, and payment webhooks.
@@ -117,7 +117,7 @@ func (h *Handler) Webhook(c *gin.Context) {
 //	billingHandler.RegisterRoutes(router, cfg.JWTSecret)
 func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 	billingGroup := r.Group("/api/v1/billing")
-	billingGroup.Use(middleware.RateLimitMiddleware(10, 20))
+	billingGroup.Use(gin_middlewares.RateLimitMiddleware(10, 20))
 
 	// Webhook endpoint (unauthenticated, signature-protected)
 	billingGroup.POST("/webhook", h.Webhook)
