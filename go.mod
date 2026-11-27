@@ -96,3 +96,8 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )
+
+replace (
+	github.com/dreamoutbox/authkit => ./shared/authkit
+	github.com/dreamoutbox/fileserver => ./fileserver
+)
