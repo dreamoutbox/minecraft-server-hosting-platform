@@ -2,7 +2,7 @@
 #
 # backup-ext4-img-to-s3.sh
 # Triggers an immediate ext4 .img backup to S3 via apiserver (which enqueues backup_image job(s);
-# jobworker mints presigned S3 PUT URLs and invokes cmd/worker to quiesce, tar.gz-split <= 1 GiB
+# jobworker mints presigned S3 PUT URLs and invokes cmd/nodemanager to quiesce, tar.gz-split <= 1 GiB
 # parts, upload to S3, and prune excess backups beyond BACKUP_MAX_COUNT).
 #
 # Usage:

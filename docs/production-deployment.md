@@ -6,7 +6,7 @@ This guide details operational prerequisites, deployment steps, and security bou
 
 The platform consists of two primary binaries:
 1. **Web API Orchestrator** (`cmd/server`): Central manager for user authentication, billing, scheduling, port allocations, and user dashboard. Never touches remote Docker daemons directly.
-2. **Worker Daemon** (`cmd/worker`): Node-level agent running on each hosting machine. Manages Docker containers and ext4 loop mounts exclusively on that node. Authenticated via per-host static secret API keys.
+2. **Worker Daemon** (`cmd/nodemanager`): Node-level agent running on each hosting machine. Manages Docker containers and ext4 loop mounts exclusively on that node. Authenticated via per-host static secret API keys.
 
 ---
 

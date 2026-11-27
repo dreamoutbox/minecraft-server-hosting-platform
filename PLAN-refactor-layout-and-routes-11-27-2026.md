@@ -34,14 +34,14 @@ internal/
 
 ---
 
-### Phase 1: Rename `cmd/worker` to `cmd/nodemanager` [STATUS: TODO]
+### Phase 1: Rename `cmd/worker` to `cmd/nodemanager` [STATUS: DONE]
 - Goal: Rename the worker daemon binary entrypoint and its build/CI references to `nodemanager` without changing runtime behavior or env var contracts.
 - Tasks:
-  - [ ] Move `cmd/worker/main.go` and `cmd/worker/main_test.go` to `cmd/nodemanager/` and remove `cmd/worker/`.
-  - [ ] Rename `Dockerfile.worker` to `Dockerfile.nodemanager`, building `./cmd/nodemanager` to `/app/nodemanager`.
-  - [ ] Update `dev-docker-build-image.sh` to build with `-f Dockerfile.nodemanager`.
-  - [ ] Update `.github/workflows/ci.yml.temp` build step to `go build -v -o /dev/null ./cmd/nodemanager`.
-  - [ ] Update `cmd/worker` references in `docs/production-deployment.md`, `docs/worker-deployment.md`, `scripts/backup-ext4-img-to-s3.sh`, and `scripts/restore-ext4-img-from-s3.sh`.
+  - [x] Move `cmd/worker/main.go` and `cmd/worker/main_test.go` to `cmd/nodemanager/` and remove `cmd/worker/`.
+  - [x] Rename `Dockerfile.worker` to `Dockerfile.nodemanager`, building `./cmd/nodemanager` to `/app/nodemanager`.
+  - [x] Update `dev-docker-build-image.sh` to build with `-f Dockerfile.nodemanager`.
+  - [x] Update `.github/workflows/ci.yml.temp` build step to `go build -v -o /dev/null ./cmd/nodemanager`.
+  - [x] Update `cmd/worker` references in `docs/production-deployment.md`, `docs/worker-deployment.md`, `scripts/backup-ext4-img-to-s3.sh`, and `scripts/restore-ext4-img-from-s3.sh`.
 - Done when: `go build ./cmd/nodemanager ./cmd/apiserver ./cmd/jobworker ./cmd/dev_db_seed` and `go test -race ./cmd/nodemanager/...` pass, and `grep -rn "cmd/worker" cmd/ Dockerfile* dev-docker-build-image.sh .github/` returns no matches.
 
 ### Phase 2: Extract shared foundation packages to `shared/` [STATUS: TODO]

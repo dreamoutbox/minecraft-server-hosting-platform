@@ -62,5 +62,5 @@ jobs:
       - name: Build apiserver binary
         run: go build -v -o /dev/null ./cmd/apiserver
 
-      - name: Build worker binary
-        run: go build -v -o /dev/null ./cmd/worker
+      - name: Build nodemanager binary
+        run: go build -v -o /dev/null ./cmd/nodemanager

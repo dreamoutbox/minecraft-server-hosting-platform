@@ -47,7 +47,7 @@ build_apiserver_image() {
 #   build_worker_image --no-cache
 build_worker_image() {
 	echo "Building worker image: ${WORKER_IMAGE}..."
-	docker build -t "${WORKER_IMAGE}" -f Dockerfile.worker . "$@"
+	docker build -t "${WORKER_IMAGE}" -f Dockerfile.nodemanager . "$@"
 	echo "Worker image built successfully: ${WORKER_IMAGE}"
 }
 

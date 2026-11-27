@@ -1,6 +1,6 @@
 # Worker Daemon Deployment Guide
 
-The worker daemon (`cmd/worker`) executes directly on each physical or virtual hosting node. It coordinates local Docker containers and loop-mounted sparse storage volumes for Minecraft servers.
+The worker daemon (`cmd/nodemanager`) executes directly on each physical or virtual hosting node. It coordinates local Docker containers and loop-mounted sparse storage volumes for Minecraft servers.
 
 ## Hard Requirements
 

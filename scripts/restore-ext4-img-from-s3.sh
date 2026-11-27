@@ -2,7 +2,7 @@
 #
 # restore-ext4-img-from-s3.sh
 # Triggers an admin ext4 .img restore via apiserver (which enqueues a restore_image job;
-# jobworker generates presigned S3 GET URLs and invokes cmd/worker to download, merge,
+# jobworker generates presigned S3 GET URLs and invokes cmd/nodemanager to download, merge,
 # uncompress, and atomically replace /var/lib/mc-platform/images/<server-id>.img).
 #
 # Usage:
