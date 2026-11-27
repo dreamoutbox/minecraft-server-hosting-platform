@@ -274,23 +274,34 @@ func (d *DockerContainerManager) GetLogs(ctx context.Context, containerID string
 	}
 	defer func() { _ = reader.Close() }()
 
-	var stdoutBuf, stderrBuf bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, reader); err != nil {
+	combined, err := demuxLogStream(reader)
+	if err != nil {
 		return nil, fmt.Errorf("failed reading container log stream %s: %w", containerID, err)
-	}
-
-	combined := stdoutBuf.String()
-	if stderrBuf.Len() > 0 {
-		if combined != "" && !strings.HasSuffix(combined, "\n") {
-			combined += "\n"
-		}
-		combined += stderrBuf.String()
 	}
 
 	return &nodemanagerclient.ContainerLogsResponse{
 		ContainerID: containerID,
 		Logs:        combined,
 	}, nil
+}
+
+// demuxLogStream strips Docker's 8-byte stream framing while preserving the
+// chronological interleaving of stdout and stderr frames as a terminal would.
+//
+// Arguments:
+//   - r: Raw multiplexed stream returned by Docker's ContainerLogs API.
+//
+// Example usage:
+//
+//	logs, err := demuxLogStream(reader)
+func demuxLogStream(r io.Reader) (string, error) {
+	// Pass the same buffer for both streams so frames stay in arrival order
+	// instead of grouping all stderr lines after stdout.
+	var combined bytes.Buffer
+	if _, err := stdcopy.StdCopy(&combined, &combined, r); err != nil {
+		return "", err
+	}
+	return combined.String(), nil
 }
 
 // ExecCommand sends a Minecraft server command via mc-send-to-console inside the running container.

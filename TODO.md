@@ -169,9 +169,13 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] add refund function to ./go-stripe-kit. 
 
+- [x] fix docker logs in nodemanager to interleave stdout and stderr chronologically instead of appending stderr at the end
+
 ---
 
 # BACKLOG
+
+- [ ] add button to delete Backups in web dashboard /dashboard/servers/<id>/backups. 
 
 - [ ] add button to kill server. for unresponsive mc server.
 
