@@ -147,17 +147,19 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ## 11/27/2026
 
-- [ ] rename `cmd/worker` to `cmd/nodemanager`
+- [x] rename `cmd/worker` to `cmd/nodemanager`
 
-- [ ] extract `cmd/nodemanager` code in `./internal` to new dir at `./nodemanager`
+- [x] extract `cmd/nodemanager` code in `./internal` to new dir at `./nodemanager`
 
-- [ ] extract `cmd/jobworker` code in `./internal` to new dir at `./jobworker`
+- [x] extract `cmd/jobworker` code in `./internal` to new dir at `./jobworker`
 
-- [ ] if any of these new dir shared code in `./internal`, the shared code to `./shared`
+- [x] if any of these new dir shared code in `./internal`, the shared code to `./shared`
 
-- [ ] separate routes in `internal/dashboard/dashboard.go` to it own file. one route per one go file. don't mix everything in just one file. separate by category like: users, billings, servers, etc. like internal/users/login.go, internal/users/register.go, internal/billings/buy_server.go, internal/mcservers/create-server.go
+- [x] separate routes in `internal/dashboard/dashboard.go` to it own file. one route per one go file. don't mix everything in just one file. separate by category like: users, billings, servers, etc. like internal/users/login.go, internal/users/register.go, internal/billings/buy_server.go, internal/mcservers/create-server.go
 
-- [ ] move each jobs in internal/jobs/queue.go to it own file. one job per one go file. example: jobworker/jobs/process_expired_servers.go, jobworker/jobs/cleanup_retention_servers.go, jobworker/jobs/enqueue_all_image_backups.go, etc...
+- [x] move each jobs in internal/jobs/queue.go to it own file. one job per one go file. example: jobworker/jobs/process_expired_servers.go, jobworker/jobs/cleanup_retention_servers.go, jobworker/jobs/enqueue_all_image_backups.go, etc...
+
+- [ ] move internal/middleware to shared/gin_middlewares. one middleware per one go file.
 
 ---
 
