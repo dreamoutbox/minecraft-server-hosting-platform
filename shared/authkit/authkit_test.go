@@ -26,7 +26,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("failed opening sqlite test db: %v", err)
 	}
-	if err := db.AutoMigrate(&User{}); err != nil {
+	if err := AutoMigrate(db); err != nil {
 		t.Fatalf("failed automigrate: %v", err)
 	}
 	return db
@@ -301,5 +301,31 @@ func TestAuthFlowIntegration(t *testing.T) {
 	r.ServeHTTP(wLogout, reqLogout)
 	if wLogout.Code != http.StatusOK {
 		t.Errorf("expected logout 200, got %d", wLogout.Code)
+	}
+}
+
+func TestAutoMigrateAndRegisterDBError(t *testing.T) {
+	db := setupTestDB(t)
+	if db.Migrator().HasColumn(&User{}, "customer_id") || db.Migrator().HasColumn(&User{}, "payment_method_id") {
+		t.Fatal("expected authkit User table not to contain billing columns")
+	}
+
+	// Drop users table to simulate a database error during Register email check.
+	if err := db.Migrator().DropTable(&User{}); err != nil {
+		t.Fatalf("failed dropping users table: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	NewHandler(db, "test-secret").RegisterRoutes(r.Group("/api/v1/auth"))
+
+	payload, _ := json.Marshal(RegisterRequest{Email: "dberr@example.com", Password: "Password123!"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 on DB error during Register, got %d (%s)", w.Code, w.Body.String())
 	}
 }

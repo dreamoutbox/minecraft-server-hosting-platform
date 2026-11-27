@@ -125,6 +125,9 @@ func (h *Handler) Register(c *gin.Context) {
 	if err := h.db.Where("email = ?", req.Email).First(&existing).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "user with this email already exists"})
 		return
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error verifying email"})
+		return
 	}
 
 	hashedPassword, err := HashPassword(req.Password)

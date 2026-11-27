@@ -206,9 +206,11 @@ func TestAsyncQueueRetryAndOperationLogs(t *testing.T) {
 	defer db.Delete(&host)
 
 	user := domain.User{
-		Email:        fmt.Sprintf("queue-user-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hashed",
-		Role:         domain.UserRoleUser,
+		User: authkit.User{
+			Email:        fmt.Sprintf("queue-user-%d@example.com", time.Now().UnixNano()),
+			PasswordHash: "hashed",
+			Role:         domain.UserRoleUser,
+		},
 	}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
@@ -414,9 +416,11 @@ func TestLifecycleExpirationAndRetentionSweep(t *testing.T) {
 	_ = db.Create(&host).Error
 
 	user := domain.User{
-		Email:        fmt.Sprintf("lifecycle-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hashed",
-		Role:         domain.UserRoleUser,
+		User: authkit.User{
+			Email:        fmt.Sprintf("lifecycle-%d@example.com", time.Now().UnixNano()),
+			PasswordHash: "hashed",
+			Role:         domain.UserRoleUser,
+		},
 	}
 	_ = db.Create(&user).Error
 
@@ -526,9 +530,11 @@ func TestScheduledImageBackupCronAndQueueExecution(t *testing.T) {
 	}
 
 	user := domain.User{
-		Email:        fmt.Sprintf("imgcron-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hashed",
-		Role:         domain.UserRoleAdmin,
+		User: authkit.User{
+			Email:        fmt.Sprintf("imgcron-%d@example.com", time.Now().UnixNano()),
+			PasswordHash: "hashed",
+			Role:         domain.UserRoleAdmin,
+		},
 	}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dreamoutbox/authkit"
+
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/storage"
@@ -189,9 +191,11 @@ func setupMigrationTestEnv(t *testing.T) (*MigrationService, *Service, map[strin
 	migrationSvc := NewMigrationService(hostingSvc, backupSvc, memStorage, workerFactory)
 
 	user := domain.User{
-		Email:        fmt.Sprintf("mig-user-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hashed",
-		Role:         domain.UserRoleUser,
+		User: authkit.User{
+			Email:        fmt.Sprintf("mig-user-%d@example.com", time.Now().UnixNano()),
+			PasswordHash: "hashed",
+			Role:         domain.UserRoleUser,
+		},
 	}
 	_ = db.Create(&user)
 

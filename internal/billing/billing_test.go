@@ -39,9 +39,11 @@ func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *domain.
 	service := NewService(db, mockProvider, webhookSecret)
 
 	user := domain.User{
-		Email:        fmt.Sprintf("billing-user-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hashed",
-		Role:         domain.UserRoleUser,
+		User: authkit.User{
+			Email:        fmt.Sprintf("billing-user-%d@example.com", time.Now().UnixNano()),
+			PasswordHash: "hashed",
+			Role:         domain.UserRoleUser,
+		},
 	}
 	_ = db.Create(&user)
 

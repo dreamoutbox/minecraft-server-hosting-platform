@@ -225,9 +225,11 @@ func (s *Service) ProcessRegister(c *gin.Context) {
 	}
 
 	newUser := domain.User{
-		Email:        email,
-		PasswordHash: hashed,
-		Role:         domain.UserRoleUser,
+		User: authkit.User{
+			Email:        email,
+			PasswordHash: hashed,
+			Role:         domain.UserRoleUser,
+		},
 	}
 	if err := s.db.Create(&newUser).Error; err != nil {
 		s.renderView(c, "register.html", map[string]interface{}{"FlashError": "Failed saving account"})

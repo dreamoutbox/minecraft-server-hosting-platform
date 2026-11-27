@@ -1,13 +1,13 @@
 # Plan: Authkit Session Auth & Cleanup
 
-### Phase 1: Decouple `authkit.User`, add `authkit` DB setup, and fix `Register` DB error check [STATUS: TODO]
+### Phase 1: Decouple `authkit.User`, add `authkit` DB setup, and fix `Register` DB error check [STATUS: DONE]
 - Goal: Remove platform-specific billing columns from `shared/authkit`, provide an `authkit` migration helper, and fix the error-handling bug in `Handler.Register`.
 - Tasks:
-  - [ ] Remove `CustomerID` and `PaymentMethodID` from `authkit.User` in `shared/authkit/model.go`.
-  - [ ] Add `AutoMigrate(db *gorm.DB) error` in `shared/authkit` to create the `users` table (and prepare a single entry point for authkit table setup).
-  - [ ] Change `domain.User` in `internal/domain/models.go` from `type User = authkit.User` to a struct embedding `authkit.User` with `CustomerID`, `PaymentMethodID`, and `TableName() string { return "users" }` (matching `fileserver/internal/store/models.go`).
-  - [ ] Update `domain.User{...}` composite literals across `internal/` (`internal/domain/db.go`, `internal/domain/db_test.go`, `internal/dashboard/dashboard.go`, `internal/dashboard/dashboard_test.go`, `internal/dashboard/admin_test.go`, `internal/hosting/hosting_test.go`, `internal/hosting/migration_test.go`, `internal/backup/backup_test.go`, `internal/billing/billing_test.go`, `internal/jobs/queue_test.go`).
-  - [ ] Fix `Handler.Register` in `shared/authkit/handler.go` to check `errors.Is(err, gorm.ErrRecordNotFound)` so database errors return `500` instead of falling through to user creation.
+  - [x] Remove `CustomerID` and `PaymentMethodID` from `authkit.User` in `shared/authkit/model.go`.
+  - [x] Add `AutoMigrate(db *gorm.DB) error` in `shared/authkit` to create the `users` table (and prepare a single entry point for authkit table setup).
+  - [x] Change `domain.User` in `internal/domain/models.go` from `type User = authkit.User` to a struct embedding `authkit.User` with `CustomerID`, `PaymentMethodID`, and `TableName() string { return "users" }` (matching `fileserver/internal/store/models.go`).
+  - [x] Update `domain.User{...}` composite literals across `internal/` (`internal/domain/db.go`, `internal/domain/db_test.go`, `internal/dashboard/dashboard.go`, `internal/dashboard/dashboard_test.go`, `internal/dashboard/admin_test.go`, `internal/hosting/hosting_test.go`, `internal/hosting/migration_test.go`, `internal/backup/backup_test.go`, `internal/billing/billing_test.go`, `internal/jobs/queue_test.go`).
+  - [x] Fix `Handler.Register` in `shared/authkit/handler.go` to check `errors.Is(err, gorm.ErrRecordNotFound)` so database errors return `500` instead of falling through to user creation.
 - Done when: `go test ./...` passes in `.`, `shared/authkit`, and `fileserver`; `authkit.User` has no billing fields while `domain.User` preserves `customer_id` and `payment_method_id` on the `users` table.
 
 ### Phase 2: Make access JWT expiry configurable via ENV [STATUS: TODO]

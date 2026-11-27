@@ -651,9 +651,11 @@ func TestExtendServerPanelInSettings(t *testing.T) {
 
 	suffix := time.Now().UnixNano()
 	owner := domain.User{
-		Email:        fmt.Sprintf("extend-panel-%d@example.com", suffix),
-		PasswordHash: "hash",
-		Role:         domain.UserRoleUser,
+		User: authkit.User{
+			Email:        fmt.Sprintf("extend-panel-%d@example.com", suffix),
+			PasswordHash: "hash",
+			Role:         domain.UserRoleUser,
+		},
 	}
 	if err := dashSvc.db.Create(&owner).Error; err != nil {
 		t.Fatalf("failed creating user: %v", err)
@@ -727,9 +729,11 @@ func TestDashboardExpiringServerAlerts(t *testing.T) {
 
 	suffix := time.Now().UnixNano()
 	owner := domain.User{
-		Email:        fmt.Sprintf("expiring-alert-%d@example.com", suffix),
-		PasswordHash: "hash",
-		Role:         domain.UserRoleUser,
+		User: authkit.User{
+			Email:        fmt.Sprintf("expiring-alert-%d@example.com", suffix),
+			PasswordHash: "hash",
+			Role:         domain.UserRoleUser,
+		},
 	}
 	if err := dashSvc.db.Create(&owner).Error; err != nil {
 		t.Fatalf("failed creating user: %v", err)

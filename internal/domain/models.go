@@ -192,7 +192,17 @@ const (
 )
 
 // User represents an authenticated account on the hosting platform.
-type User = authkit.User
+// Extends authkit.User with platform-specific billing identifiers.
+type User struct {
+	authkit.User
+	CustomerID      string `gorm:"type:varchar(128)" json:"customer_id,omitempty"`
+	PaymentMethodID string `gorm:"type:varchar(128)" json:"payment_method_id,omitempty"`
+}
+
+// TableName pins domain.User to the shared "users" table.
+func (User) TableName() string {
+	return "users"
+}
 
 // Plan defines hardware resource limits and monthly cost for a Minecraft server tier.
 // Note: Intentionally decoupled from Stripe plan or price identifiers.

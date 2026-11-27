@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/dreamoutbox/authkit"
 )
 
 // getTestDSN returns the PostgreSQL connection string for integration testing.
@@ -82,7 +84,7 @@ func TestServerPortUniqueConstraint(t *testing.T) {
 		t.Fatalf("AutoMigrate failed: %v", err)
 	}
 
-	user := User{Email: "test-port@example.com", PasswordHash: "hashed", Role: UserRoleUser}
+	user := User{User: authkit.User{Email: "test-port@example.com", PasswordHash: "hashed", Role: UserRoleUser}}
 	_ = db.Where("email = ?", user.Email).FirstOrCreate(&user)
 
 	host := Host{

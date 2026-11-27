@@ -157,9 +157,11 @@ func setupHostingTestEnv(t *testing.T) (*gin.Engine, *Service, *mockWorkerClient
 
 	// Create test user
 	user := domain.User{
-		Email:        fmt.Sprintf("hosting-user-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hashed",
-		Role:         domain.UserRoleUser,
+		User: authkit.User{
+			Email:        fmt.Sprintf("hosting-user-%d@example.com", time.Now().UnixNano()),
+			PasswordHash: "hashed",
+			Role:         domain.UserRoleUser,
+		},
 	}
 	_ = db.Create(&user)
 
@@ -497,14 +499,18 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 	}
 
 	user := domain.User{
-		Email:        fmt.Sprintf("fs-owner-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hashed",
-		Role:         domain.UserRoleUser,
+		User: authkit.User{
+			Email:        fmt.Sprintf("fs-owner-%d@example.com", time.Now().UnixNano()),
+			PasswordHash: "hashed",
+			Role:         domain.UserRoleUser,
+		},
 	}
 	adminUser := domain.User{
-		Email:        fmt.Sprintf("fs-admin-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hashed",
-		Role:         domain.UserRoleAdmin,
+		User: authkit.User{
+			Email:        fmt.Sprintf("fs-admin-%d@example.com", time.Now().UnixNano()),
+			PasswordHash: "hashed",
+			Role:         domain.UserRoleAdmin,
+		},
 	}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)

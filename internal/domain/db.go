@@ -220,9 +220,11 @@ func SeedUsers(db *gorm.DB, specs []SeedUserSpec) error {
 		}
 
 		user := User{
-			Email:        spec.Email,
-			PasswordHash: hashedPassword,
-			Role:         spec.Role,
+			User: authkit.User{
+				Email:        spec.Email,
+				PasswordHash: hashedPassword,
+				Role:         spec.Role,
+			},
 		}
 		if err := db.Create(&user).Error; err != nil {
 			return err

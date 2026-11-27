@@ -220,9 +220,11 @@ func setupBackupTestEnv(t *testing.T) (*Service, *mockWorkerForBackup, storage.S
 	})
 
 	user := domain.User{
-		Email:        fmt.Sprintf("backup-user-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hashed",
-		Role:         domain.UserRoleUser,
+		User: authkit.User{
+			Email:        fmt.Sprintf("backup-user-%d@example.com", time.Now().UnixNano()),
+			PasswordHash: "hashed",
+			Role:         domain.UserRoleUser,
+		},
 	}
 	_ = db.Create(&user)
 

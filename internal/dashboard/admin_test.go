@@ -45,8 +45,8 @@ func TestAdminMenuSearchPaginationAndPlanCRUD(t *testing.T) {
 	suffix := time.Now().UnixNano()
 	userEmail := fmt.Sprintf("admin-test-user-%d@example.com", suffix)
 	adminEmail := fmt.Sprintf("admin-test-owner-%d@example.com", suffix)
-	userRecord := domain.User{Email: userEmail, PasswordHash: "hash", Role: domain.UserRoleUser}
-	adminRecord := domain.User{Email: adminEmail, PasswordHash: "hash", Role: domain.UserRoleAdmin}
+	userRecord := domain.User{User: authkit.User{Email: userEmail, PasswordHash: "hash", Role: domain.UserRoleUser}}
+	adminRecord := domain.User{User: authkit.User{Email: adminEmail, PasswordHash: "hash", Role: domain.UserRoleAdmin}}
 	if err := dashSvc.db.Create(&userRecord).Error; err != nil {
 		t.Fatalf("failed creating test user: %v", err)
 	}
@@ -428,10 +428,10 @@ func TestStaffAndAdminCrossUserServerActions(t *testing.T) {
 	}
 
 	suffix := time.Now().UnixNano()
-	owner := domain.User{Email: fmt.Sprintf("owner-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}
-	otherUser := domain.User{Email: fmt.Sprintf("other-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}
-	staffUser := domain.User{Email: fmt.Sprintf("staff-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleStaff}
-	adminUser := domain.User{Email: fmt.Sprintf("admin-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleAdmin}
+	owner := domain.User{User: authkit.User{Email: fmt.Sprintf("owner-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}}
+	otherUser := domain.User{User: authkit.User{Email: fmt.Sprintf("other-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}}
+	staffUser := domain.User{User: authkit.User{Email: fmt.Sprintf("staff-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleStaff}}
+	adminUser := domain.User{User: authkit.User{Email: fmt.Sprintf("admin-cross-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleAdmin}}
 	for _, u := range []*domain.User{&owner, &otherUser, &staffUser, &adminUser} {
 		if err := dashSvc.db.Create(u).Error; err != nil {
 			t.Fatalf("failed creating user %s: %v", u.Email, err)
@@ -603,10 +603,10 @@ func TestStaffAndAdminOpenFileManagerOnOtherUserServer(t *testing.T) {
 	defer fakeFS.Close()
 
 	suffix := time.Now().UnixNano()
-	owner := domain.User{Email: fmt.Sprintf("fs-owner-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}
-	other := domain.User{Email: fmt.Sprintf("fs-other-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}
-	staff := domain.User{Email: fmt.Sprintf("fs-staff-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleStaff}
-	admin := domain.User{Email: fmt.Sprintf("fs-admin-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleAdmin}
+	owner := domain.User{User: authkit.User{Email: fmt.Sprintf("fs-owner-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}}
+	other := domain.User{User: authkit.User{Email: fmt.Sprintf("fs-other-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleUser}}
+	staff := domain.User{User: authkit.User{Email: fmt.Sprintf("fs-staff-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleStaff}}
+	admin := domain.User{User: authkit.User{Email: fmt.Sprintf("fs-admin-%d@example.com", suffix), PasswordHash: "hash", Role: domain.UserRoleAdmin}}
 	for _, u := range []*domain.User{&owner, &other, &staff, &admin} {
 		if err := dashSvc.db.Create(u).Error; err != nil {
 			t.Fatalf("failed creating user: %v", err)
