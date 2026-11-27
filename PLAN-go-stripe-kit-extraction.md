@@ -47,11 +47,11 @@ internal/billings/              # Minecraft server hosting platform billing
 
 ---
 
-### Phase 1: Scaffold `./go-stripe-kit` module, core types, and workspace/Docker wiring [STATUS: TODO]
+### Phase 1: Scaffold `./go-stripe-kit` module, core types, and workspace/Docker wiring [STATUS: DONE]
 - Goal: Create the standalone `github.com/dreamoutbox/go-stripe-kit` module with framework-agnostic enums, request/result types, and the `PaymentProvider` interface, wired into `go.work`, root `go.mod`, and Dockerfiles.
 - Tasks:
-  - [ ] Create `go-stripe-kit/go.mod` (`module github.com/dreamoutbox/go-stripe-kit`, Go `1.27.1`) with core dependencies (`github.com/stripe/stripe-go/v81`, `github.com/google/uuid`).
-  - [ ] Define core enums and structs (one type per file) in `go-stripe-kit/` (`package stripekit`):
+  - [x] Create `go-stripe-kit/go.mod` (`module github.com/dreamoutbox/go-stripe-kit`, Go `1.27.1`) with core dependencies (`github.com/stripe/stripe-go/v81`, `github.com/google/uuid`).
+  - [x] Define core enums and structs (one type per file) in `go-stripe-kit/` (`package stripekit`):
     - `payment_status.go` (`PaymentStatus`: `pending`, `succeeded`, `failed`, `refunded`)
     - `event_type.go` (`EventType`: `checkout.session.completed`, `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`)
     - `refund_reason.go` (`RefundReason`: `duplicate`, `fraudulent`, `requested_by_customer` + `IsValid()`)
@@ -61,8 +61,8 @@ internal/billings/              # Minecraft server hosting platform billing
     - `refund.go` (`RefundRequest` with `PaymentID`, `AmountCents` [0 = full refund, >0 = partial], `Reason`, `Metadata`, `IdempotencyKey`, and `Validate()`; and `RefundResult` with `RefundID`, `PaymentID`, `AmountCents`, `Currency`, `Status`, `Reason`)
     - `webhook_event.go` (`WebhookEvent` with `Type EventType`, `PaymentID`, `SessionID`, `RefundID`, `ClientReferenceID`, `AmountCents`, `Currency`, `CustomerID`, `Status PaymentStatus`, `Metadata map[string]string`)
     - `provider.go` (`PaymentProvider` interface: `CreatePayment`, `GetPayment`, `Refund`, `CreateCheckoutSession`, `VerifyWebhookSignature`)
-  - [ ] Register `./go-stripe-kit` in `go.work` (`use` and `replace github.com/dreamoutbox/go-stripe-kit v0.0.0 => ./go-stripe-kit`) and add `require` + `replace` in root `go.mod` (matching `./fileserver`).
-  - [ ] Update `Dockerfile.apiserver`, `Dockerfile.jobworker`, `Dockerfile.nodemanager`, and `fileserver/Dockerfile` to `COPY go-stripe-kit/go.* ./go-stripe-kit/` before `go mod download` / `go build`.
+  - [x] Register `./go-stripe-kit` in `go.work` (`use` and `replace github.com/dreamoutbox/go-stripe-kit v0.0.0 => ./go-stripe-kit`) and add `require` + `replace` in root `go.mod` (matching `./fileserver`).
+  - [x] Update `Dockerfile.apiserver`, `Dockerfile.jobworker`, `Dockerfile.nodemanager`, and `fileserver/Dockerfile` to `COPY go-stripe-kit/go.* ./go-stripe-kit/` before `go mod download` / `go build`.
 - Done when: `go build ./go-stripe-kit/...` and `go build ./...` pass, and `go list -m github.com/dreamoutbox/go-stripe-kit` resolves to `./go-stripe-kit`.
 
 ### Phase 2: Implement `StripePaymentProvider`, `MockPaymentProvider`, and refund operations [STATUS: TODO]
