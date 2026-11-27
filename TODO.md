@@ -159,13 +159,13 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] move each jobs in internal/jobs/queue.go to it own file. one job per one go file. example: jobworker/jobs/process_expired_servers.go, jobworker/jobs/cleanup_retention_servers.go, jobworker/jobs/enqueue_all_image_backups.go, etc...
 
-- [ ] move internal/middleware to shared/gin_middlewares. one middleware per one go file.
+- [x] move internal/middleware to shared/gin_middlewares. one middleware per one go file.
+
+- [x] move shared/authkit to new git repo
 
 ---
 
 # BACKLOG
-
-- [ ] move shared/authkit to new git repo
 
 - [ ] add button to kill server. for unresponsive mc server.
 
