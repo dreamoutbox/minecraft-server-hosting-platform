@@ -91,12 +91,12 @@ internal/
   - [x] Update imports in `cmd/jobworker/main.go`, `cmd/apiserver/main.go`, `internal/jobs/handler.go`, and `internal/dashboard/`.
 - Done when: `go build ./...` and `go test -race ./jobworker/... ./internal/jobs/... ./cmd/...` pass, and `go list -f '{{.Deps}}' ./cmd/jobworker` contains no `internal/` packages.
 
-### Phase 6: Extract shared dashboard renderer and helpers in `internal/dashboard` [STATUS: TODO]
-- Goal: Export template rendering, auth/admin guard, and pagination helpers from `internal/dashboard` so category route packages can depend on them without circular imports.
+### Phase 6: Extract shared dashboard renderer and helpers in `internal/dashboard/view` [STATUS: DONE]
+- Goal: Export template rendering, auth/admin guard, and pagination helpers from `internal/dashboard/view` so category route packages can depend on them without circular imports.
 - Tasks:
-  - [ ] Create `internal/dashboard/renderer.go` exporting `Renderer` (wrapping `//go:embed templates/*`, `RenderView`, `RenderViewWithStatus`, `RenderAdminView`).
-  - [ ] Create `internal/dashboard/helpers.go` exporting shared helpers used across route categories (`RequireAdmin`, `EffectiveServerUserID`, `ParseIDParam`, `ServerRedirectURL`, `ServerExpiryFlags`, `Pagination`, `ParseSearchAndPage`, `ApplySearchFilter`, `PaginateQuery`, `AdminPageURL`, `LoadUserEmailMap`, `LoadServerNameMap`).
-  - [ ] Refactor `internal/dashboard/dashboard.go` and `internal/dashboard/admin.go` to delegate to `Renderer` and the exported helpers.
+  - [x] Move `internal/dashboard/templates` to `internal/dashboard/view/templates` and create `internal/dashboard/view/renderer.go` exporting `Renderer` (`RenderView`, `RenderViewWithStatus`, `RenderAdminView`).
+  - [x] Create `internal/dashboard/view/helpers.go` exporting shared helpers used across route categories (`RequireAdmin`, `EffectiveServerUserID`, `ParseIDParam`, `ServerRedirectURL`, `ServerExpiryFlags`, `Pagination`, `ParseSearchAndPage`, `ApplySearchFilter`, `PaginateQuery`, `AdminPageURL`, `LoadUserEmailMap`, `LoadServerNameMap`).
+  - [x] Refactor `internal/dashboard/dashboard.go` and `internal/dashboard/admin.go` to delegate to `view.Renderer` and the exported helpers.
 - Done when: `go test -race ./internal/dashboard/...` passes with zero behavior or route changes.
 
 ### Phase 7: Split `users` and `billings` routes into `internal/users/` and `internal/billings/` [STATUS: TODO]

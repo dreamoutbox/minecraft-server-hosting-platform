@@ -9,211 +9,45 @@ import (
 	"strconv"
 	"strings"
 
-	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard/view"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 )
 
-const (
-	defaultAdminPageSize = 20
-	maxAdminPageSize     = 100
-	adminPageWindow      = 5
-)
-
-// Pagination holds search query state and page navigation metadata for admin list views.
-type Pagination struct {
-	Query      string
-	Page       int
-	PageSize   int
-	TotalCount int64
-	TotalPages int
-	HasPrev    bool
-	HasNext    bool
-	PrevPage   int
-	NextPage   int
-	Pages      []int
-	BaseURL    string
-}
+type Pagination = view.Pagination
 
 func (s *Service) requireAdmin(c *gin.Context, message string) bool {
-	if authmw.GetUserRoleFromContext(c).IsAdmin() {
-		return true
-	}
-	s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
-		"ErrorMessage": message,
-	})
-	return false
+	return view.RequireAdmin(c, s.renderer, message)
 }
 
 func (s *Service) renderAdminView(c *gin.Context, page string, data map[string]interface{}) {
-	if data == nil {
-		data = make(map[string]interface{})
-	}
-	data["FullWidth"] = true
-	s.renderView(c, page, data)
+	s.renderer.RenderAdminView(c, page, data)
 }
 
-// effectiveServerUserID returns 0 for staff and admin users so they can inspect and manage
-// any server, and returns the authenticated user ID for regular users.
 func (s *Service) effectiveServerUserID(c *gin.Context) uint {
-	if authmw.GetUserRoleFromContext(c).IsStaffOrAdmin() {
-		return 0
-	}
-	userID, _ := authmw.GetUserIDFromContext(c)
-	return userID
+	return view.EffectiveServerUserID(c)
 }
 
 func parseSearchAndPage(c *gin.Context) (string, int, int) {
-	query := strings.TrimSpace(c.Query("q"))
-
-	page := 1
-	if raw := strings.TrimSpace(c.Query("page")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
-			page = parsed
-		}
-	}
-
-	pageSize := defaultAdminPageSize
-	if rawSize := strings.TrimSpace(c.Query("page_size")); rawSize != "" {
-		if parsed, err := strconv.Atoi(rawSize); err == nil && parsed > 0 {
-			if parsed > maxAdminPageSize {
-				parsed = maxAdminPageSize
-			}
-			pageSize = parsed
-		}
-	}
-
-	return query, page, pageSize
+	return view.ParseSearchAndPage(c)
 }
 
 func applySearchFilter(db *gorm.DB, query string, conditions ...string) *gorm.DB {
-	if query == "" || len(conditions) == 0 {
-		return db
-	}
-	pattern := "%" + strings.ToLower(query) + "%"
-	args := make([]interface{}, len(conditions))
-	for i := range conditions {
-		args[i] = pattern
-	}
-	return db.Where("("+strings.Join(conditions, " OR ")+")", args...)
+	return view.ApplySearchFilter(db, query, conditions...)
 }
 
 func paginateQuery(query *gorm.DB, search string, page, pageSize int, baseURL, orderBy string, dest interface{}) (Pagination, error) {
-	var totalCount int64
-	if err := query.Count(&totalCount).Error; err != nil {
-		return Pagination{}, err
-	}
-
-	totalPages := int((totalCount + int64(pageSize) - 1) / int64(pageSize))
-	if totalPages < 1 {
-		totalPages = 1
-	}
-	if page > totalPages {
-		page = totalPages
-	}
-	if page < 1 {
-		page = 1
-	}
-
-	offset := (page - 1) * pageSize
-	if err := query.Order(orderBy).Offset(offset).Limit(pageSize).Find(dest).Error; err != nil {
-		return Pagination{}, err
-	}
-
-	startPage := page - adminPageWindow/2
-	if startPage < 1 {
-		startPage = 1
-	}
-	endPage := startPage + adminPageWindow - 1
-	if endPage > totalPages {
-		endPage = totalPages
-		startPage = endPage - adminPageWindow + 1
-		if startPage < 1 {
-			startPage = 1
-		}
-	}
-	pages := make([]int, 0, endPage-startPage+1)
-	for p := startPage; p <= endPage; p++ {
-		pages = append(pages, p)
-	}
-
-	return Pagination{
-		Query:      search,
-		Page:       page,
-		PageSize:   pageSize,
-		TotalCount: totalCount,
-		TotalPages: totalPages,
-		HasPrev:    page > 1,
-		HasNext:    page < totalPages,
-		PrevPage:   page - 1,
-		NextPage:   page + 1,
-		Pages:      pages,
-		BaseURL:    baseURL,
-	}, nil
-}
-
-func adminPageURL(baseURL, query string, page, pageSize int) string {
-	params := url.Values{}
-	if query != "" {
-		params.Set("q", query)
-	}
-	if page > 1 {
-		params.Set("page", strconv.Itoa(page))
-	}
-	if pageSize > 0 && pageSize != defaultAdminPageSize {
-		params.Set("page_size", strconv.Itoa(pageSize))
-	}
-	encoded := params.Encode()
-	if encoded == "" {
-		return baseURL
-	}
-	return baseURL + "?" + encoded
+	return view.PaginateQuery(query, search, page, pageSize, baseURL, orderBy, dest)
 }
 
 func (s *Service) loadUserEmailMap(ctx context.Context, userIDs []uint) map[uint]string {
-	result := make(map[uint]string)
-	unique := uniquePositiveIDs(userIDs)
-	if len(unique) == 0 {
-		return result
-	}
-	var users []domain.User
-	_ = s.db.WithContext(ctx).Select("id, email").Where("id IN ?", unique).Find(&users).Error
-	for _, u := range users {
-		result[u.ID] = u.Email
-	}
-	return result
+	return view.LoadUserEmailMap(ctx, s.db, userIDs)
 }
 
 func (s *Service) loadServerNameMap(ctx context.Context, serverIDs []uint) map[uint]string {
-	result := make(map[uint]string)
-	unique := uniquePositiveIDs(serverIDs)
-	if len(unique) == 0 {
-		return result
-	}
-	var servers []domain.Server
-	_ = s.db.WithContext(ctx).Select("id, name").Where("id IN ?", unique).Find(&servers).Error
-	for _, srv := range servers {
-		result[srv.ID] = srv.Name
-	}
-	return result
-}
-
-func uniquePositiveIDs(ids []uint) []uint {
-	seen := make(map[uint]struct{}, len(ids))
-	out := make([]uint, 0, len(ids))
-	for _, id := range ids {
-		if id == 0 {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	return out
+	return view.LoadServerNameMap(ctx, s.db, serverIDs)
 }
 
 // AdminListServers renders all provisioned Minecraft servers across all users with search and pagination.

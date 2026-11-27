@@ -1,10 +1,8 @@
 package dashboard
 
 import (
-	"embed"
 	"errors"
 	"fmt"
-	"html/template"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -17,20 +15,18 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard/view"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/hosting"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
 )
 
 const (
-	defaultServerRetentionDays = 7
-	serverExpiringSoonWindow   = 7 * 24 * time.Hour
+	defaultServerRetentionDays = view.DefaultServerRetentionDays
+	serverExpiringSoonWindow   = view.ServerExpiringSoonWindow
 )
-
-//go:embed templates/*
-var templateFS embed.FS
 
 // Service coordinates dashboard views and delegates exclusively to public domain service interfaces.
 type Service struct {
@@ -41,7 +37,7 @@ type Service struct {
 	migrationSvc *hosting.MigrationService
 	jobSvc       *jobs.Service
 	authsessions *session.Manager
-	tmpl         map[string]*template.Template
+	renderer     *view.Renderer
 }
 
 // NewService instantiates a decoupled dashboard controller.
@@ -67,7 +63,7 @@ func NewService(
 	jobSvc *jobs.Service,
 	authsessions *session.Manager,
 ) *Service {
-	s := &Service{
+	return &Service{
 		db:           db,
 		hostingSvc:   hostingSvc,
 		backupSvc:    backupSvc,
@@ -75,97 +71,17 @@ func NewService(
 		migrationSvc: migrationSvc,
 		jobSvc:       jobSvc,
 		authsessions: authsessions,
-		tmpl:         make(map[string]*template.Template),
-	}
-	s.loadTemplates()
-	return s
-}
-
-// loadTemplates parses HTML templates with custom arithmetic functions.
-func (s *Service) loadTemplates() {
-	funcMap := template.FuncMap{
-		"div": func(a, b int64) int64 {
-			if b == 0 {
-				return 0
-			}
-			return a / b
-		},
-		"formatUSD": func(cents int64) string {
-			return fmt.Sprintf("$%.2f", float64(cents)/100.0)
-		},
-		"pageURL": adminPageURL,
-	}
-
-	pages := []string{
-		"login.html",
-		"register.html",
-		"servers_list.html",
-		"server_create.html",
-		"server_buy.html",
-		"server_detail.html",
-		"server_console.html",
-		"server_backups.html",
-		"server_logs.html",
-		"server_settings.html",
-		"server_jobs.html",
-		"server_host.html",
-		"users.html",
-		"billing.html",
-		"forbidden.html",
-		"admin_servers.html",
-		"admin_orders.html",
-		"admin_payments.html",
-		"admin_jobs.html",
-		"admin_logs.html",
-		"admin_plans.html",
-	}
-
-	for _, page := range pages {
-		tmpl := template.Must(template.New("layout").Funcs(funcMap).ParseFS(
-			templateFS,
-			"templates/layout.html",
-			"templates/server_subnav.html",
-			"templates/admin_controls.html",
-			"templates/"+page,
-		))
-		s.tmpl[page] = tmpl
+		renderer:     view.NewRenderer(),
 	}
 }
 
 // renderView renders an HTML template page with HTTP 200 and flash message support.
 func (s *Service) renderView(c *gin.Context, page string, data map[string]interface{}) {
-	s.renderViewWithStatus(c, http.StatusOK, page, data)
+	s.renderer.RenderView(c, page, data)
 }
 
 func (s *Service) renderViewWithStatus(c *gin.Context, status int, page string, data map[string]interface{}) {
-	tmpl, exists := s.tmpl[page]
-	if !exists {
-		c.String(http.StatusInternalServerError, "template %s not found", page)
-		return
-	}
-
-	if data == nil {
-		data = make(map[string]interface{})
-	}
-
-	if userVal, exists := c.Get(authkit.ContextEmailKey); exists {
-		data["UserEmail"] = userVal
-	}
-	role := authmw.GetUserRoleFromContext(c)
-	data["UserRole"] = role
-	data["IsStaffOrAdmin"] = role.IsStaffOrAdmin()
-	data["IsAdmin"] = role.IsAdmin()
-
-	if msg := c.Query("success"); msg != "" {
-		data["FlashSuccess"] = msg
-	}
-	if msg := c.Query("error"); msg != "" {
-		data["FlashError"] = msg
-	}
-
-	c.Status(status)
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	_ = tmpl.ExecuteTemplate(c.Writer, "layout", data)
+	s.renderer.RenderViewWithStatus(c, status, page, data)
 }
 
 // ShowLogin renders the login page.
@@ -379,9 +295,7 @@ func (s *Service) ProcessBuyServer(c *gin.Context) {
 //
 //	isExpired, canExtend := serverExpiryFlags(server, time.Now())
 func serverExpiryFlags(server *domain.Server, now time.Time) (bool, bool) {
-	isExpired := server.IsExpired(now)
-	canExtend := server.ExpiresAt != nil && server.IsWithinRetention(now, defaultServerRetentionDays)
-	return isExpired, canExtend
+	return view.ServerExpiryFlags(server, now)
 }
 
 // ExtendServerDuration creates a Stripe Checkout session to extend a server by 30 days.
@@ -943,19 +857,11 @@ func (s *Service) TriggerMigration(c *gin.Context) {
 }
 
 func parseIDParam(c *gin.Context, name string) (uint, bool) {
-	val, err := strconv.ParseUint(c.Param(name), 10, 64)
-	if err != nil || val == 0 {
-		return 0, false
-	}
-	return uint(val), true
+	return view.ParseIDParam(c, name)
 }
 
 func serverRedirectURL(serverID uint, subpath, flashKey, message string) string {
-	base := fmt.Sprintf("/dashboard/servers/%d%s", serverID, subpath)
-	if flashKey == "" || message == "" {
-		return base
-	}
-	return fmt.Sprintf("%s?%s=%s", base, flashKey, url.QueryEscape(message))
+	return view.ServerRedirectURL(serverID, subpath, flashKey, message)
 }
 
 // OpenFileManager provisions fileserver access for the server and redirects to the node's file manager.
