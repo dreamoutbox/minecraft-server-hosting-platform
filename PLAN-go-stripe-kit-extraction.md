@@ -79,16 +79,16 @@ internal/billings/              # Minecraft server hosting platform billing
   - [x] Add `go-stripe-kit/provider_test.go` covering checkout session creation, payment create/get, full refund, partial refund, refund validation/over-refund errors, and webhook signing/verification (valid, missing header, tampered signature, `checkout.session.completed`, `charge.refunded`).
 - Done when: `cd go-stripe-kit && go test -v -race ./...` passes with zero DB or network dependencies, and `go list -f '{{.Deps}}' ./go-stripe-kit` contains no web framework (`gin`, `echo`, `fiber`) or GORM imports.
 
-### Phase 3: Implement framework-agnostic core `Service` in `./go-stripe-kit` [STATUS: TODO]
+### Phase 3: Implement framework-agnostic core `Service` in `./go-stripe-kit` [STATUS: DONE]
 - Goal: Add a reusable core service in `./go-stripe-kit` that coordinates provider calls, refunds, and webhook verification/dispatch independent of any HTTP framework.
 - Tasks:
-  - [ ] Create `go-stripe-kit/webhook_handler.go` defining `WebhookHandler` (`func(ctx context.Context, event *WebhookEvent) error`) and `RefundHook` (`func(ctx context.Context, res *RefundResult) error`).
-  - [ ] Create `go-stripe-kit/service.go` (`Service`, `NewService(provider PaymentProvider, webhookSecret string)`):
+  - [x] Create `go-stripe-kit/webhook_handler.go` defining `WebhookHandler` (`func(ctx context.Context, event *WebhookEvent) error`) and `RefundHook` (`func(ctx context.Context, res *RefundResult) error`).
+  - [x] Create `go-stripe-kit/service.go` (`Service`, `NewService(provider PaymentProvider, webhookSecret string)`):
     - Expose `CreatePayment`, `GetPayment`, and `CreateCheckoutSession` with input guards.
     - Expose `Refund(ctx context.Context, req RefundRequest) (*RefundResult, error)` validating `req`, executing `provider.Refund`, and invoking an optional registered `RefundHook`.
     - Expose `OnEvent(eventType EventType, handler WebhookHandler)` and `OnWebhook(handler WebhookHandler)` to register application callbacks.
     - Expose `HandleWebhook(ctx context.Context, payload []byte, signatureHeader string) (*WebhookEvent, error)` to verify the signature and dispatch the parsed event to matching callbacks.
-  - [ ] Add `go-stripe-kit/service_test.go` testing checkout, full/partial refund execution and validation, refund hook execution, webhook verification failure rejection, and event-specific + catch-all webhook dispatch.
+  - [x] Add `go-stripe-kit/service_test.go` testing checkout, full/partial refund execution and validation, refund hook execution, webhook verification failure rejection, and event-specific + catch-all webhook dispatch.
 - Done when: `cd go-stripe-kit && go test -v -race ./...` passes and `go-stripe-kit` root package has zero HTTP framework dependencies.
 
 ### Phase 4: Implement Gin HTTP adapter in `./go-stripe-kit/ginapi` [STATUS: TODO]
