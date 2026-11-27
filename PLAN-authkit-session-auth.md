@@ -19,14 +19,14 @@
   - [x] Add unit tests in `shared/authkit/authkit_test.go` and `internal/config` covering default `15m`, custom valid durations, and invalid/non-positive values.
 - Done when: `go test ./...` passes across all modules; setting `JWT_ACCESS_TTL` changes the `exp` claim on issued access JWTs, and leaving it unset defaults to 15 minutes.
 
-### Phase 3: Implement `github.com/dreamoutbox/authkit/session` package and `sessions` table [STATUS: TODO]
+### Phase 3: Implement `github.com/dreamoutbox/authkit/session` package and `sessions` table [STATUS: DONE]
 - Goal: Build a DB-backed opaque session cookie package importable as `"github.com/dreamoutbox/authkit/session"` with secure cookie handling.
 - Tasks:
-  - [ ] Create `shared/authkit/session/session.go` defining the `Session` GORM model (`TokenHash` primary key storing SHA-256 of the opaque random cookie token, `UserID` indexed, `ExpiresAt` indexed, `CreatedAt`, `LastSeenAt`).
-  - [ ] Create `shared/authkit/session/store.go` with `AutoMigrate(db *gorm.DB) error` (creating the `sessions` table) and `Store` methods (`Create`, `GetValid`, `Delete`, `DeleteByUserID`, `PruneExpired`); wire `sessions` migration into `authkit.AutoMigrate` (or call `session.AutoMigrate` from authkit's store setup function).
-  - [ ] Create `shared/authkit/session/cookie.go` with `CookieConfig` (`Name`, `MaxAgeSeconds`, `Secure`, `SameSite`, `Path`, `Domain`) and `SetCookie` / `ClearCookie` helpers (`HttpOnly: true`, `SameSite=Lax` by default, and matching `Secure` flag on both set and clear).
-  - [ ] Create `shared/authkit/session/middleware.go` with `Middleware(store *Store, cfg CookieConfig, loginPath string) gin.HandlerFunc` that validates the cookie against `sessions`, loads the current `authkit.User` from DB (ensuring immediate revocation and role updates), sets `authkit.ContextUserIDKey` / `ContextEmailKey` / `ContextRoleKey`, and clears invalid/expired cookies before redirecting or returning `401`.
-  - [ ] Add unit tests in `shared/authkit/session/session_test.go` covering session creation, validation, expiration, server-side logout revocation, live role reflection, and cookie `HttpOnly`/`SameSite`/`Secure` attributes on both set and clear.
+  - [x] Create `shared/authkit/session/session.go` defining the `Session` GORM model (`TokenHash` primary key storing SHA-256 of the opaque random cookie token, `UserID` indexed, `ExpiresAt` indexed, `CreatedAt`, `LastSeenAt`).
+  - [x] Create `shared/authkit/session/store.go` with `AutoMigrate(db *gorm.DB) error` (creating the `sessions` table) and `Store` methods (`Create`, `GetValid`, `Delete`, `DeleteByUserID`, `PruneExpired`); wire `sessions` migration into `authkit.AutoMigrate` (or call `session.AutoMigrate` from authkit's store setup function).
+  - [x] Create `shared/authkit/session/cookie.go` with `CookieConfig` (`Name`, `MaxAgeSeconds`, `Secure`, `SameSite`, `Path`, `Domain`) and `SetCookie` / `ClearCookie` helpers (`HttpOnly: true`, `SameSite=Lax` by default, and matching `Secure` flag on both set and clear).
+  - [x] Create `shared/authkit/session/middleware.go` with `Middleware(store *Store, cfg CookieConfig, loginPath string) gin.HandlerFunc` that validates the cookie against `sessions`, loads the current `authkit.User` from DB (ensuring immediate revocation and role updates), sets `authkit.ContextUserIDKey` / `ContextEmailKey` / `ContextRoleKey`, and clears invalid/expired cookies before redirecting or returning `401`.
+  - [x] Add unit tests in `shared/authkit/session/session_test.go` covering session creation, validation, expiration, server-side logout revocation, live role reflection, and cookie `HttpOnly`/`SameSite`/`Secure` attributes on both set and clear.
 - Done when: `go test ./...` in `shared/authkit` passes and external packages can import `"github.com/dreamoutbox/authkit/session"`.
 
 ### Phase 4: Migrate `dashboard` to `authkit/session` and secure cookie config [STATUS: TODO]

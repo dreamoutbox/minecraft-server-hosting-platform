@@ -6,7 +6,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// AutoMigrate applies database schema migrations for core authkit tables.
+// AutoMigrate applies database schema migrations for core authkit tables (users and sessions).
 //
 // Arguments:
 //   - db: Active GORM database handle.
@@ -17,7 +17,7 @@ import (
 //	    return err
 //	}
 func AutoMigrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(&User{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &Session{}); err != nil {
 		return fmt.Errorf("failed migrating authkit tables: %w", err)
 	}
 	return nil
