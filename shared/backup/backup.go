@@ -11,8 +11,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 )
 
 // WorkerClientFactory instantiates a worker client targeting a specific host.
-type WorkerClientFactory func(baseURL string, apiKey string) worker.Client
+type WorkerClientFactory func(baseURL string, apiKey string) nodemanagerclient.Client
 
 // Service coordinates world snapshot archives, ext4 image backups, and restorations.
 type Service struct {
@@ -48,8 +48,8 @@ type Service struct {
 //	svc := backup.NewService(db, storageProvider, nil)
 func NewService(db *gorm.DB, storage storage.StorageProvider, factory WorkerClientFactory) *Service {
 	if factory == nil {
-		factory = func(baseURL string, apiKey string) worker.Client {
-			return worker.NewClient(baseURL, apiKey)
+		factory = func(baseURL string, apiKey string) nodemanagerclient.Client {
+			return nodemanagerclient.NewClient(baseURL, apiKey)
 		}
 	}
 
@@ -342,7 +342,7 @@ func (s *Service) RestoreServer(ctx context.Context, serverID uint, backupRecord
 	}
 
 	// Step 3: Restart container
-	ctrReq := worker.CreateContainerRequest{
+	ctrReq := nodemanagerclient.CreateContainerRequest{
 		ServerID:      server.ID,
 		Port:          server.Port,
 		CPULimit:      server.Plan.CPULimit,

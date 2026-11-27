@@ -19,13 +19,13 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 // mockWorkerClient records invocations for hosting integration verification.
 type mockWorkerClient struct {
 	createdVolumes    map[string]bool
-	createdContainers map[string]worker.CreateContainerRequest
+	createdContainers map[string]nodemanagerclient.CreateContainerRequest
 	stoppedContainers map[string]bool
 	deletedContainers map[string]bool
 	deletedVolumes    map[string]bool
@@ -34,25 +34,25 @@ type mockWorkerClient struct {
 func newMockWorkerClient() *mockWorkerClient {
 	return &mockWorkerClient{
 		createdVolumes:    make(map[string]bool),
-		createdContainers: make(map[string]worker.CreateContainerRequest),
+		createdContainers: make(map[string]nodemanagerclient.CreateContainerRequest),
 		stoppedContainers: make(map[string]bool),
 		deletedContainers: make(map[string]bool),
 		deletedVolumes:    make(map[string]bool),
 	}
 }
 
-func (m *mockWorkerClient) GetStatus(ctx context.Context) (*worker.HostStatusResponse, error) {
-	return &worker.HostStatusResponse{
+func (m *mockWorkerClient) GetStatus(ctx context.Context) (*nodemanagerclient.HostStatusResponse, error) {
+	return &nodemanagerclient.HostStatusResponse{
 		Hostname:         "node-test",
 		ActiveContainers: len(m.createdContainers),
 		MaxServers:       10,
 	}, nil
 }
 
-func (m *mockWorkerClient) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*worker.CreateVolumeResponse, error) {
+func (m *mockWorkerClient) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*nodemanagerclient.CreateVolumeResponse, error) {
 	id := fmt.Sprintf("%d", serverID)
 	m.createdVolumes[id] = true
-	return &worker.CreateVolumeResponse{
+	return &nodemanagerclient.CreateVolumeResponse{
 		MountPath: fmt.Sprintf("/var/lib/mc-platform/mounts/%d", serverID),
 		ImagePath: fmt.Sprintf("/var/lib/mc-platform/images/%d.img", serverID),
 	}, nil
@@ -71,26 +71,26 @@ func (m *mockWorkerClient) ImportVolume(ctx context.Context, volumeID string, r 
 	return nil
 }
 
-func (m *mockWorkerClient) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
-	return &worker.UploadVolumeBackupResponse{SizeBytes: 0}, nil
+func (m *mockWorkerClient) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*nodemanagerclient.UploadVolumeBackupResponse, error) {
+	return &nodemanagerclient.UploadVolumeBackupResponse{SizeBytes: 0}, nil
 }
 
 func (m *mockWorkerClient) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
 	return nil
 }
 
-func (m *mockWorkerClient) UploadImageBackup(ctx context.Context, volumeID string, req worker.UploadImageBackupRequest) (*worker.UploadImageBackupResponse, error) {
-	return &worker.UploadImageBackupResponse{}, nil
+func (m *mockWorkerClient) UploadImageBackup(ctx context.Context, volumeID string, req nodemanagerclient.UploadImageBackupRequest) (*nodemanagerclient.UploadImageBackupResponse, error) {
+	return &nodemanagerclient.UploadImageBackupResponse{}, nil
 }
 
-func (m *mockWorkerClient) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*worker.RestoreImageBackupResponse, error) {
-	return &worker.RestoreImageBackupResponse{}, nil
+func (m *mockWorkerClient) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*nodemanagerclient.RestoreImageBackupResponse, error) {
+	return &nodemanagerclient.RestoreImageBackupResponse{}, nil
 }
 
-func (m *mockWorkerClient) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
+func (m *mockWorkerClient) CreateContainer(ctx context.Context, req nodemanagerclient.CreateContainerRequest) (*nodemanagerclient.CreateContainerResponse, error) {
 	id := fmt.Sprintf("ctr-server-%d", req.ServerID)
 	m.createdContainers[id] = req
-	return &worker.CreateContainerResponse{
+	return &nodemanagerclient.CreateContainerResponse{
 		ContainerID: id,
 		Port:        req.Port,
 		MountPath:   req.MountPath,
@@ -107,22 +107,22 @@ func (m *mockWorkerClient) DeleteContainer(ctx context.Context, containerID stri
 	return nil
 }
 
-func (m *mockWorkerClient) GetContainerStatus(ctx context.Context, containerID string) (*worker.ContainerStatusResponse, error) {
-	return &worker.ContainerStatusResponse{
+func (m *mockWorkerClient) GetContainerStatus(ctx context.Context, containerID string) (*nodemanagerclient.ContainerStatusResponse, error) {
+	return &nodemanagerclient.ContainerStatusResponse{
 		ContainerID: containerID,
-		Status:      worker.ContainerStatusRunning,
+		Status:      nodemanagerclient.ContainerStatusRunning,
 	}, nil
 }
 
-func (m *mockWorkerClient) GetContainerLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
-	return &worker.ContainerLogsResponse{
+func (m *mockWorkerClient) GetContainerLogs(ctx context.Context, containerID string, tail int) (*nodemanagerclient.ContainerLogsResponse, error) {
+	return &nodemanagerclient.ContainerLogsResponse{
 		ContainerID: containerID,
 		Logs:        "[Server thread/INFO]: Starting minecraft server\n",
 	}, nil
 }
 
-func (m *mockWorkerClient) ExecContainerCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
-	return &worker.ExecCommandResponse{
+func (m *mockWorkerClient) ExecContainerCommand(ctx context.Context, containerID string, command string) (*nodemanagerclient.ExecCommandResponse, error) {
+	return &nodemanagerclient.ExecCommandResponse{
 		ContainerID: containerID,
 		Command:     command,
 		Output:      "ok: " + command,
@@ -148,7 +148,7 @@ func setupHostingTestEnv(t *testing.T) (*gin.Engine, *Service, *mockWorkerClient
 
 	scheduler := NewLeastLoadedScheduler(db)
 	portAllocator := NewPortAllocator(db, 25565, 25575)
-	service := NewService(db, scheduler, portAllocator, func(baseURL, apiKey string) worker.Client {
+	service := NewService(db, scheduler, portAllocator, func(baseURL, apiKey string) nodemanagerclient.Client {
 		return mockClient
 	})
 	handler := NewHandler(service)
@@ -392,7 +392,7 @@ func TestCreateServerFallbackOnUnreachableHost(t *testing.T) {
 
 	healthyClient := newMockWorkerClient()
 
-	workerFactory := func(baseURL, apiKey string) worker.Client {
+	workerFactory := func(baseURL, apiKey string) nodemanagerclient.Client {
 		if baseURL == hOffline.WorkerBaseURL {
 			return &failingWorkerClient{}
 		}
@@ -430,7 +430,7 @@ type failingWorkerClient struct {
 	mockWorkerClient
 }
 
-func (f *failingWorkerClient) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*worker.CreateVolumeResponse, error) {
+func (f *failingWorkerClient) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*nodemanagerclient.CreateVolumeResponse, error) {
 	return nil, errors.New("dial tcp: connect: connection refused")
 }
 
@@ -527,7 +527,7 @@ func TestOpenFileManagerURLAndRevokeOnDelete(t *testing.T) {
 	db.Where("port >= ? AND port <= ?", portMin, portMax).Delete(&domain.Server{})
 
 	mockWorker := newMockWorkerClient()
-	svc := NewService(db, NewLeastLoadedScheduler(db), NewPortAllocator(db, portMin, portMax), func(baseURL, apiKey string) worker.Client {
+	svc := NewService(db, NewLeastLoadedScheduler(db), NewPortAllocator(db, portMin, portMax), func(baseURL, apiKey string) nodemanagerclient.Client {
 		return mockWorker
 	})
 

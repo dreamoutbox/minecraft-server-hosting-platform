@@ -18,8 +18,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 // mockWorkerForBackup tracks volume exports and imports in memory for backup verification.
@@ -27,7 +27,7 @@ type mockWorkerForBackup struct {
 	mu           sync.Mutex
 	volumeData   map[string][]byte
 	stoppedCtrs  map[string]bool
-	createdCtrs  map[string]worker.CreateContainerRequest
+	createdCtrs  map[string]nodemanagerclient.CreateContainerRequest
 	exportedCall int
 	importedCall int
 }
@@ -36,16 +36,16 @@ func newMockWorkerForBackup() *mockWorkerForBackup {
 	return &mockWorkerForBackup{
 		volumeData:  make(map[string][]byte),
 		stoppedCtrs: make(map[string]bool),
-		createdCtrs: make(map[string]worker.CreateContainerRequest),
+		createdCtrs: make(map[string]nodemanagerclient.CreateContainerRequest),
 	}
 }
 
-func (m *mockWorkerForBackup) GetStatus(ctx context.Context) (*worker.HostStatusResponse, error) {
-	return &worker.HostStatusResponse{Hostname: "backup-node", MaxServers: 10}, nil
+func (m *mockWorkerForBackup) GetStatus(ctx context.Context) (*nodemanagerclient.HostStatusResponse, error) {
+	return &nodemanagerclient.HostStatusResponse{Hostname: "backup-node", MaxServers: 10}, nil
 }
 
-func (m *mockWorkerForBackup) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*worker.CreateVolumeResponse, error) {
-	return &worker.CreateVolumeResponse{MountPath: "/data"}, nil
+func (m *mockWorkerForBackup) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*nodemanagerclient.CreateVolumeResponse, error) {
+	return &nodemanagerclient.CreateVolumeResponse{MountPath: "/data"}, nil
 }
 
 func (m *mockWorkerForBackup) DeleteVolume(ctx context.Context, volumeID string) error {
@@ -72,21 +72,21 @@ func (m *mockWorkerForBackup) ImportVolume(ctx context.Context, volumeID string,
 	return nil
 }
 
-func (m *mockWorkerForBackup) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
+func (m *mockWorkerForBackup) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*nodemanagerclient.UploadVolumeBackupResponse, error) {
 	m.mu.Lock()
 	m.exportedCall++
 	data := append([]byte(nil), m.volumeData[volumeID]...)
 	m.mu.Unlock()
 
-	sizeBytes, err := worker.PutPresignedBytes(ctx, presignedURL, data, backupContentType)
+	sizeBytes, err := nodemanagerclient.PutPresignedBytes(ctx, presignedURL, data, backupContentType)
 	if err != nil {
 		return nil, err
 	}
-	return &worker.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
+	return &nodemanagerclient.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
 }
 
 func (m *mockWorkerForBackup) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
-	buf, err := worker.GetPresignedBytes(ctx, presignedURL)
+	buf, err := nodemanagerclient.GetPresignedBytes(ctx, presignedURL)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (m *mockWorkerForBackup) RestoreVolumeBackup(ctx context.Context, volumeID 
 	return nil
 }
 
-func (m *mockWorkerForBackup) UploadImageBackup(ctx context.Context, volumeID string, req worker.UploadImageBackupRequest) (*worker.UploadImageBackupResponse, error) {
+func (m *mockWorkerForBackup) UploadImageBackup(ctx context.Context, volumeID string, req nodemanagerclient.UploadImageBackupRequest) (*nodemanagerclient.UploadImageBackupResponse, error) {
 	m.mu.Lock()
 	data := append([]byte(nil), m.volumeData[volumeID]...)
 	m.mu.Unlock()
@@ -121,7 +121,7 @@ func (m *mockWorkerForBackup) UploadImageBackup(ctx context.Context, volumeID st
 			end = len(data)
 		}
 		chunk := data[offset:end]
-		n, err := worker.PutPresignedBytes(ctx, req.PresignedURLs[partIdx], chunk, backupContentType)
+		n, err := nodemanagerclient.PutPresignedBytes(ctx, req.PresignedURLs[partIdx], chunk, backupContentType)
 		if err != nil {
 			return nil, err
 		}
@@ -133,17 +133,17 @@ func (m *mockWorkerForBackup) UploadImageBackup(ctx context.Context, volumeID st
 		}
 	}
 
-	return &worker.UploadImageBackupResponse{
+	return &nodemanagerclient.UploadImageBackupResponse{
 		PartsUploaded: len(partSizes),
 		PartSizes:     partSizes,
 		TotalBytes:    totalBytes,
 	}, nil
 }
 
-func (m *mockWorkerForBackup) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*worker.RestoreImageBackupResponse, error) {
+func (m *mockWorkerForBackup) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*nodemanagerclient.RestoreImageBackupResponse, error) {
 	var merged bytes.Buffer
 	for _, u := range presignedURLs {
-		partBytes, err := worker.GetPresignedBytes(ctx, u)
+		partBytes, err := nodemanagerclient.GetPresignedBytes(ctx, u)
 		if err != nil {
 			return nil, err
 		}
@@ -152,15 +152,15 @@ func (m *mockWorkerForBackup) RestoreImageBackup(ctx context.Context, volumeID s
 	m.mu.Lock()
 	m.volumeData[volumeID] = merged.Bytes()
 	m.mu.Unlock()
-	return &worker.RestoreImageBackupResponse{SizeBytes: int64(merged.Len())}, nil
+	return &nodemanagerclient.RestoreImageBackupResponse{SizeBytes: int64(merged.Len())}, nil
 }
 
-func (m *mockWorkerForBackup) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
+func (m *mockWorkerForBackup) CreateContainer(ctx context.Context, req nodemanagerclient.CreateContainerRequest) (*nodemanagerclient.CreateContainerResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	id := fmt.Sprintf("ctr-%d", req.ServerID)
 	m.createdCtrs[id] = req
-	return &worker.CreateContainerResponse{ContainerID: id, Port: req.Port, MountPath: req.MountPath}, nil
+	return &nodemanagerclient.CreateContainerResponse{ContainerID: id, Port: req.Port, MountPath: req.MountPath}, nil
 }
 
 func (m *mockWorkerForBackup) StopContainer(ctx context.Context, containerID string) error {
@@ -174,16 +174,16 @@ func (m *mockWorkerForBackup) DeleteContainer(ctx context.Context, containerID s
 	return nil
 }
 
-func (m *mockWorkerForBackup) GetContainerStatus(ctx context.Context, containerID string) (*worker.ContainerStatusResponse, error) {
-	return &worker.ContainerStatusResponse{ContainerID: containerID, Status: worker.ContainerStatusRunning}, nil
+func (m *mockWorkerForBackup) GetContainerStatus(ctx context.Context, containerID string) (*nodemanagerclient.ContainerStatusResponse, error) {
+	return &nodemanagerclient.ContainerStatusResponse{ContainerID: containerID, Status: nodemanagerclient.ContainerStatusRunning}, nil
 }
 
-func (m *mockWorkerForBackup) GetContainerLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
-	return &worker.ContainerLogsResponse{ContainerID: containerID, Logs: ""}, nil
+func (m *mockWorkerForBackup) GetContainerLogs(ctx context.Context, containerID string, tail int) (*nodemanagerclient.ContainerLogsResponse, error) {
+	return &nodemanagerclient.ContainerLogsResponse{ContainerID: containerID, Logs: ""}, nil
 }
 
-func (m *mockWorkerForBackup) ExecContainerCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
-	return &worker.ExecCommandResponse{ContainerID: containerID, Command: command, Output: ""}, nil
+func (m *mockWorkerForBackup) ExecContainerCommand(ctx context.Context, containerID string, command string) (*nodemanagerclient.ExecCommandResponse, error) {
+	return &nodemanagerclient.ExecCommandResponse{ContainerID: containerID, Command: command, Output: ""}, nil
 }
 
 func setupBackupTestEnv(t *testing.T) (*Service, *mockWorkerForBackup, storage.StorageProvider, *domain.Server, *domain.User, string) {
@@ -216,7 +216,7 @@ func setupBackupTestEnv(t *testing.T) (*Service, *mockWorkerForBackup, storage.S
 	}
 
 	mockWorker := newMockWorkerForBackup()
-	service := NewService(db, sp, func(baseURL, apiKey string) worker.Client {
+	service := NewService(db, sp, func(baseURL, apiKey string) nodemanagerclient.Client {
 		return mockWorker
 	})
 

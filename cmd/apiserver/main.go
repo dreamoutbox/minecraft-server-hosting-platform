@@ -12,17 +12,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/config"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/hosting"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/jobs"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/middleware"
 	jobqueue "github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/config"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/hosting"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 // SetupRouter initializes HTTP routes and middleware for the orchestrator API and dashboard.
@@ -67,7 +67,7 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobqueue.Servic
 	authGroup.Use(middleware.RateLimitMiddleware(10, 20))
 	authHandler.RegisterRoutes(authGroup)
 
-	workerFactory := func(baseURL string, apiKey string) worker.Client {
+	workerFactory := func(baseURL string, apiKey string) nodemanagerclient.Client {
 		// When running inside containers and a default worker URL is configured,
 		// map loopback addresses (127.0.0.1 / localhost) to the reachable compose worker service.
 		if cfg.DefaultWorkerURL != "" && (strings.Contains(baseURL, "127.0.0.1:9090") || strings.Contains(baseURL, "localhost:9090")) {
@@ -76,7 +76,7 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobqueue.Servic
 				apiKey = cfg.DefaultWorkerKey
 			}
 		}
-		return worker.NewClient(baseURL, apiKey)
+		return nodemanagerclient.NewClient(baseURL, apiKey)
 	}
 
 	scheduler := hosting.NewLeastLoadedScheduler(db)

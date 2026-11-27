@@ -18,11 +18,11 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 // WorkerClientFactory produces a typed worker client given host credentials.
-type WorkerClientFactory func(baseURL string, apiKey string) worker.Client
+type WorkerClientFactory func(baseURL string, apiKey string) nodemanagerclient.Client
 
 // FileServerClientFactory produces a fileserver management client given host credentials.
 type FileServerClientFactory func(baseURL string, apiKey string) fsclient.Client
@@ -57,8 +57,8 @@ type Service struct {
 //	svc := hosting.NewService(db, scheduler, allocator, nil)
 func NewService(db *gorm.DB, scheduler Scheduler, portAllocator *PortAllocator, factory WorkerClientFactory) *Service {
 	if factory == nil {
-		factory = func(baseURL string, apiKey string) worker.Client {
-			return worker.NewClient(baseURL, apiKey)
+		factory = func(baseURL string, apiKey string) nodemanagerclient.Client {
+			return nodemanagerclient.NewClient(baseURL, apiKey)
 		}
 	}
 	return &Service{
@@ -371,11 +371,11 @@ func (s *Service) ProvisionServer(ctx context.Context, serverID uint) (*domain.S
 }
 
 // cleanupFailedServer purges database state for failed provisioning to free ports.
-func (s *Service) cleanupFailedServer(ctx context.Context, server *domain.Server, wClient worker.Client) {
+func (s *Service) cleanupFailedServer(ctx context.Context, server *domain.Server, wClient nodemanagerclient.Client) {
 	_ = s.db.WithContext(ctx).Delete(server).Error
 }
 
-// StopServer halts a running game server container via its hosting worker.
+// StopServer halts a running game server container via its hosting nodemanagerclient.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
@@ -418,7 +418,7 @@ func (s *Service) StopServer(ctx context.Context, userID uint, serverID uint) (*
 	return server, nil
 }
 
-// StartServer resumes a stopped game server container via its hosting worker.
+// StartServer resumes a stopped game server container via its hosting nodemanagerclient.
 //
 // Arguments:
 //   - ctx: Operation cancellation context.
@@ -569,8 +569,8 @@ func (s *Service) GetServerForOwner(ctx context.Context, userID uint, serverID u
 	return s.getServerAndHost(ctx, userID, serverID)
 }
 
-func buildContainerRequest(server *domain.Server, plan *domain.Plan, mountPath string) worker.CreateContainerRequest {
-	return worker.CreateContainerRequest{
+func buildContainerRequest(server *domain.Server, plan *domain.Plan, mountPath string) nodemanagerclient.CreateContainerRequest {
+	return nodemanagerclient.CreateContainerRequest{
 		ServerID:      server.ID,
 		Port:          server.Port,
 		CPULimit:      plan.CPULimit,
@@ -661,19 +661,19 @@ func (s *Service) OpenFileManagerURL(ctx context.Context, actorUserID uint, serv
 // Example usage:
 //
 //	srv, status, err := svc.GetServer(ctx, user.ID, 42)
-func (s *Service) GetServer(ctx context.Context, userID uint, serverID uint) (*domain.Server, *worker.ContainerStatusResponse, error) {
+func (s *Service) GetServer(ctx context.Context, userID uint, serverID uint) (*domain.Server, *nodemanagerclient.ContainerStatusResponse, error) {
 	server, host, err := s.getServerAndHost(ctx, userID, serverID)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	var statusResp *worker.ContainerStatusResponse
+	var statusResp *nodemanagerclient.ContainerStatusResponse
 	if server.ContainerID != "" {
 		wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
 		statusResp, _ = wClient.GetContainerStatus(ctx, server.ContainerID)
 		// Reconcile stale running status if the container was removed (e.g. worker restart).
 		if statusResp != nil && server.Status == domain.ServerStatusRunning &&
-			(statusResp.Status == worker.ContainerStatusStopped || statusResp.Status == worker.ContainerStatusUnknown) {
+			(statusResp.Status == nodemanagerclient.ContainerStatusStopped || statusResp.Status == nodemanagerclient.ContainerStatusUnknown) {
 			server.Status = domain.ServerStatusStopped
 			_ = s.db.WithContext(ctx).Model(server).Update("status", domain.ServerStatusStopped).Error
 		}
@@ -715,13 +715,13 @@ func (s *Service) ListServers(ctx context.Context, userID uint) ([]domain.Server
 // Example usage:
 //
 //	logs, err := svc.GetServerConsoleLogs(ctx, user.ID, server.ID, 200)
-func (s *Service) GetServerConsoleLogs(ctx context.Context, userID uint, serverID uint, tail int) (*worker.ContainerLogsResponse, error) {
+func (s *Service) GetServerConsoleLogs(ctx context.Context, userID uint, serverID uint, tail int) (*nodemanagerclient.ContainerLogsResponse, error) {
 	server, host, err := s.getServerAndHost(ctx, userID, serverID)
 	if err != nil {
 		return nil, err
 	}
 	if server.ContainerID == "" {
-		return &worker.ContainerLogsResponse{Logs: ""}, nil
+		return &nodemanagerclient.ContainerLogsResponse{Logs: ""}, nil
 	}
 
 	wClient := s.workerClientFactory(host.WorkerBaseURL, host.APIKey)
@@ -739,7 +739,7 @@ func (s *Service) GetServerConsoleLogs(ctx context.Context, userID uint, serverI
 // Example usage:
 //
 //	res, err := svc.SendServerCommand(ctx, user.ID, server.ID, "list")
-func (s *Service) SendServerCommand(ctx context.Context, userID uint, serverID uint, command string) (*worker.ExecCommandResponse, error) {
+func (s *Service) SendServerCommand(ctx context.Context, userID uint, serverID uint, command string) (*nodemanagerclient.ExecCommandResponse, error) {
 	trimmed := strings.TrimSpace(command)
 	if trimmed == "" {
 		return nil, errors.New("command cannot be empty")

@@ -10,13 +10,13 @@ import (
 
 	fsclient "github.com/dreamoutbox/fileserver/client"
 
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/config"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/hosting"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 func main() {
@@ -34,14 +34,14 @@ func main() {
 		log.Fatalf("failed running database migrations: %v", err)
 	}
 
-	workerFactory := func(baseURL string, apiKey string) worker.Client {
+	workerFactory := func(baseURL string, apiKey string) nodemanagerclient.Client {
 		if cfg.DefaultWorkerURL != "" && (strings.Contains(baseURL, "127.0.0.1:9090") || strings.Contains(baseURL, "localhost:9090")) {
 			baseURL = cfg.DefaultWorkerURL
 			if apiKey == "" {
 				apiKey = cfg.DefaultWorkerKey
 			}
 		}
-		return worker.NewClient(baseURL, apiKey)
+		return nodemanagerclient.NewClient(baseURL, apiKey)
 	}
 
 	scheduler := hosting.NewLeastLoadedScheduler(db)

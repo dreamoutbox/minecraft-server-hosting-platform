@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 const minImageBackupPartSlots = 4
@@ -111,7 +111,7 @@ func (s *Service) ExecuteImageBackupRecord(ctx context.Context, userID uint, ser
 	volID := strconv.FormatUint(uint64(server.ID), 10)
 	wClient := s.workerClientFactory(server.Host.WorkerBaseURL, server.Host.APIKey)
 
-	req := worker.UploadImageBackupRequest{
+	req := nodemanagerclient.UploadImageBackupRequest{
 		PresignedURLs: putURLs,
 		MaxPartBytes:  s.maxImagePartBytes,
 	}
@@ -307,7 +307,7 @@ func (s *Service) RestoreImageBackup(ctx context.Context, serverID uint, imageBa
 	}
 
 	if wasRunning {
-		ctrReq := worker.CreateContainerRequest{
+		ctrReq := nodemanagerclient.CreateContainerRequest{
 			ServerID:      server.ID,
 			Port:          server.Port,
 			CPULimit:      server.Plan.CPULimit,

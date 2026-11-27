@@ -20,37 +20,37 @@ import (
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/hosting"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 type dashboardTestWorker struct {
 	mu         sync.Mutex
 	volumes    map[string][]byte
-	containers map[string]worker.CreateContainerRequest
+	containers map[string]nodemanagerclient.CreateContainerRequest
 }
 
 func newDashboardTestWorker() *dashboardTestWorker {
 	return &dashboardTestWorker{
 		volumes:    make(map[string][]byte),
-		containers: make(map[string]worker.CreateContainerRequest),
+		containers: make(map[string]nodemanagerclient.CreateContainerRequest),
 	}
 }
 
-func (d *dashboardTestWorker) GetStatus(ctx context.Context) (*worker.HostStatusResponse, error) {
-	return &worker.HostStatusResponse{Hostname: "dash-node", MaxServers: 10}, nil
+func (d *dashboardTestWorker) GetStatus(ctx context.Context) (*nodemanagerclient.HostStatusResponse, error) {
+	return &nodemanagerclient.HostStatusResponse{Hostname: "dash-node", MaxServers: 10}, nil
 }
 
-func (d *dashboardTestWorker) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*worker.CreateVolumeResponse, error) {
+func (d *dashboardTestWorker) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*nodemanagerclient.CreateVolumeResponse, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.volumes[fmt.Sprintf("%d", serverID)] = []byte("initial-chunk")
-	return &worker.CreateVolumeResponse{MountPath: "/var/lib/mounts/dash"}, nil
+	return &nodemanagerclient.CreateVolumeResponse{MountPath: "/var/lib/mounts/dash"}, nil
 }
 
 func (d *dashboardTestWorker) DeleteVolume(ctx context.Context, volumeID string) error {
@@ -75,20 +75,20 @@ func (d *dashboardTestWorker) ImportVolume(ctx context.Context, volumeID string,
 	return nil
 }
 
-func (d *dashboardTestWorker) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
+func (d *dashboardTestWorker) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*nodemanagerclient.UploadVolumeBackupResponse, error) {
 	d.mu.Lock()
 	data := append([]byte(nil), d.volumes[volumeID]...)
 	d.mu.Unlock()
 
-	sizeBytes, err := worker.PutPresignedBytes(ctx, presignedURL, data, "application/gzip")
+	sizeBytes, err := nodemanagerclient.PutPresignedBytes(ctx, presignedURL, data, "application/gzip")
 	if err != nil {
 		return nil, err
 	}
-	return &worker.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
+	return &nodemanagerclient.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
 }
 
 func (d *dashboardTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
-	data, err := worker.GetPresignedBytes(ctx, presignedURL)
+	data, err := nodemanagerclient.GetPresignedBytes(ctx, presignedURL)
 	if err != nil {
 		return err
 	}
@@ -98,20 +98,20 @@ func (d *dashboardTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID 
 	return nil
 }
 
-func (d *dashboardTestWorker) UploadImageBackup(ctx context.Context, volumeID string, req worker.UploadImageBackupRequest) (*worker.UploadImageBackupResponse, error) {
-	return &worker.UploadImageBackupResponse{}, nil
+func (d *dashboardTestWorker) UploadImageBackup(ctx context.Context, volumeID string, req nodemanagerclient.UploadImageBackupRequest) (*nodemanagerclient.UploadImageBackupResponse, error) {
+	return &nodemanagerclient.UploadImageBackupResponse{}, nil
 }
 
-func (d *dashboardTestWorker) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*worker.RestoreImageBackupResponse, error) {
-	return &worker.RestoreImageBackupResponse{}, nil
+func (d *dashboardTestWorker) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*nodemanagerclient.RestoreImageBackupResponse, error) {
+	return &nodemanagerclient.RestoreImageBackupResponse{}, nil
 }
 
-func (d *dashboardTestWorker) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
+func (d *dashboardTestWorker) CreateContainer(ctx context.Context, req nodemanagerclient.CreateContainerRequest) (*nodemanagerclient.CreateContainerResponse, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	id := fmt.Sprintf("ctr-dash-%d", req.ServerID)
 	d.containers[id] = req
-	return &worker.CreateContainerResponse{ContainerID: id, Port: req.Port, MountPath: req.MountPath}, nil
+	return &nodemanagerclient.CreateContainerResponse{ContainerID: id, Port: req.Port, MountPath: req.MountPath}, nil
 }
 
 func (d *dashboardTestWorker) StopContainer(ctx context.Context, containerID string) error {
@@ -122,19 +122,19 @@ func (d *dashboardTestWorker) DeleteContainer(ctx context.Context, containerID s
 	return nil
 }
 
-func (d *dashboardTestWorker) GetContainerStatus(ctx context.Context, containerID string) (*worker.ContainerStatusResponse, error) {
-	return &worker.ContainerStatusResponse{ContainerID: containerID, Status: worker.ContainerStatusRunning}, nil
+func (d *dashboardTestWorker) GetContainerStatus(ctx context.Context, containerID string) (*nodemanagerclient.ContainerStatusResponse, error) {
+	return &nodemanagerclient.ContainerStatusResponse{ContainerID: containerID, Status: nodemanagerclient.ContainerStatusRunning}, nil
 }
 
-func (d *dashboardTestWorker) GetContainerLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
-	return &worker.ContainerLogsResponse{
+func (d *dashboardTestWorker) GetContainerLogs(ctx context.Context, containerID string, tail int) (*nodemanagerclient.ContainerLogsResponse, error) {
+	return &nodemanagerclient.ContainerLogsResponse{
 		ContainerID: containerID,
 		Logs:        "[12:00:00] [Server thread/INFO]: Done (1.5s)! For help, type \"help\"\n",
 	}, nil
 }
 
-func (d *dashboardTestWorker) ExecContainerCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
-	return &worker.ExecCommandResponse{
+func (d *dashboardTestWorker) ExecContainerCommand(ctx context.Context, containerID string, command string) (*nodemanagerclient.ExecCommandResponse, error) {
+	return &nodemanagerclient.ExecCommandResponse{
 		ContainerID: containerID,
 		Command:     command,
 		Output:      "There are 0 of a max of 20 players online:",
@@ -156,7 +156,7 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 	_ = domain.SeedPlans(db)
 
 	mockWorker := newDashboardTestWorker()
-	workerFactory := func(baseURL, apiKey string) worker.Client {
+	workerFactory := func(baseURL, apiKey string) nodemanagerclient.Client {
 		return mockWorker
 	}
 

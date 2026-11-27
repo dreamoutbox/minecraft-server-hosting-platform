@@ -10,8 +10,8 @@ import (
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 var (
@@ -137,7 +137,7 @@ func (m *MigrationService) MigrateServer(ctx context.Context, userID uint, serve
 	destHealthy := false
 	for attempt := 0; attempt < 5; attempt++ {
 		status, statusErr := destWorker.GetContainerStatus(ctx, ctrResp.ContainerID)
-		if statusErr == nil && status.Status == worker.ContainerStatusRunning {
+		if statusErr == nil && status.Status == nodemanagerclient.ContainerStatusRunning {
 			destHealthy = true
 			break
 		}

@@ -16,8 +16,8 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/hosting"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 type queueTestWorker struct {
@@ -25,21 +25,21 @@ type queueTestWorker struct {
 	failCreateVol int
 	failExportVol int
 	volumes       map[string][]byte
-	containers    map[string]worker.CreateContainerRequest
+	containers    map[string]nodemanagerclient.CreateContainerRequest
 }
 
 func newQueueTestWorker() *queueTestWorker {
 	return &queueTestWorker{
 		volumes:    make(map[string][]byte),
-		containers: make(map[string]worker.CreateContainerRequest),
+		containers: make(map[string]nodemanagerclient.CreateContainerRequest),
 	}
 }
 
-func (q *queueTestWorker) GetStatus(ctx context.Context) (*worker.HostStatusResponse, error) {
-	return &worker.HostStatusResponse{Hostname: "queue-node", MaxServers: 10}, nil
+func (q *queueTestWorker) GetStatus(ctx context.Context) (*nodemanagerclient.HostStatusResponse, error) {
+	return &nodemanagerclient.HostStatusResponse{Hostname: "queue-node", MaxServers: 10}, nil
 }
 
-func (q *queueTestWorker) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*worker.CreateVolumeResponse, error) {
+func (q *queueTestWorker) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*nodemanagerclient.CreateVolumeResponse, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.failCreateVol > 0 {
@@ -48,7 +48,7 @@ func (q *queueTestWorker) CreateVolume(ctx context.Context, serverID uint, diskL
 	}
 	id := fmt.Sprintf("%d", serverID)
 	q.volumes[id] = []byte("initial-world-data")
-	return &worker.CreateVolumeResponse{MountPath: "/var/lib/mc-platform/mounts/" + id}, nil
+	return &nodemanagerclient.CreateVolumeResponse{MountPath: "/var/lib/mc-platform/mounts/" + id}, nil
 }
 
 func (q *queueTestWorker) DeleteVolume(ctx context.Context, volumeID string) error {
@@ -76,7 +76,7 @@ func (q *queueTestWorker) ImportVolume(ctx context.Context, volumeID string, r i
 	return nil
 }
 
-func (q *queueTestWorker) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
+func (q *queueTestWorker) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*nodemanagerclient.UploadVolumeBackupResponse, error) {
 	q.mu.Lock()
 	if q.failExportVol > 0 {
 		q.failExportVol--
@@ -86,15 +86,15 @@ func (q *queueTestWorker) UploadVolumeBackup(ctx context.Context, volumeID strin
 	data := append([]byte(nil), q.volumes[volumeID]...)
 	q.mu.Unlock()
 
-	sizeBytes, err := worker.PutPresignedBytes(ctx, presignedURL, data, "application/gzip")
+	sizeBytes, err := nodemanagerclient.PutPresignedBytes(ctx, presignedURL, data, "application/gzip")
 	if err != nil {
 		return nil, err
 	}
-	return &worker.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
+	return &nodemanagerclient.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
 }
 
 func (q *queueTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
-	b, err := worker.GetPresignedBytes(ctx, presignedURL)
+	b, err := nodemanagerclient.GetPresignedBytes(ctx, presignedURL)
 	if err != nil {
 		return err
 	}
@@ -104,28 +104,28 @@ func (q *queueTestWorker) RestoreVolumeBackup(ctx context.Context, volumeID stri
 	return nil
 }
 
-func (q *queueTestWorker) UploadImageBackup(ctx context.Context, volumeID string, req worker.UploadImageBackupRequest) (*worker.UploadImageBackupResponse, error) {
+func (q *queueTestWorker) UploadImageBackup(ctx context.Context, volumeID string, req nodemanagerclient.UploadImageBackupRequest) (*nodemanagerclient.UploadImageBackupResponse, error) {
 	q.mu.Lock()
 	data := append([]byte(nil), q.volumes[volumeID]...)
 	q.mu.Unlock()
 	if len(data) == 0 {
 		data = []byte("mock-ext4-image-bytes")
 	}
-	n, err := worker.PutPresignedBytes(ctx, req.PresignedURLs[0], data, "application/gzip")
+	n, err := nodemanagerclient.PutPresignedBytes(ctx, req.PresignedURLs[0], data, "application/gzip")
 	if err != nil {
 		return nil, err
 	}
-	return &worker.UploadImageBackupResponse{
+	return &nodemanagerclient.UploadImageBackupResponse{
 		PartsUploaded: 1,
 		PartSizes:     []int64{n},
 		TotalBytes:    n,
 	}, nil
 }
 
-func (q *queueTestWorker) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*worker.RestoreImageBackupResponse, error) {
+func (q *queueTestWorker) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*nodemanagerclient.RestoreImageBackupResponse, error) {
 	var merged bytes.Buffer
 	for _, u := range presignedURLs {
-		b, err := worker.GetPresignedBytes(ctx, u)
+		b, err := nodemanagerclient.GetPresignedBytes(ctx, u)
 		if err != nil {
 			return nil, err
 		}
@@ -134,15 +134,15 @@ func (q *queueTestWorker) RestoreImageBackup(ctx context.Context, volumeID strin
 	q.mu.Lock()
 	q.volumes[volumeID] = merged.Bytes()
 	q.mu.Unlock()
-	return &worker.RestoreImageBackupResponse{SizeBytes: int64(merged.Len())}, nil
+	return &nodemanagerclient.RestoreImageBackupResponse{SizeBytes: int64(merged.Len())}, nil
 }
 
-func (q *queueTestWorker) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
+func (q *queueTestWorker) CreateContainer(ctx context.Context, req nodemanagerclient.CreateContainerRequest) (*nodemanagerclient.CreateContainerResponse, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	id := fmt.Sprintf("ctr-q-%d", req.ServerID)
 	q.containers[id] = req
-	return &worker.CreateContainerResponse{ContainerID: id, Port: req.Port, MountPath: req.MountPath}, nil
+	return &nodemanagerclient.CreateContainerResponse{ContainerID: id, Port: req.Port, MountPath: req.MountPath}, nil
 }
 
 func (q *queueTestWorker) StopContainer(ctx context.Context, containerID string) error {
@@ -156,16 +156,16 @@ func (q *queueTestWorker) DeleteContainer(ctx context.Context, containerID strin
 	return nil
 }
 
-func (q *queueTestWorker) GetContainerStatus(ctx context.Context, containerID string) (*worker.ContainerStatusResponse, error) {
-	return &worker.ContainerStatusResponse{ContainerID: containerID, Status: worker.ContainerStatusRunning}, nil
+func (q *queueTestWorker) GetContainerStatus(ctx context.Context, containerID string) (*nodemanagerclient.ContainerStatusResponse, error) {
+	return &nodemanagerclient.ContainerStatusResponse{ContainerID: containerID, Status: nodemanagerclient.ContainerStatusRunning}, nil
 }
 
-func (q *queueTestWorker) GetContainerLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
-	return &worker.ContainerLogsResponse{ContainerID: containerID, Logs: ""}, nil
+func (q *queueTestWorker) GetContainerLogs(ctx context.Context, containerID string, tail int) (*nodemanagerclient.ContainerLogsResponse, error) {
+	return &nodemanagerclient.ContainerLogsResponse{ContainerID: containerID, Logs: ""}, nil
 }
 
-func (q *queueTestWorker) ExecContainerCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
-	return &worker.ExecCommandResponse{ContainerID: containerID, Command: command, Output: ""}, nil
+func (q *queueTestWorker) ExecContainerCommand(ctx context.Context, containerID string, command string) (*nodemanagerclient.ExecCommandResponse, error) {
+	return &nodemanagerclient.ExecCommandResponse{ContainerID: containerID, Command: command, Output: ""}, nil
 }
 
 func TestAsyncQueueRetryAndOperationLogs(t *testing.T) {
@@ -182,7 +182,7 @@ func TestAsyncQueueRetryAndOperationLogs(t *testing.T) {
 	_ = domain.SeedPlans(db)
 
 	mockWorker := newQueueTestWorker()
-	workerFactory := func(baseURL, apiKey string) worker.Client {
+	workerFactory := func(baseURL, apiKey string) nodemanagerclient.Client {
 		return mockWorker
 	}
 
@@ -409,7 +409,7 @@ func TestLifecycleExpirationAndRetentionSweep(t *testing.T) {
 	_ = db.First(&plan)
 
 	tw := &queueTestWorker{}
-	workerFactory := func(baseURL string, apiKey string) worker.Client { return tw }
+	workerFactory := func(baseURL string, apiKey string) nodemanagerclient.Client { return tw }
 	scheduler := hosting.NewLeastLoadedScheduler(db)
 	portAlloc := hosting.NewPortAllocator(db, 26700, 26800)
 	hostingSvc := hosting.NewService(db, scheduler, portAlloc, workerFactory)
@@ -564,7 +564,7 @@ func TestScheduledImageBackupCronAndQueueExecution(t *testing.T) {
 	tw.volumes[fmt.Sprintf("%d", runningID)] = []byte("running-ext4-img-content")
 	tw.volumes[fmt.Sprintf("%d", stoppedID)] = []byte("stopped-ext4-img-content")
 
-	workerFactory := func(baseURL, apiKey string) worker.Client { return tw }
+	workerFactory := func(baseURL, apiKey string) nodemanagerclient.Client { return tw }
 	hostingSvc := hosting.NewService(db, hosting.NewLeastLoadedScheduler(db), hosting.NewPortAllocator(db, 26850, 26890), workerFactory)
 	memStore := storage.NewMemoryStorageProvider()
 	defer func() { _ = memStore.Close() }()

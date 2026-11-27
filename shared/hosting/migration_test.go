@@ -14,8 +14,8 @@ import (
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
-	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 // multiHostWorkerClient simulates worker operations on a specific host node.
@@ -23,7 +23,7 @@ type multiHostWorkerClient struct {
 	mu         sync.Mutex
 	hostname   string
 	volumes    map[string][]byte
-	containers map[string]worker.CreateContainerRequest
+	containers map[string]nodemanagerclient.CreateContainerRequest
 	failHealth bool
 	failVolume bool
 }
@@ -32,15 +32,15 @@ func newMultiHostWorkerClient(hostname string) *multiHostWorkerClient {
 	return &multiHostWorkerClient{
 		hostname:   hostname,
 		volumes:    make(map[string][]byte),
-		containers: make(map[string]worker.CreateContainerRequest),
+		containers: make(map[string]nodemanagerclient.CreateContainerRequest),
 	}
 }
 
-func (m *multiHostWorkerClient) GetStatus(ctx context.Context) (*worker.HostStatusResponse, error) {
-	return &worker.HostStatusResponse{Hostname: m.hostname, MaxServers: 10}, nil
+func (m *multiHostWorkerClient) GetStatus(ctx context.Context) (*nodemanagerclient.HostStatusResponse, error) {
+	return &nodemanagerclient.HostStatusResponse{Hostname: m.hostname, MaxServers: 10}, nil
 }
 
-func (m *multiHostWorkerClient) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*worker.CreateVolumeResponse, error) {
+func (m *multiHostWorkerClient) CreateVolume(ctx context.Context, serverID uint, diskLimitGB int) (*nodemanagerclient.CreateVolumeResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.failVolume {
@@ -50,7 +50,7 @@ func (m *multiHostWorkerClient) CreateVolume(ctx context.Context, serverID uint,
 	if _, exists := m.volumes[id]; !exists {
 		m.volumes[id] = []byte("empty-vol")
 	}
-	return &worker.CreateVolumeResponse{
+	return &nodemanagerclient.CreateVolumeResponse{
 		MountPath: fmt.Sprintf("/var/lib/mounts/%s/%d", m.hostname, serverID),
 		ImagePath: fmt.Sprintf("/var/lib/images/%s/%d.img", m.hostname, serverID),
 	}, nil
@@ -81,20 +81,20 @@ func (m *multiHostWorkerClient) ImportVolume(ctx context.Context, volumeID strin
 	return nil
 }
 
-func (m *multiHostWorkerClient) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*worker.UploadVolumeBackupResponse, error) {
+func (m *multiHostWorkerClient) UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (*nodemanagerclient.UploadVolumeBackupResponse, error) {
 	m.mu.Lock()
 	data := append([]byte(nil), m.volumes[volumeID]...)
 	m.mu.Unlock()
 
-	sizeBytes, err := worker.PutPresignedBytes(ctx, presignedURL, data, "application/gzip")
+	sizeBytes, err := nodemanagerclient.PutPresignedBytes(ctx, presignedURL, data, "application/gzip")
 	if err != nil {
 		return nil, err
 	}
-	return &worker.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
+	return &nodemanagerclient.UploadVolumeBackupResponse{SizeBytes: sizeBytes}, nil
 }
 
 func (m *multiHostWorkerClient) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
-	data, err := worker.GetPresignedBytes(ctx, presignedURL)
+	data, err := nodemanagerclient.GetPresignedBytes(ctx, presignedURL)
 	if err != nil {
 		return err
 	}
@@ -104,20 +104,20 @@ func (m *multiHostWorkerClient) RestoreVolumeBackup(ctx context.Context, volumeI
 	return nil
 }
 
-func (m *multiHostWorkerClient) UploadImageBackup(ctx context.Context, volumeID string, req worker.UploadImageBackupRequest) (*worker.UploadImageBackupResponse, error) {
-	return &worker.UploadImageBackupResponse{}, nil
+func (m *multiHostWorkerClient) UploadImageBackup(ctx context.Context, volumeID string, req nodemanagerclient.UploadImageBackupRequest) (*nodemanagerclient.UploadImageBackupResponse, error) {
+	return &nodemanagerclient.UploadImageBackupResponse{}, nil
 }
 
-func (m *multiHostWorkerClient) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*worker.RestoreImageBackupResponse, error) {
-	return &worker.RestoreImageBackupResponse{}, nil
+func (m *multiHostWorkerClient) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (*nodemanagerclient.RestoreImageBackupResponse, error) {
+	return &nodemanagerclient.RestoreImageBackupResponse{}, nil
 }
 
-func (m *multiHostWorkerClient) CreateContainer(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
+func (m *multiHostWorkerClient) CreateContainer(ctx context.Context, req nodemanagerclient.CreateContainerRequest) (*nodemanagerclient.CreateContainerResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	id := fmt.Sprintf("ctr-%s-%d", m.hostname, req.ServerID)
 	m.containers[id] = req
-	return &worker.CreateContainerResponse{
+	return &nodemanagerclient.CreateContainerResponse{
 		ContainerID: id,
 		Port:        req.Port,
 		MountPath:   req.MountPath,
@@ -135,27 +135,27 @@ func (m *multiHostWorkerClient) DeleteContainer(ctx context.Context, containerID
 	return nil
 }
 
-func (m *multiHostWorkerClient) GetContainerStatus(ctx context.Context, containerID string) (*worker.ContainerStatusResponse, error) {
+func (m *multiHostWorkerClient) GetContainerStatus(ctx context.Context, containerID string) (*nodemanagerclient.ContainerStatusResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.failHealth {
-		return &worker.ContainerStatusResponse{
+		return &nodemanagerclient.ContainerStatusResponse{
 			ContainerID: containerID,
-			Status:      worker.ContainerStatusStopped,
+			Status:      nodemanagerclient.ContainerStatusStopped,
 		}, nil
 	}
-	return &worker.ContainerStatusResponse{
+	return &nodemanagerclient.ContainerStatusResponse{
 		ContainerID: containerID,
-		Status:      worker.ContainerStatusRunning,
+		Status:      nodemanagerclient.ContainerStatusRunning,
 	}, nil
 }
 
-func (m *multiHostWorkerClient) GetContainerLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
-	return &worker.ContainerLogsResponse{ContainerID: containerID, Logs: ""}, nil
+func (m *multiHostWorkerClient) GetContainerLogs(ctx context.Context, containerID string, tail int) (*nodemanagerclient.ContainerLogsResponse, error) {
+	return &nodemanagerclient.ContainerLogsResponse{ContainerID: containerID, Logs: ""}, nil
 }
 
-func (m *multiHostWorkerClient) ExecContainerCommand(ctx context.Context, containerID string, command string) (*worker.ExecCommandResponse, error) {
-	return &worker.ExecCommandResponse{ContainerID: containerID, Command: command, Output: ""}, nil
+func (m *multiHostWorkerClient) ExecContainerCommand(ctx context.Context, containerID string, command string) (*nodemanagerclient.ExecCommandResponse, error) {
+	return &nodemanagerclient.ExecCommandResponse{ContainerID: containerID, Command: command, Output: ""}, nil
 }
 
 func setupMigrationTestEnv(t *testing.T) (*MigrationService, *Service, map[string]*multiHostWorkerClient, *domain.User, *domain.Host, *domain.Host, *domain.Server) {
@@ -176,7 +176,7 @@ func setupMigrationTestEnv(t *testing.T) (*MigrationService, *Service, map[strin
 		"http://node-beta:9090":  newMultiHostWorkerClient("node-beta"),
 	}
 
-	workerFactory := func(baseURL, apiKey string) worker.Client {
+	workerFactory := func(baseURL, apiKey string) nodemanagerclient.Client {
 		if client, ok := workers[baseURL]; ok {
 			return client
 		}
