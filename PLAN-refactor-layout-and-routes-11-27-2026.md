@@ -62,12 +62,12 @@ internal/
   - [x] Remove the emptied `internal/backup` and `internal/hosting` directories.
 - Done when: `go build ./...` and `go test -race ./shared/... ./internal/... ./cmd/...` pass.
 
-### Phase 4: Extract `cmd/nodemanager` implementation to `./nodemanager` [STATUS: TODO]
+### Phase 4: Extract `cmd/nodemanager` implementation to `./nodemanager` [STATUS: DONE]
 - Goal: Move all node-daemon implementation files out of `internal/worker` into top-level `./nodemanager`.
 - Tasks:
-  - [ ] Move `docker.go`, `handler.go`, `loop_linux.go`, `loop_linux_test.go`, `loop_other.go`, `middleware.go`, `presigned_backup.go`, `volume.go`, and `worker_test.go` from `internal/worker/` to `nodemanager/` (package `nodemanager`).
-  - [ ] Update `cmd/nodemanager/main.go` and `cmd/nodemanager/main_test.go` to import `nodemanager` (and `shared/nodemanagerclient` where needed).
-  - [ ] Remove the emptied `internal/worker/` directory.
+  - [x] Move `docker.go`, `handler.go`, `loop_linux.go`, `loop_linux_test.go`, `loop_other.go`, `middleware.go`, `presigned_backup.go`, `volume.go`, and `worker_test.go` from `internal/worker/` to `nodemanager/` (package `nodemanager`).
+  - [x] Update `cmd/nodemanager/main.go` and `cmd/nodemanager/main_test.go` to import `nodemanager` (and `shared/nodemanagerclient` where needed).
+  - [x] Remove the emptied `internal/worker/` directory.
 - Done when: `go build ./...` and `go test -race ./nodemanager/... ./cmd/nodemanager/...` pass, `internal/worker` no longer exists, and `go list -f '{{.Deps}}' ./cmd/nodemanager` contains no `internal/` or AWS/S3 SDK packages.
 
 ### Phase 5: Extract `cmd/jobworker` queue to `./jobworker/jobs` and split one job per file [STATUS: TODO]
