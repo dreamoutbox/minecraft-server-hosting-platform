@@ -8,7 +8,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/admin"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billings"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard/view"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/mcservers"
@@ -23,7 +22,7 @@ type Service struct {
 	db           *gorm.DB
 	hostingSvc   *hosting.Service
 	backupSvc    *backup.Service
-	billingSvc   *billing.Service
+	billingSvc   *billings.Service
 	migrationSvc *hosting.MigrationService
 	jobSvc       *jobs.Service
 	authsessions *session.Manager
@@ -48,7 +47,7 @@ func NewService(
 	db *gorm.DB,
 	hostingSvc *hosting.Service,
 	backupSvc *backup.Service,
-	billingSvc *billing.Service,
+	billingSvc *billings.Service,
 	migrationSvc *hosting.MigrationService,
 	jobSvc *jobs.Service,
 	authsessions *session.Manager,

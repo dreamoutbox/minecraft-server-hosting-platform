@@ -8,11 +8,13 @@ import (
 
 	authhandler "github.com/dreamoutbox/go-authkit/handler"
 	"github.com/dreamoutbox/go-authkit/session"
+	stripekit "github.com/dreamoutbox/go-stripe-kit"
+	"github.com/dreamoutbox/go-stripe-kit/ginapi"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billings"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/jobs"
 	jobqueue "github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
@@ -115,18 +117,19 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobqueue.Servic
 	migrationService := hosting.NewMigrationService(hostingService, backupService, storageProvider, workerFactory)
 	hostingHandler.SetMigrationService(migrationService)
 
-	var paymentProvider billing.PaymentProvider
+	var paymentProvider stripekit.PaymentProvider
 	if cfg.BillingProvider == "stripe" && cfg.StripeSecretKey != "" {
-		paymentProvider = billing.NewStripePaymentProvider(cfg.StripeSecretKey)
+		paymentProvider = stripekit.NewStripePaymentProvider(cfg.StripeSecretKey)
 	} else {
-		paymentProvider = billing.NewMockPaymentProvider()
+		paymentProvider = stripekit.NewMockPaymentProvider()
 	}
-	billingService := billing.NewService(db, paymentProvider, cfg.StripeWebhookSecret)
+	stripeService := stripekit.NewService(paymentProvider, cfg.StripeWebhookSecret)
+	billingService := billings.NewService(db, stripeService)
 	billingService.SetJobQueue(jobService)
 	billingService.SetAppBaseURL(cfg.AppBaseURL)
 	billingService.SetRetentionDays(cfg.RetentionDays)
-	billingHandler := billing.NewHandler(billingService)
-	billingHandler.RegisterRoutes(r, cfg.JWTSecret)
+	billingAPIHandler := billings.NewAPIHandler(billingService, ginapi.NewHandler(stripeService))
+	billingAPIHandler.RegisterRoutes(r, cfg.JWTSecret)
 
 	cookieCfg := session.DefaultCookieConfig(session.DefaultCookieName, cfg.SessionTTL, cfg.CookieSecure)
 	authsessions := session.NewManager(db, cookieCfg)

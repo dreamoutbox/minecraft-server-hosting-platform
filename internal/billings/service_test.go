@@ -1,11 +1,8 @@
-package billing
+package billings
 
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,13 +13,18 @@ import (
 
 	"github.com/dreamoutbox/go-authkit"
 	"github.com/dreamoutbox/go-authkit/authkitjwt"
+	stripekit "github.com/dreamoutbox/go-stripe-kit"
+	"github.com/dreamoutbox/go-stripe-kit/ginapi"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 )
 
-func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *domain.User, *domain.Server, *domain.Plan, string) {
+func setupBillingTestEnv(t *testing.T) (*Service, *stripekit.MockPaymentProvider, *domain.User, *domain.Server, *domain.Plan, string) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
 	dsn := os.Getenv("TEST_DATABASE_DSN")
 	if dsn == "" {
 		dsn = "host=localhost user=postgres password=postgrespassword dbname=minecraft_hosting port=5432 sslmode=disable"
@@ -35,9 +37,10 @@ func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *domain.
 	_ = domain.AutoMigrate(db)
 	_ = domain.SeedPlans(db)
 
-	mockProvider := NewMockPaymentProvider()
+	mockProvider := stripekit.NewMockPaymentProvider()
 	webhookSecret := "whsec_test_secret_123"
-	service := NewService(db, mockProvider, webhookSecret)
+	stripeSvc := stripekit.NewService(mockProvider, webhookSecret)
+	service := NewService(db, stripeSvc)
 
 	user := domain.User{
 		User: authkit.User{
@@ -51,7 +54,6 @@ func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *domain.
 	var plan domain.Plan
 	_ = db.Where("name = ?", "Small").First(&plan)
 
-	// Create dummy host
 	host := domain.Host{
 		Hostname:      fmt.Sprintf("billing-host-%d", time.Now().UnixNano()),
 		WorkerBaseURL: "http://127.0.0.1:9090",
@@ -86,17 +88,17 @@ func TestWebhookSignatureVerification(t *testing.T) {
 		return
 	}
 
-	secret := "whsec_test_secret_123"
-	handler := NewHandler(service)
+	secret := service.StripeService().WebhookSecret()
+	apiHandler := NewAPIHandler(service, ginapi.NewHandler(service.StripeService()))
 	r := gin.New()
-	handler.RegisterRoutes(r, "jwt-secret")
+	apiHandler.RegisterRoutes(r, "jwt-secret")
 
-	evt := WebhookEvent{
-		Type:        "payment_intent.succeeded",
+	evt := stripekit.WebhookEvent{
+		Type:        stripekit.EventPaymentIntentSucceeded,
 		PaymentID:   "pi_test_abc123",
 		AmountCents: 1000,
 		CustomerID:  "cust_test_1",
-		Status:      domain.PaymentStatusSucceeded,
+		Status:      stripekit.PaymentStatusSucceeded,
 	}
 
 	validPayload, validSig := mockProvider.GenerateSignedWebhook(evt, secret)
@@ -128,39 +130,37 @@ func TestWebhookSignatureVerification(t *testing.T) {
 	}
 }
 
-func TestBillingHTTPRoutes(t *testing.T) {
-	service, _, user, srv, plan, token := setupBillingTestEnv(t)
+func TestBillingHTTPRoutesAndRefundWebhookSync(t *testing.T) {
+	service, mockProvider, user, srv, plan, token := setupBillingTestEnv(t)
 	if service == nil {
 		return
 	}
 
 	jq := &mockCheckoutJobQueue{db: service.db, hostID: srv.HostID}
 	service.SetJobQueue(jq)
-	cs, order, err := service.CreateServerCheckout(context.Background(), user.ID, plan.ID, "OrderHistoryTest", domain.ServerTypeVanilla, "LATEST")
+	cs, order, err := service.CreateServerCheckout(context.Background(), user.ID, plan.ID, "OrderHistoryTest", domain.ServerTypeVanilla, domain.DefaultServerVersion)
 	if err != nil {
 		t.Fatalf("CreateServerCheckout failed: %v", err)
 	}
 
-	payload, _ := json.Marshal(map[string]interface{}{
-		"type": "checkout.session.completed",
-		"data": map[string]interface{}{
-			"object": map[string]interface{}{
-				"id":             cs.SessionID,
-				"payment_intent": fmt.Sprintf("pi_routes_%d", time.Now().UnixNano()),
-				"amount_total":   plan.PriceCents,
-				"metadata": map[string]string{
-					"order_id": fmt.Sprintf("%d", order.ID),
-				},
-			},
-		},
-	})
-	if err := service.HandleWebhook(context.Background(), payload, signMockStripePayload(payload, service.webhookSecret)); err != nil {
+	paymentIntentID := fmt.Sprintf("pi_routes_%d", time.Now().UnixNano())
+	secret := service.StripeService().WebhookSecret()
+	payload, sig := mockProvider.GenerateSignedWebhook(stripekit.WebhookEvent{
+		Type:              stripekit.EventCheckoutSessionCompleted,
+		SessionID:         cs.SessionID,
+		PaymentID:         paymentIntentID,
+		ClientReferenceID: fmt.Sprintf("%d", order.ID),
+		AmountCents:       plan.PriceCents,
+		Status:            stripekit.PaymentStatusSucceeded,
+		Metadata:          map[string]string{"order_id": fmt.Sprintf("%d", order.ID)},
+	}, secret)
+	if err := service.HandleWebhook(context.Background(), payload, sig); err != nil {
 		t.Fatalf("HandleWebhook failed: %v", err)
 	}
 
-	handler := NewHandler(service)
+	apiHandler := NewAPIHandler(service, ginapi.NewHandler(service.StripeService()))
 	r := gin.New()
-	handler.RegisterRoutes(r, "billing-jwt-secret")
+	apiHandler.RegisterRoutes(r, "billing-jwt-secret")
 
 	// 1. List orders
 	wOrders := httptest.NewRecorder()
@@ -197,6 +197,26 @@ func TestBillingHTTPRoutes(t *testing.T) {
 	if len(paymentsResp.Payments) == 0 || paymentsResp.Payments[0].OrderID == nil || *paymentsResp.Payments[0].OrderID != order.ID {
 		t.Fatalf("expected payment linked to order #%d, got %+v", order.ID, paymentsResp.Payments)
 	}
+
+	// 3. charge.refunded webhook syncs PaymentRecord status to refunded
+	refundPayload, refundSig := mockProvider.GenerateSignedWebhook(stripekit.WebhookEvent{
+		Type:        stripekit.EventChargeRefunded,
+		PaymentID:   paymentIntentID,
+		RefundID:    "re_test_sync",
+		AmountCents: plan.PriceCents,
+		Status:      stripekit.PaymentStatusRefunded,
+	}, secret)
+	if err := service.HandleWebhook(context.Background(), refundPayload, refundSig); err != nil {
+		t.Fatalf("refund HandleWebhook failed: %v", err)
+	}
+
+	var updatedPayment domain.PaymentRecord
+	if err := service.db.Where("provider_tx_id = ?", paymentIntentID).First(&updatedPayment).Error; err != nil {
+		t.Fatalf("failed loading updated payment record: %v", err)
+	}
+	if updatedPayment.Status != domain.PaymentStatusRefunded {
+		t.Fatalf("expected payment record status %s after charge.refunded webhook, got %s", domain.PaymentStatusRefunded, updatedPayment.Status)
+	}
 }
 
 type mockCheckoutJobQueue struct {
@@ -224,19 +244,13 @@ func (m *mockCheckoutJobQueue) EnqueueCreateServerWithExpiry(ctx context.Context
 	return &srv, &domain.ServerJob{ID: uint(m.calls)}, nil
 }
 
-func signMockStripePayload(payload []byte, secret string) string {
-	ts := time.Now().Unix()
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = fmt.Fprintf(mac, "%d.%s", ts, string(payload))
-	return fmt.Sprintf("t=%d,v1=%s", ts, hex.EncodeToString(mac.Sum(nil)))
-}
-
 func TestCheckoutWebhookCreateAndExtendServer(t *testing.T) {
-	svc, _, user, srv, plan, _ := setupBillingTestEnv(t)
+	svc, mockProvider, user, srv, plan, _ := setupBillingTestEnv(t)
 	if svc == nil {
 		return
 	}
 	ctx := context.Background()
+	secret := svc.StripeService().WebhookSecret()
 
 	jq := &mockCheckoutJobQueue{db: svc.db, hostID: srv.HostID}
 	svc.SetJobQueue(jq)
@@ -252,20 +266,15 @@ func TestCheckoutWebhookCreateAndExtendServer(t *testing.T) {
 	}
 
 	// 2. Simulate checkout.session.completed webhook
-	payload, _ := json.Marshal(map[string]interface{}{
-		"type": "checkout.session.completed",
-		"data": map[string]interface{}{
-			"object": map[string]interface{}{
-				"id":             cs.SessionID,
-				"payment_intent": fmt.Sprintf("pi_test_%d", time.Now().UnixNano()),
-				"amount_total":   plan.PriceCents,
-				"metadata": map[string]string{
-					"order_id": fmt.Sprintf("%d", order.ID),
-				},
-			},
-		},
-	})
-	sig := signMockStripePayload(payload, svc.webhookSecret)
+	payload, sig := mockProvider.GenerateSignedWebhook(stripekit.WebhookEvent{
+		Type:              stripekit.EventCheckoutSessionCompleted,
+		SessionID:         cs.SessionID,
+		PaymentID:         fmt.Sprintf("pi_test_%d", time.Now().UnixNano()),
+		ClientReferenceID: fmt.Sprintf("%d", order.ID),
+		AmountCents:       plan.PriceCents,
+		Status:            stripekit.PaymentStatusSucceeded,
+		Metadata:          map[string]string{"order_id": fmt.Sprintf("%d", order.ID)},
+	}, secret)
 	if err := svc.HandleWebhook(ctx, payload, sig); err != nil {
 		t.Fatalf("HandleWebhook failed: %v", err)
 	}
@@ -295,20 +304,16 @@ func TestCheckoutWebhookCreateAndExtendServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateExtendCheckout failed: %v", err)
 	}
-	extPayload, _ := json.Marshal(map[string]interface{}{
-		"type": "checkout.session.completed",
-		"data": map[string]interface{}{
-			"object": map[string]interface{}{
-				"id":             extCS.SessionID,
-				"payment_intent": fmt.Sprintf("pi_ext_%d", time.Now().UnixNano()),
-				"amount_total":   plan.PriceCents,
-				"metadata": map[string]string{
-					"order_id": fmt.Sprintf("%d", extOrder.ID),
-				},
-			},
-		},
-	})
-	if err := svc.HandleWebhook(ctx, extPayload, signMockStripePayload(extPayload, svc.webhookSecret)); err != nil {
+	extPayload, extSig := mockProvider.GenerateSignedWebhook(stripekit.WebhookEvent{
+		Type:              stripekit.EventCheckoutSessionCompleted,
+		SessionID:         extCS.SessionID,
+		PaymentID:         fmt.Sprintf("pi_ext_%d", time.Now().UnixNano()),
+		ClientReferenceID: fmt.Sprintf("%d", extOrder.ID),
+		AmountCents:       plan.PriceCents,
+		Status:            stripekit.PaymentStatusSucceeded,
+		Metadata:          map[string]string{"order_id": fmt.Sprintf("%d", extOrder.ID)},
+	}, secret)
+	if err := svc.HandleWebhook(ctx, extPayload, extSig); err != nil {
 		t.Fatalf("extension HandleWebhook failed: %v", err)
 	}
 	_ = svc.db.First(&createdSrv, createdSrv.ID)

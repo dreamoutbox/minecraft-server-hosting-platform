@@ -17,10 +17,11 @@ import (
 
 	"github.com/dreamoutbox/go-authkit"
 	"github.com/dreamoutbox/go-authkit/session"
+	stripekit "github.com/dreamoutbox/go-stripe-kit"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billings"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
@@ -176,8 +177,9 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 	// Clear stale pending jobs from other test packages before running dashboard queue assertions
 	db.Model(&domain.ServerJob{}).Where("status = ?", domain.JobStatusPending).Update("status", domain.JobStatusFailed)
 
-	paymentProvider := billing.NewMockPaymentProvider()
-	billingSvc := billing.NewService(db, paymentProvider, "whsec_test")
+	paymentProvider := stripekit.NewMockPaymentProvider()
+	stripeSvc := stripekit.NewService(paymentProvider, "whsec_test")
+	billingSvc := billings.NewService(db, stripeSvc)
 
 	fakeFS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

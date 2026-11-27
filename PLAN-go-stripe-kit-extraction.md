@@ -101,21 +101,21 @@ internal/billings/              # Minecraft server hosting platform billing
   - [x] Add `go-stripe-kit/ginapi/handler_test.go` using `httptest` and `stripekit.NewMockPaymentProvider()` covering webhook signature validation + dispatch and full/partial/invalid refund HTTP responses.
 - Done when: `cd go-stripe-kit && go test -v -race ./...` passes, and `go list -f '{{.Deps}}' ./go-stripe-kit` still contains no `github.com/gin-gonic/gin` imports while `go list -f '{{.Deps}}' ./go-stripe-kit/ginapi` does.
 
-### Phase 5: Migrate MC platform billing code to `./internal/billings` and remove `./internal/billing` [STATUS: TODO]
+### Phase 5: Migrate MC platform billing code to `./internal/billings` and remove `./internal/billing` [STATUS: DONE]
 - Goal: Move all Minecraft server hosting platform billing logic and `/api/v1/billing/*` API routes from `internal/billing` into `internal/billings` backed by `go-stripe-kit` + `go-stripe-kit/ginapi`, then remove `internal/billing`.
 - Tasks:
-  - [ ] Move MC-platform billing service code from `internal/billing/service.go` into `internal/billings/`:
+  - [x] Move MC-platform billing service code from `internal/billing/service.go` into `internal/billings/`:
     - `internal/billings/service.go`: `JobEnqueuer`, `Service` wrapping `*gorm.DB` and `*stripekit.Service`, `NewService`, `SetJobQueue`, `SetAppBaseURL`, `SetRetentionDays`, `StripeService()`, and explicit `mapStripePaymentStatus` (keeping `shared/domain` free of `go-stripe-kit` imports).
     - `internal/billings/checkout.go`: `CreateServerCheckout` and `CreateExtendCheckout`, passing `order_id` via `Metadata` and `ClientReferenceID` to `stripekit.Service.CreateCheckoutSession`.
     - `internal/billings/webhook_fulfillment.go`: `HandleWebhookEvent(ctx, *stripekit.WebhookEvent)` registered on `stripekit.Service` — handles `checkout.session.completed` (idempotent order claim, `PaymentRecord` insert, enqueue server creation, extend server expiration) and updates `PaymentRecord.Status` on `payment_intent.*` and `charge.refunded` events.
     - `internal/billings/queries.go`: `ListUserOrders` and `ListUserPayments`.
-  - [ ] Move MC-platform JSON API routes from `internal/billing/handler.go` into `internal/billings/` (one route per file, preserving `/api/v1/billing/*` routes and contracts):
+  - [x] Move MC-platform JSON API routes from `internal/billing/handler.go` into `internal/billings/` (one route per file, preserving `/api/v1/billing/*` routes and contracts):
     - `internal/billings/api_handler.go`: `APIHandler`, `NewAPIHandler(svc *Service, stripeGin *ginapi.Handler)`, `RegisterRoutes(r *gin.Engine, jwtSecret string)` applying rate limiting, mounting `POST /webhook` via `stripeGin.RegisterWebhookRoute`, and mounting JWT-authenticated `GET /orders` and `GET /payments`.
     - `internal/billings/list_orders_api.go`: `ListOrders` (`GET /api/v1/billing/orders`).
     - `internal/billings/list_payments_api.go`: `ListPayments` (`GET /api/v1/billing/payments`).
-  - [ ] Update callers (`internal/billings/handler.go`, `internal/dashboard/dashboard.go`, `internal/dashboard/dashboard_test.go`, `cmd/apiserver/main.go`) to use `stripekit`, `ginapi`, and `internal/billings`.
-  - [ ] Migrate DB-backed tests from `internal/billing/billing_test.go` to `internal/billings/service_test.go`, adding a test verifying `charge.refunded` webhook syncs `PaymentRecord.Status` to `refunded`.
-  - [ ] Delete `internal/billing/`.
+  - [x] Update callers (`internal/billings/handler.go`, `internal/dashboard/dashboard.go`, `internal/dashboard/dashboard_test.go`, `cmd/apiserver/main.go`) to use `stripekit`, `ginapi`, and `internal/billings`.
+  - [x] Migrate DB-backed tests from `internal/billing/billing_test.go` to `internal/billings/service_test.go`, adding a test verifying `charge.refunded` webhook syncs `PaymentRecord.Status` to `refunded`.
+  - [x] Delete `internal/billing/`.
 - Done when: `go build ./...`, `go test -race ./...`, and `cd go-stripe-kit && go test -race ./...` pass; `internal/billing/` does not exist; `rg "internal/billing\b" cmd/ internal/ shared/` returns no matches; and `go list -f '{{.Deps}}' ./cmd/nodemanager ./cmd/jobworker` contains neither `go-stripe-kit` nor `stripe-go`.
 
 ### Phase 6: Document `./go-stripe-kit`, tidy modules, and verify Docker builds [STATUS: TODO]
