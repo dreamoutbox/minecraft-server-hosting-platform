@@ -10,13 +10,13 @@
   - [x] Fix `Handler.Register` in `shared/authkit/handler.go` to check `errors.Is(err, gorm.ErrRecordNotFound)` so database errors return `500` instead of falling through to user creation.
 - Done when: `go test ./...` passes in `.`, `shared/authkit`, and `fileserver`; `authkit.User` has no billing fields while `domain.User` preserves `customer_id` and `payment_method_id` on the `users` table.
 
-### Phase 2: Make access JWT expiry configurable via ENV [STATUS: TODO]
+### Phase 2: Make access JWT expiry configurable via ENV [STATUS: DONE]
 - Goal: Replace the hardcoded 15-minute access JWT TTL with an environment-configurable duration defaulting to `15m`.
 - Tasks:
-  - [ ] Update `shared/authkit/token.go` to support configurable access token TTL (e.g., `DefaultAccessTokenTTL = 15 * time.Minute`, `GenerateTokenPairWithTTL`, and/or `AccessTokenTTLFromEnv()` reading `JWT_ACCESS_TTL` with `15m` fallback) while preserving `15m` default behavior.
-  - [ ] Add `JWTAccessTTL time.Duration` to `internal/config/config.go` via `parseEnvDuration("JWT_ACCESS_TTL", 15*time.Minute)` with positive-duration validation.
-  - [ ] Wire `cfg.JWTAccessTTL` into `authkit.Handler` in `cmd/apiserver/main.go`.
-  - [ ] Add unit tests in `shared/authkit/authkit_test.go` and `internal/config` covering default `15m`, custom valid durations, and invalid/non-positive values.
+  - [x] Update `shared/authkit/token.go` to support configurable access token TTL (e.g., `DefaultAccessTokenTTL = 15 * time.Minute`, `GenerateTokenPairWithTTL`, and/or `AccessTokenTTLFromEnv()` reading `JWT_ACCESS_TTL` with `15m` fallback) while preserving `15m` default behavior.
+  - [x] Add `JWTAccessTTL time.Duration` to `internal/config/config.go` via `parseEnvDuration("JWT_ACCESS_TTL", 15*time.Minute)` with positive-duration validation.
+  - [x] Wire `cfg.JWTAccessTTL` into `authkit.Handler` in `cmd/apiserver/main.go`.
+  - [x] Add unit tests in `shared/authkit/authkit_test.go` and `internal/config` covering default `15m`, custom valid durations, and invalid/non-positive values.
 - Done when: `go test ./...` passes across all modules; setting `JWT_ACCESS_TTL` changes the `exp` claim on issued access JWTs, and leaving it unset defaults to 15 minutes.
 
 ### Phase 3: Implement `github.com/dreamoutbox/authkit/session` package and `sessions` table [STATUS: TODO]

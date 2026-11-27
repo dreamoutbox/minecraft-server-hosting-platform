@@ -60,6 +60,7 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 	})
 
 	authHandler := authkit.NewHandler(db, cfg.JWTSecret)
+	authHandler.SetAccessTokenTTL(cfg.JWTAccessTTL)
 	authGroup := r.Group("/api/v1/auth")
 	authGroup.Use(middleware.RateLimitMiddleware(10, 20))
 	authHandler.RegisterRoutes(authGroup)

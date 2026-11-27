@@ -15,6 +15,7 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 		"CRON_MC_SERVER_DATA_BACKUP",
 		"BACKUP_MAX_COUNT",
 		"BACKUP_PRESIGN_TTL",
+		"JWT_ACCESS_TTL",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatalf("failed unsetting %s: %v", key, err)
@@ -46,6 +47,9 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.BackupPresignTTL != time.Hour {
 		t.Errorf("expected default BackupPresignTTL 1h, got: %s", cfg.BackupPresignTTL)
+	}
+	if cfg.JWTAccessTTL != 15*time.Minute {
+		t.Errorf("expected default JWTAccessTTL 15m, got: %s", cfg.JWTAccessTTL)
 	}
 	if cfg.DefaultWorkerKey != "dev-worker-key" {
 		t.Errorf("expected default DefaultWorkerKey dev-worker-key, got: %s", cfg.DefaultWorkerKey)
@@ -125,4 +129,31 @@ func TestLoadFromEnvInvalidRange(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when min >= max, got nil")
 	}
+}
+
+func TestLoadFromEnvJWTAccessTTL(t *testing.T) {
+	t.Run("valid override", func(t *testing.T) {
+		t.Setenv("JWT_ACCESS_TTL", "30m")
+		cfg, err := LoadFromEnv()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.JWTAccessTTL != 30*time.Minute {
+			t.Fatalf("expected 30m, got %s", cfg.JWTAccessTTL)
+		}
+	})
+
+	t.Run("invalid duration", func(t *testing.T) {
+		t.Setenv("JWT_ACCESS_TTL", "bad")
+		if _, err := LoadFromEnv(); err == nil {
+			t.Fatal("expected error for invalid JWT_ACCESS_TTL")
+		}
+	})
+
+	t.Run("non-positive duration", func(t *testing.T) {
+		t.Setenv("JWT_ACCESS_TTL", "0s")
+		if _, err := LoadFromEnv(); err == nil {
+			t.Fatal("expected error for zero JWT_ACCESS_TTL")
+		}
+	})
 }

@@ -14,6 +14,7 @@ const (
 	defaultCronMCServerDataBackup     = "0 5 * * *"
 	defaultBackupMaxCount             = 8
 	defaultBackupPresignTTL           = time.Hour
+	defaultJWTAccessTTL               = 15 * time.Minute
 )
 
 // Config encapsulates runtime configuration settings for the platform orchestrator.
@@ -23,6 +24,7 @@ type Config struct {
 	PortRangeMin                 int
 	PortRangeMax                 int
 	JWTSecret                    string
+	JWTAccessTTL                 time.Duration
 	AppBaseURL                   string
 	RetentionDays                int
 	CronMCServerDataBackup       string
@@ -63,6 +65,13 @@ func LoadFromEnv() (*Config, error) {
 	dbName := getEnv("DB_NAME", "minecraft_hosting")
 	dbSSL := getEnv("DB_SSLMODE", "disable")
 	jwtSecret := getEnv("JWT_SECRET", "dev-platform-jwt-secret-key-change-in-prod")
+	jwtAccessTTL, err := parseEnvDuration("JWT_ACCESS_TTL", defaultJWTAccessTTL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWT_ACCESS_TTL: %w", err)
+	}
+	if jwtAccessTTL <= 0 {
+		return nil, fmt.Errorf("JWT_ACCESS_TTL must be positive: got %s", jwtAccessTTL)
+	}
 	appBaseURL := getEnv("APP_BASE_URL", "http://localhost:8080")
 	retentionDays, err := parseEnvInt("SERVER_EXPIRED_DATA_RETENTION_DAYS", defaultServerExpiredRetentionDays)
 	if err != nil || retentionDays <= 0 {
@@ -149,6 +158,7 @@ func LoadFromEnv() (*Config, error) {
 		PortRangeMin:                 minPort,
 		PortRangeMax:                 maxPort,
 		JWTSecret:                    jwtSecret,
+		JWTAccessTTL:                 jwtAccessTTL,
 		AppBaseURL:                   appBaseURL,
 		RetentionDays:                retentionDays,
 		CronMCServerDataBackup:       cronMCServerDataBackup,

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -16,6 +17,7 @@ var ErrInvalidCredentials = errors.New("invalid credentials")
 type Handler struct {
 	db        *gorm.DB
 	jwtSecret string
+	accessTTL time.Duration
 }
 
 // NewHandler initializes a new authentication handler.
@@ -32,6 +34,26 @@ func NewHandler(db *gorm.DB, jwtSecret string) *Handler {
 		db:        db,
 		jwtSecret: jwtSecret,
 	}
+}
+
+// SetAccessTokenTTL overrides the access JWT lifetime used by this handler.
+// When unset (or <= 0), GenerateTokenPair reads JWT_ACCESS_TTL or falls back to DefaultAccessTokenTTL.
+//
+// Arguments:
+//   - ttl: Desired access token lifetime duration.
+//
+// Example usage:
+//
+//	handler.SetAccessTokenTTL(cfg.JWTAccessTTL)
+func (h *Handler) SetAccessTokenTTL(ttl time.Duration) {
+	h.accessTTL = ttl
+}
+
+func (h *Handler) generateTokens(user *User) (*TokenPair, error) {
+	if h.accessTTL > 0 {
+		return GenerateTokenPairWithTTL(user.ID, user.Email, user.Role, h.jwtSecret, h.accessTTL)
+	}
+	return GenerateTokenPair(user.ID, user.Email, user.Role, h.jwtSecret)
 }
 
 // RegisterRequest holds registration inputs.
@@ -147,7 +169,7 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	tokens, err := GenerateTokenPair(newUser.ID, newUser.Email, newUser.Role, h.jwtSecret)
+	tokens, err := h.generateTokens(&newUser)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed generating tokens"})
 		return
@@ -180,7 +202,7 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	tokens, err := GenerateTokenPair(user.ID, user.Email, user.Role, h.jwtSecret)
+	tokens, err := h.generateTokens(user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed generating tokens"})
 		return
@@ -219,7 +241,7 @@ func (h *Handler) Refresh(c *gin.Context) {
 		return
 	}
 
-	tokens, err := GenerateTokenPair(user.ID, user.Email, user.Role, h.jwtSecret)
+	tokens, err := h.generateTokens(&user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed generating refreshed tokens"})
 		return

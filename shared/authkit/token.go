@@ -5,11 +5,21 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+)
+
+const (
+	// DefaultAccessTokenTTL is the fallback lifetime for access JWTs when JWT_ACCESS_TTL is unset.
+	DefaultAccessTokenTTL = 15 * time.Minute
+	// DefaultRefreshTokenTTL is the lifetime for refresh JWTs.
+	DefaultRefreshTokenTTL = 7 * 24 * time.Hour
+	// AccessTokenTTLEnvVar is the environment variable controlling default access JWT lifetime.
+	AccessTokenTTLEnvVar = "JWT_ACCESS_TTL"
 )
 
 // TokenType designates the intended purpose of an issued JWT.
@@ -101,7 +111,31 @@ func signClaims(claims CustomClaims, secret string) (string, error) {
 	return signed, nil
 }
 
-// GenerateTokenPair mints both a short-lived access token and a longer-lived refresh token.
+// AccessTokenTTLFromEnv parses JWT_ACCESS_TTL from the environment, defaulting to DefaultAccessTokenTTL.
+//
+// Arguments:
+//   - None (reads JWT_ACCESS_TTL from the process environment).
+//
+// Example usage:
+//
+//	ttl, err := authkit.AccessTokenTTLFromEnv()
+func AccessTokenTTLFromEnv() (time.Duration, error) {
+	raw := os.Getenv(AccessTokenTTLEnvVar)
+	if raw == "" {
+		return DefaultAccessTokenTTL, nil
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s (%q): %w", AccessTokenTTLEnvVar, raw, err)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("%s must be positive: got %s", AccessTokenTTLEnvVar, parsed)
+	}
+	return parsed, nil
+}
+
+// GenerateTokenPair mints both an access token (using JWT_ACCESS_TTL or DefaultAccessTokenTTL)
+// and a longer-lived refresh token.
 //
 // Arguments:
 //   - userID: Database primary key of the authenticated user.
@@ -116,9 +150,33 @@ func signClaims(claims CustomClaims, secret string) (string, error) {
 //	    return nil, err
 //	}
 func GenerateTokenPair(userID uint, email string, role UserRole, secret string) (*TokenPair, error) {
+	accessTTL, err := AccessTokenTTLFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return GenerateTokenPairWithTTL(userID, email, role, secret, accessTTL)
+}
+
+// GenerateTokenPairWithTTL mints an access token with the given TTL and a refresh token.
+//
+// Arguments:
+//   - userID: Database primary key of the authenticated user.
+//   - email: Account email address.
+//   - role: Authorization role tier of the user.
+//   - secret: HMAC signing secret key.
+//   - accessTTL: Positive lifetime duration for the access token.
+//
+// Example usage:
+//
+//	pair, err := authkit.GenerateTokenPairWithTTL(user.ID, user.Email, user.Role, "jwt-secret", 30*time.Minute)
+func GenerateTokenPairWithTTL(userID uint, email string, role UserRole, secret string, accessTTL time.Duration) (*TokenPair, error) {
+	if accessTTL <= 0 {
+		return nil, errors.New("accessTTL must be positive")
+	}
+
 	now := time.Now()
-	accessExpiry := now.Add(15 * time.Minute)
-	refreshExpiry := now.Add(7 * 24 * time.Hour)
+	accessExpiry := now.Add(accessTTL)
+	refreshExpiry := now.Add(DefaultRefreshTokenTTL)
 
 	accessTokenStr, err := signClaims(CustomClaims{
 		UserID:    userID,
