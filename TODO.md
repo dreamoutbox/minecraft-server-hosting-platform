@@ -83,8 +83,6 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] new background worker to create server from queue, stop expired server, delete server data after passed retention days
 
-- [ ] add button to kill server. for unresponsive mc server.
-
 - [x] change "Create Your First Server" to "Buy Server" if user is not admin/staff
 
 - [x] restore from backup failed: failed importing volume contents on worker: import volume failed with code 500: {"error":"failed creating file /var/lib/mc-platform/mounts/1/.install-vanilla.env: open /var/lib/mc-platform/mounts/1/.install-vanilla.env: permission denied"}
@@ -98,8 +96,6 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
     - [x] plans (with CRUD)
 
 - [x] add script to reset dev seaweedfs s3 bucket. also add to dev-reset-wrapper.sh.
-
-- [ ] add ability for user to install mods/modpacks from modrinth/curseforge.
 
 ---
 
@@ -159,14 +155,22 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [ ] if any of these new dir shared code in `./internal`, the shared code to `./shared`
 
-- [ ] separate routes in `internal/dashboard/dashboard.go` to own file. one route per one go file. don't mix everything in just one file. separate by category like: users, billings, servers, etc. like internal/dashboard/users/login.go, internal/dashboard/users/register.go, internal/dashboard/billings/buy_server.go, internal/dashboard/servers/create-server.go
+- [ ] separate routes in `internal/dashboard/dashboard.go` to it own file. one route per one go file. don't mix everything in just one file. separate by category like: users, billings, servers, etc. like internal/users/login.go, internal/users/register.go, internal/billings/buy_server.go, internal/mcservers/create-server.go
+
+- [ ] move each jobs in internal/jobs/queue.go to it own file. one job per one go file. example: jobworker/jobs/process_expired_servers.go, jobworker/jobs/cleanup_retention_servers.go, jobworker/jobs/enqueue_all_image_backups.go, etc...
 
 ---
 
 # BACKLOG
 
+- [ ] move shared/authkit to new git repo
+
+- [ ] add button to kill server. for unresponsive mc server.
+
+- [ ] add ability for user to install mods/modpacks from modrinth/curseforge.
+
 - [ ] connect to cloudflare API for minecraft server custom subdomain.
 
-- [ ] add AI chat to manage server.
+- [ ] add AI chat to manage user mcservers.
 
 - [ ] add server_instance_type for vps, container to servers tables
