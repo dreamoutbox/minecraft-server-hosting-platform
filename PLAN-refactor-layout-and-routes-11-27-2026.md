@@ -115,10 +115,10 @@ internal/
   - [x] Wire `users.Handler` and `billings.Handler` in `internal/dashboard/dashboard.go` `RegisterRoutes` and remove the migrated methods from `dashboard.go`.
 - Done when: `go build ./...` and `go test -race ./internal/dashboard/... ./internal/users/... ./internal/billings/...` pass.
 
-### Phase 8: Split Minecraft server routes into `internal/mcservers/` [STATUS: TODO]
+### Phase 8: Split Minecraft server routes into `internal/mcservers/` [STATUS: DONE]
 - Goal: Move all server dashboard routes out of `internal/dashboard/dashboard.go` into `internal/mcservers/` with one route per file.
 - Tasks:
-  - [ ] Create `internal/mcservers/` with `handler.go` (struct + `RegisterRoutes`) and one file per route:
+  - [x] Create `internal/mcservers/` with `handler.go` (struct + `RegisterRoutes`) and one file per route:
     - `list_servers.go` (`GET /dashboard`)
     - `create_server.go` (`GET/POST /dashboard/servers/new`)
     - `server_detail.go` (`GET /dashboard/servers/:id`)
@@ -138,7 +138,7 @@ internal/
     - `stop_server.go` (`POST /dashboard/servers/:id/stop`)
     - `delete_server.go` (`POST /dashboard/servers/:id/delete`)
     - `open_file_manager.go` (`GET /dashboard/servers/:id/files/open`)
-  - [ ] Wire `mcservers.Handler` in `internal/dashboard/dashboard.go` `RegisterRoutes` and remove the migrated methods from `dashboard.go`.
+  - [x] Wire `mcservers.Handler` in `internal/dashboard/dashboard.go` `RegisterRoutes` and remove the migrated methods from `dashboard.go`.
 - Done when: `go build ./...` and `go test -race ./internal/dashboard/... ./internal/mcservers/...` pass.
 
 ### Phase 9: Split admin routes into `internal/admin/` and final verification [STATUS: TODO]

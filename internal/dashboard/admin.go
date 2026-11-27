@@ -429,7 +429,7 @@ func (s *Service) AdminUpdatePlan(c *gin.Context) {
 		return
 	}
 
-	planID, ok := parseIDParam(c, "id")
+	planID, ok := view.ParseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard/admin/plans?error=Invalid+plan+ID")
 		return
@@ -482,7 +482,7 @@ func (s *Service) AdminDeletePlan(c *gin.Context) {
 		return
 	}
 
-	planID, ok := parseIDParam(c, "id")
+	planID, ok := view.ParseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard/admin/plans?error=Invalid+plan+ID")
 		return
