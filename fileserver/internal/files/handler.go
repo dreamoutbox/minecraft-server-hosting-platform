@@ -18,16 +18,16 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/session"
 	"github.com/dreamoutbox/fileserver/internal/store"
 )
 
-// SessionCookieName is the HTTP cookie carrying the fileserver session JWT.
+// SessionCookieName is the HTTP cookie carrying the fileserver opaque session token.
 const SessionCookieName = "fs_session"
 
 const (
-	sessionCookieMaxAgeSeconds = 3600 * 24
-	maxEditableFileBytes       = MaxEditableFileBytes
-	maxUploadPathFieldBytes    = 4096
+	maxEditableFileBytes    = MaxEditableFileBytes
+	maxUploadPathFieldBytes = 4096
 )
 
 //go:embed templates/*
@@ -42,10 +42,11 @@ type Breadcrumb struct {
 // Handler serves the browser login endpoint and file manager HTML UI.
 type Handler struct {
 	store           *store.Store
+	sessionStore    *session.Store
+	cookieCfg       session.CookieConfig
 	jwtSecret       string
 	maxUploadBytes  int64
 	dailyQuotaBytes int64
-	cookieSecure    bool
 	nowFn           func() time.Time
 	tmpl            map[string]*template.Template
 }
@@ -54,21 +55,23 @@ type Handler struct {
 //
 // Arguments:
 //   - st: Fileserver SQLite store for permissions, usage tracking, and token replay protection.
-//   - jwtSecret: HMAC secret used to verify login tokens and sign session cookies.
+//   - sessionStore: Database-backed session store for browser authentication.
+//   - jwtSecret: HMAC secret used to verify single-use login handoff tokens.
 //   - maxUploadBytes: Maximum allowed multipart upload body size in bytes.
 //   - dailyQuotaBytes: Per-user daily upload/download quota in bytes (0 disables quota enforcement).
-//   - cookieSecure: Whether session cookies set the Secure attribute.
+//   - cookieCfg: Session cookie configuration (name, TTL, Secure, SameSite).
 //
 // Example usage:
 //
-//	h := files.NewHandler(st, cfg.JWTSecret, cfg.MaxUploadBytes, cfg.DailyQuotaBytes, cfg.CookieSecure)
-func NewHandler(st *store.Store, jwtSecret string, maxUploadBytes int64, dailyQuotaBytes int64, cookieSecure bool) *Handler {
+//	h := files.NewHandler(st, sessionStore, cfg.JWTSecret, cfg.MaxUploadBytes, cfg.DailyQuotaBytes, cookieCfg)
+func NewHandler(st *store.Store, sessionStore *session.Store, jwtSecret string, maxUploadBytes int64, dailyQuotaBytes int64, cookieCfg session.CookieConfig) *Handler {
 	h := &Handler{
 		store:           st,
+		sessionStore:    sessionStore,
+		cookieCfg:       cookieCfg,
 		jwtSecret:       jwtSecret,
 		maxUploadBytes:  maxUploadBytes,
 		dailyQuotaBytes: dailyQuotaBytes,
-		cookieSecure:    cookieSecure,
 		nowFn:           time.Now,
 		tmpl:            make(map[string]*template.Template),
 	}
@@ -151,13 +154,13 @@ func (h *Handler) LoginWithToken(c *gin.Context) {
 		return
 	}
 
-	tokens, err := authkit.GenerateTokenPair(claims.UserID, claims.Email, claims.Role, h.jwtSecret)
+	rawSessionToken, _, err := h.sessionStore.Create(c.Request.Context(), claims.UserID, 0)
 	if err != nil {
 		h.renderError(c, http.StatusInternalServerError, "Session Error", "Failed establishing session.")
 		return
 	}
 
-	authkit.SetSessionCookie(c, SessionCookieName, tokens.AccessToken, sessionCookieMaxAgeSeconds, h.cookieSecure)
+	session.SetCookie(c, h.cookieCfg, rawSessionToken)
 
 	target := strings.TrimSpace(c.Query("target"))
 	if target == "" {
@@ -167,7 +170,7 @@ func (h *Handler) LoginWithToken(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/files?path="+url.QueryEscape(target))
 }
 
-// Logout clears the active fileserver session cookie.
+// Logout revokes the active fileserver session and clears the session cookie.
 //
 // Arguments:
 //   - c: Active Gin request context.
@@ -176,7 +179,10 @@ func (h *Handler) LoginWithToken(c *gin.Context) {
 //
 //	POST /logout
 func (h *Handler) Logout(c *gin.Context) {
-	authkit.ClearSessionCookie(c, SessionCookieName)
+	if rawToken, err := session.ReadCookie(c, h.cookieCfg); err == nil && rawToken != "" {
+		_ = h.sessionStore.Delete(c.Request.Context(), rawToken)
+	}
+	session.ClearCookie(c, h.cookieCfg)
 	h.renderError(c, http.StatusOK, "Logged Out", "You have been signed out of the file manager. You can close this tab.")
 }
 
@@ -861,7 +867,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	r.POST("/logout", h.Logout)
 
 	protected := r.Group("")
-	protected.Use(authkit.CookieAuthMiddleware(h.jwtSecret, SessionCookieName, ""))
+	protected.Use(session.Middleware(h.sessionStore, h.cookieCfg, ""))
 	{
 		protected.GET("/", func(c *gin.Context) {
 			c.Redirect(http.StatusFound, "/files")

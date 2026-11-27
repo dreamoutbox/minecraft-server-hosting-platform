@@ -16,6 +16,7 @@ const (
 	defaultMaxUploadMB   = 2048
 	defaultDailyQuotaMB  = 5120
 	defaultLoginTokenTTL = 60 * time.Second
+	defaultSessionTTL    = 24 * time.Hour
 )
 
 // Config holds runtime settings for the node fileserver daemon.
@@ -29,6 +30,7 @@ type Config struct {
 	DailyQuotaBytes int64
 	CookieSecure    bool
 	LoginTokenTTL   time.Duration
+	SessionTTL      time.Duration
 }
 
 // LoadFromEnv reads fileserver configuration from environment variables with safe dev defaults.
@@ -48,6 +50,10 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid FILESERVER_DAILY_QUOTA_MB: %w", err)
 	}
+	sessionTTL, err := parsePositiveDuration("FILESERVER_SESSION_TTL", defaultSessionTTL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid FILESERVER_SESSION_TTL: %w", err)
+	}
 
 	return &Config{
 		Port:            getEnv("FILESERVER_PORT", defaultPort),
@@ -59,6 +65,7 @@ func LoadFromEnv() (*Config, error) {
 		DailyQuotaBytes: int64(dailyQuotaMB) * 1024 * 1024,
 		CookieSecure:    os.Getenv("FILESERVER_COOKIE_SECURE") == "true",
 		LoginTokenTTL:   defaultLoginTokenTTL,
+		SessionTTL:      sessionTTL,
 	}, nil
 }
 
@@ -89,6 +96,18 @@ func parseNonNegativeInt(key string, fallback int) (int, error) {
 	parsed, err := strconv.Atoi(raw)
 	if err != nil || parsed < 0 {
 		return 0, fmt.Errorf("must be a non-negative integer, got %q", raw)
+	}
+	return parsed, nil
+}
+
+func parsePositiveDuration(key string, fallback time.Duration) (time.Duration, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("must be a positive duration, got %q", raw)
 	}
 	return parsed, nil
 }

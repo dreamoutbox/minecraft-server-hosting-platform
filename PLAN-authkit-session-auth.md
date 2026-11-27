@@ -41,17 +41,17 @@
   - [x] Update `internal/dashboard/dashboard_test.go` and `internal/dashboard/admin_test.go` to authenticate via `session.Store` cookies.
 - Done when: `go test ./...` passes in `.`; dashboard login persists a session row, logout deletes it, expired sessions redirect to `/login`, and cookie `Secure` flag reflects config.
 
-### Phase 5: Migrate `fileserver` browser UI to `authkit/session` and remove legacy cookie-JWT helpers [STATUS: TODO]
+### Phase 5: Migrate `fileserver` browser UI to `authkit/session` and remove legacy cookie-JWT helpers [STATUS: DONE]
 - Goal: Switch `fileserver` browser sessions to `authkit/session` while keeping one-time login JWTs for cross-service handoff, and remove obsolete JWT-cookie helpers from `shared/authkit`.
 - Tasks:
-  - [ ] Update `fileserver/internal/store/store.go` `OpenSQLite` to call `session.AutoMigrate(db)` so SQLite creates the `sessions` table.
-  - [ ] Add `SessionTTL time.Duration` (from `FILESERVER_SESSION_TTL`, defaulting to `24h`) to `fileserver/internal/config/config.go` and wire `FILESERVER_COOKIE_SECURE` into `session.CookieConfig`.
-  - [ ] Update `fileserver/internal/files/handler.go` and `fileserver/cmd/fileserver/main.go`:
+  - [x] Update `fileserver/internal/store/store.go` `OpenSQLite` to call `session.AutoMigrate(db)` so SQLite creates the `sessions` table.
+  - [x] Add `SessionTTL time.Duration` (from `FILESERVER_SESSION_TTL`, defaulting to `24h`) to `fileserver/internal/config/config.go` and wire `FILESERVER_COOKIE_SECURE` into `session.CookieConfig`.
+  - [x] Update `fileserver/internal/files/handler.go` and `fileserver/cmd/fileserver/main.go`:
     - In `LoginWithToken`, after consuming the one-time `TokenTypeLogin` JWT, create a DB session via `session.Store` and call `session.SetCookie`.
     - In `Logout`, delete the session from `session.Store` and call `session.ClearCookie` with matching `CookieConfig`.
     - Replace `authkit.CookieAuthMiddleware` with `session.Middleware`.
-  - [ ] Update `fileserver` tests to use `session.Store` cookies.
-  - [ ] Remove the now-unused `CookieAuthMiddleware`, `SetSessionCookie`, and `ClearSessionCookie` from `shared/authkit/middleware.go` and their corresponding tests from `shared/authkit/authkit_test.go`.
+  - [x] Update `fileserver` tests to use `session.Store` cookies.
+  - [x] Remove the now-unused `CookieAuthMiddleware`, `SetSessionCookie`, and `ClearSessionCookie` from `shared/authkit/middleware.go` and their corresponding tests from `shared/authkit/authkit_test.go`.
 - Done when: `go test ./...` and `go build ./...` pass across `.`, `shared/authkit`, and `fileserver`; no caller uses JWT-in-cookie middleware anymore.
 
 ## Unknowns, risks, assumptions

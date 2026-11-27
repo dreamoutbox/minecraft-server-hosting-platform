@@ -9,6 +9,7 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 	t.Setenv("FILESERVER_PORT", "")
 	t.Setenv("FILESERVER_MAX_UPLOAD_MB", "")
 	t.Setenv("FILESERVER_DAILY_QUOTA_MB", "")
+	t.Setenv("FILESERVER_SESSION_TTL", "")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -25,6 +26,9 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.DailyQuotaBytes != 5120*1024*1024 {
 		t.Errorf("expected 5120MB daily quota default, got %d", cfg.DailyQuotaBytes)
+	}
+	if cfg.SessionTTL != 24*time.Hour {
+		t.Errorf("expected 24h session ttl default, got %s", cfg.SessionTTL)
 	}
 }
 
@@ -57,5 +61,21 @@ func TestLoadFromEnvInvalidUploadLimit(t *testing.T) {
 	t.Setenv("FILESERVER_MAX_UPLOAD_MB", "0")
 	if _, err := LoadFromEnv(); err == nil {
 		t.Fatal("expected error for zero upload limit")
+	}
+}
+
+func TestLoadFromEnvSessionTTL(t *testing.T) {
+	t.Setenv("FILESERVER_SESSION_TTL", "12h")
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SessionTTL != 12*time.Hour {
+		t.Fatalf("expected 12h session ttl, got %s", cfg.SessionTTL)
+	}
+
+	t.Setenv("FILESERVER_SESSION_TTL", "-5m")
+	if _, err := LoadFromEnv(); err == nil {
+		t.Fatal("expected error for negative session ttl")
 	}
 }

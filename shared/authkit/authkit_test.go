@@ -101,52 +101,6 @@ func TestGenerateAndParseLoginToken(t *testing.T) {
 	}
 }
 
-func TestCookieAuthMiddleware(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	secret := "cookie-secret"
-	r := gin.New()
-	r.GET("/protected", CookieAuthMiddleware(secret, "session", "/login"), func(c *gin.Context) {
-		uid, err := GetUserIDFromContext(c)
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-			return
-		}
-		c.String(http.StatusOK, fmt.Sprintf("user=%d", uid))
-	})
-	r.GET("/api-cookie", CookieAuthMiddleware(secret, "session", ""), func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	// Missing cookie redirects when loginPath is configured
-	wNoCookie := httptest.NewRecorder()
-	reqNoCookie, _ := http.NewRequest(http.MethodGet, "/protected", nil)
-	r.ServeHTTP(wNoCookie, reqNoCookie)
-	if wNoCookie.Code != http.StatusFound || wNoCookie.Header().Get("Location") != "/login" {
-		t.Errorf("expected redirect to /login, got %d (%s)", wNoCookie.Code, wNoCookie.Header().Get("Location"))
-	}
-
-	// Missing cookie returns 401 when loginPath is empty
-	wNoCookieAPI := httptest.NewRecorder()
-	reqNoCookieAPI, _ := http.NewRequest(http.MethodGet, "/api-cookie", nil)
-	r.ServeHTTP(wNoCookieAPI, reqNoCookieAPI)
-	if wNoCookieAPI.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d", wNoCookieAPI.Code)
-	}
-
-	// Valid cookie succeeds
-	pair, err := GenerateTokenPair(7, "cookie@example.com", UserRoleUser, secret)
-	if err != nil {
-		t.Fatalf("failed generating tokens: %v", err)
-	}
-	wValid := httptest.NewRecorder()
-	reqValid, _ := http.NewRequest(http.MethodGet, "/protected", nil)
-	reqValid.AddCookie(&http.Cookie{Name: "session", Value: pair.AccessToken})
-	r.ServeHTTP(wValid, reqValid)
-	if wValid.Code != http.StatusOK || wValid.Body.String() != "user=7" {
-		t.Errorf("expected 200 user=7, got %d (%s)", wValid.Code, wValid.Body.String())
-	}
-}
-
 func TestAuthFlowIntegration(t *testing.T) {
 	r, db, jwtSecret := setupTestRouter(t)
 

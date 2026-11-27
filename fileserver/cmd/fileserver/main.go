@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dreamoutbox/authkit/session"
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/fileserver/internal/api"
@@ -38,7 +39,9 @@ func SetupRouter(cfg *config.Config, st *store.Store) *gin.Engine {
 	apiHandler := api.NewHandler(st, cfg.JWTSecret, cfg.LoginTokenTTL)
 	apiHandler.RegisterRoutes(r, cfg.APIKey)
 
-	filesHandler := files.NewHandler(st, cfg.JWTSecret, cfg.MaxUploadBytes, cfg.DailyQuotaBytes, cfg.CookieSecure)
+	sessionStore := session.NewStore(st.DB(), cfg.SessionTTL)
+	cookieCfg := session.DefaultCookieConfig(files.SessionCookieName, cfg.SessionTTL, cfg.CookieSecure)
+	filesHandler := files.NewHandler(st, sessionStore, cfg.JWTSecret, cfg.MaxUploadBytes, cfg.DailyQuotaBytes, cookieCfg)
 	filesHandler.RegisterRoutes(r)
 
 	return r

@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/session"
 )
 
 var (
@@ -67,6 +68,9 @@ func OpenSQLite(dbPath string) (*gorm.DB, error) {
 		_ = db.Exec("PRAGMA busy_timeout=5000;").Error
 	}
 
+	if err := session.AutoMigrate(db); err != nil {
+		return nil, fmt.Errorf("failed running sqlite session automigrate: %w", err)
+	}
 	if err := db.AutoMigrate(&User{}, &DirPermission{}, &UsedLoginToken{}, &TransferUsage{}); err != nil {
 		return nil, fmt.Errorf("failed running sqlite automigrate: %w", err)
 	}
@@ -78,6 +82,11 @@ func OpenSQLite(dbPath string) (*gorm.DB, error) {
 type Store struct {
 	db        *gorm.DB
 	mountsDir string
+}
+
+// DB exposes the underlying GORM database handle for shared stores such as authkit/session.
+func (s *Store) DB() *gorm.DB {
+	return s.db
 }
 
 // New constructs a Store bound to db and the node's base mounts directory.

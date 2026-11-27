@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/session"
 	"github.com/dreamoutbox/fileserver/internal/store"
 )
 
@@ -55,7 +56,9 @@ func setupFilesTestRouter(t *testing.T) (*gin.Engine, *store.Store, string, stri
 
 	secret := "files-handler-secret"
 	r := gin.New()
-	h := NewHandler(st, secret, 10*1024*1024, 5*1024*1024*1024, false)
+	sessionStore := session.NewStore(st.DB(), time.Hour)
+	cookieCfg := session.DefaultCookieConfig(SessionCookieName, time.Hour, false)
+	h := NewHandler(st, sessionStore, secret, 10*1024*1024, 5*1024*1024*1024, cookieCfg)
 	h.RegisterRoutes(r)
 
 	return r, st, secret, serverDir, otherDir
@@ -707,7 +710,9 @@ func TestDailyQuotaEnforcementAndReset(t *testing.T) {
 
 	secret := "quota-secret"
 	const dailyQuota int64 = 100 // 100 bytes per day per direction
-	h := NewHandler(st, secret, 10*1024*1024, dailyQuota, false)
+	sessionStore := session.NewStore(st.DB(), time.Hour)
+	cookieCfg := session.DefaultCookieConfig(SessionCookieName, time.Hour, false)
+	h := NewHandler(st, sessionStore, secret, 10*1024*1024, dailyQuota, cookieCfg)
 	currentTime := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
 	h.nowFn = func() time.Time { return currentTime }
 
