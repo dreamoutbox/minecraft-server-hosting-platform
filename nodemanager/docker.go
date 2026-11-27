@@ -309,7 +309,7 @@ func (d *DockerContainerManager) ExecCommand(ctx context.Context, containerID st
 		return nil, errors.New("command cannot be empty")
 	}
 
-	execCfg := types.ExecConfig{
+	execCfg := container.ExecOptions{
 		User:         user,
 		Cmd:          []string{"mc-send-to-console", trimmed},
 		AttachStdout: true,
@@ -320,7 +320,7 @@ func (d *DockerContainerManager) ExecCommand(ctx context.Context, containerID st
 		return nil, fmt.Errorf("failed creating exec in container %s: %w", containerID, err)
 	}
 
-	attachResp, err := d.cli.ContainerExecAttach(ctx, execCreated.ID, types.ExecStartCheck{})
+	attachResp, err := d.cli.ContainerExecAttach(ctx, execCreated.ID, container.ExecAttachOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed attaching exec in container %s: %w", containerID, err)
 	}
