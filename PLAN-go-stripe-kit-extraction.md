@@ -91,14 +91,14 @@ internal/billings/              # Minecraft server hosting platform billing
   - [x] Add `go-stripe-kit/service_test.go` testing checkout, full/partial refund execution and validation, refund hook execution, webhook verification failure rejection, and event-specific + catch-all webhook dispatch.
 - Done when: `cd go-stripe-kit && go test -v -race ./...` passes and `go-stripe-kit` root package has zero HTTP framework dependencies.
 
-### Phase 4: Implement Gin HTTP adapter in `./go-stripe-kit/ginapi` [STATUS: TODO]
+### Phase 4: Implement Gin HTTP adapter in `./go-stripe-kit/ginapi` [STATUS: DONE]
 - Goal: Expose thin Gin HTTP handlers for webhooks and refunds under `./go-stripe-kit/ginapi`, keeping all payment logic in the root `stripekit` package so other web framework adapters can mirror this layout later.
 - Tasks:
-  - [ ] Add `github.com/gin-gonic/gin` to `go-stripe-kit/go.mod` (imported only inside `go-stripe-kit/ginapi`).
-  - [ ] Create `go-stripe-kit/ginapi/handler.go` defining a narrow `BillingService` interface (satisfied by `*stripekit.Service`), `Handler`, `NewHandler`, `RegisterWebhookRoute(rg *gin.RouterGroup)`, and `RegisterRefundRoute(rg *gin.RouterGroup)` so callers control URL prefixes, rate limiting, and auth middleware.
-  - [ ] Create `go-stripe-kit/ginapi/webhook.go` (`Webhook(c *gin.Context)`): require `Stripe-Signature` header, read raw body (bounded with `http.MaxBytesReader`), call `service.HandleWebhook`, and respond `200 {"received": true}` or `400 {"error": ...}`.
-  - [ ] Create `go-stripe-kit/ginapi/refund.go` (`Refund(c *gin.Context)`): bind JSON `stripekit.RefundRequest`, validate (`400` on invalid input), call `service.Refund`, and return `200` with `*stripekit.RefundResult` (or `400`/`502` on errors).
-  - [ ] Add `go-stripe-kit/ginapi/handler_test.go` using `httptest` and `stripekit.NewMockPaymentProvider()` covering webhook signature validation + dispatch and full/partial/invalid refund HTTP responses.
+  - [x] Add `github.com/gin-gonic/gin` to `go-stripe-kit/go.mod` (imported only inside `go-stripe-kit/ginapi`).
+  - [x] Create `go-stripe-kit/ginapi/handler.go` defining a narrow `BillingService` interface (satisfied by `*stripekit.Service`), `Handler`, `NewHandler`, `RegisterWebhookRoute(rg *gin.RouterGroup)`, and `RegisterRefundRoute(rg *gin.RouterGroup)` so callers control URL prefixes, rate limiting, and auth middleware.
+  - [x] Create `go-stripe-kit/ginapi/webhook.go` (`Webhook(c *gin.Context)`): require `Stripe-Signature` header, read raw body (bounded with `http.MaxBytesReader`), call `service.HandleWebhook`, and respond `200 {"received": true}` or `400 {"error": ...}`.
+  - [x] Create `go-stripe-kit/ginapi/refund.go` (`Refund(c *gin.Context)`): bind JSON `stripekit.RefundRequest`, validate (`400` on invalid input), call `service.Refund`, and return `200` with `*stripekit.RefundResult` (or `400`/`502` on errors).
+  - [x] Add `go-stripe-kit/ginapi/handler_test.go` using `httptest` and `stripekit.NewMockPaymentProvider()` covering webhook signature validation + dispatch and full/partial/invalid refund HTTP responses.
 - Done when: `cd go-stripe-kit && go test -v -race ./...` passes, and `go list -f '{{.Deps}}' ./go-stripe-kit` still contains no `github.com/gin-gonic/gin` imports while `go list -f '{{.Deps}}' ./go-stripe-kit/ginapi` does.
 
 ### Phase 5: Migrate MC platform billing code to `./internal/billings` and remove `./internal/billing` [STATUS: TODO]
