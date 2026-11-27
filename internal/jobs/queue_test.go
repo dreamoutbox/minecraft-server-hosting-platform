@@ -18,9 +18,9 @@ import (
 	"github.com/dreamoutbox/authkit/authkitjwt"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/hosting"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
 	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )

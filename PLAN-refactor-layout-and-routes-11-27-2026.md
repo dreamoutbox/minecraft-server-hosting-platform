@@ -54,12 +54,12 @@ internal/
   - [x] Remove the emptied `internal/config`, `internal/domain`, and `internal/storage` directories.
 - Done when: `go build ./...` and `go test -race ./...` pass, and `shared/nodemanagerclient` has zero Docker SDK or `golang.org/x/sys/unix` imports.
 
-### Phase 3: Extract shared domain services (`backup`, `hosting`) to `shared/` [STATUS: TODO]
+### Phase 3: Extract shared domain services (`backup`, `hosting`) to `shared/` [STATUS: DONE]
 - Goal: Move `backup` and `hosting` packages shared between `apiserver` and `jobworker` into `shared/`.
 - Tasks:
-  - [ ] Move `internal/backup` to `shared/backup` and update all imports across `cmd/` and `internal/`.
-  - [ ] Move `internal/hosting` to `shared/hosting` and update all imports across `cmd/` and `internal/`.
-  - [ ] Remove the emptied `internal/backup` and `internal/hosting` directories.
+  - [x] Move `internal/backup` to `shared/backup` and update all imports across `cmd/` and `internal/`.
+  - [x] Move `internal/hosting` to `shared/hosting` and update all imports across `cmd/` and `internal/`.
+  - [x] Remove the emptied `internal/backup` and `internal/hosting` directories.
 - Done when: `go build ./...` and `go test -race ./shared/... ./internal/... ./cmd/...` pass.
 
 ### Phase 4: Extract `cmd/nodemanager` implementation to `./nodemanager` [STATUS: TODO]
