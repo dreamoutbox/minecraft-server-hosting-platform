@@ -141,10 +141,10 @@ internal/
   - [x] Wire `mcservers.Handler` in `internal/dashboard/dashboard.go` `RegisterRoutes` and remove the migrated methods from `dashboard.go`.
 - Done when: `go build ./...` and `go test -race ./internal/dashboard/... ./internal/mcservers/...` pass.
 
-### Phase 9: Split admin routes into `internal/admin/` and final verification [STATUS: TODO]
+### Phase 9: Split admin routes into `internal/admin/` and final verification [STATUS: DONE]
 - Goal: Move all `/dashboard/admin/*` routes out of `internal/dashboard/admin.go` into `internal/admin/` (one route per file) and verify the full platform build and test suite.
 - Tasks:
-  - [ ] Create `internal/admin/` with `handler.go` (struct + `RegisterRoutes` + `parsePlanForm`) and one file per route:
+  - [x] Create `internal/admin/` with `handler.go` (struct + `RegisterRoutes` + `parsePlanForm`) and one file per route:
     - `list_servers.go` (`GET /dashboard/admin/servers`)
     - `list_orders.go` (`GET /dashboard/admin/orders`)
     - `list_payments.go` (`GET /dashboard/admin/payments`)
@@ -154,8 +154,8 @@ internal/
     - `create_plan.go` (`POST /dashboard/admin/plans`)
     - `update_plan.go` (`POST /dashboard/admin/plans/:id`)
     - `delete_plan.go` (`POST /dashboard/admin/plans/:id/delete`)
-  - [ ] Wire `admin.Handler` in `internal/dashboard/dashboard.go` `RegisterRoutes` and remove `internal/dashboard/admin.go`.
-  - [ ] Run full build, test suite, and compose config validation.
+  - [x] Wire `admin.Handler` in `internal/dashboard/dashboard.go` `RegisterRoutes` and remove `internal/dashboard/admin.go`.
+  - [x] Run full build, test suite, and compose config validation.
 - Done when: `go build ./...`, `go test -race ./...`, and `docker compose -f docker-compose.base.yml -f docker-compose.app.yml config --quiet` all pass, and `internal/dashboard/dashboard.go` contains only service wiring and root redirect.
 
 ---

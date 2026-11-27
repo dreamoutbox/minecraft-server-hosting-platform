@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/admin"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billings"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard/view"
@@ -76,6 +77,7 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 	usersHandler := users.NewHandler(s.db, s.authsessions, s.renderer)
 	billingsHandler := billings.NewHandler(s.db, s.billingSvc, s.renderer)
 	mcHandler := mcservers.NewHandler(s.db, s.hostingSvc, s.backupSvc, s.migrationSvc, s.jobSvc, s.renderer)
+	adminHandler := admin.NewHandler(s.db, s.renderer)
 
 	// Public auth pages
 	usersHandler.RegisterPublicRoutes(r)
@@ -88,18 +90,8 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 		billingsHandler.RegisterRoutes(dash)
 		usersHandler.RegisterDashboardRoutes(dash)
 
-		admin := dash.Group("/admin")
-		{
-			admin.GET("/servers", s.AdminListServers)
-			admin.GET("/orders", s.AdminListOrders)
-			admin.GET("/payments", s.AdminListPayments)
-			admin.GET("/jobs", s.AdminListJobs)
-			admin.GET("/logs", s.AdminListLogs)
-			admin.GET("/plans", s.AdminListPlans)
-			admin.POST("/plans", s.AdminCreatePlan)
-			admin.POST("/plans/:id", s.AdminUpdatePlan)
-			admin.POST("/plans/:id/delete", s.AdminDeletePlan)
-		}
+		adminGroup := dash.Group("/admin")
+		adminHandler.RegisterRoutes(adminGroup)
 	}
 
 	// Redirect root to /dashboard
