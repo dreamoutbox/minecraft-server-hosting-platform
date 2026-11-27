@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"strings"
 
+	fsclient "github.com/dreamoutbox/fileserver/client"
 	authhandler "github.com/dreamoutbox/go-authkit/handler"
 	"github.com/dreamoutbox/go-authkit/session"
 	stripekit "github.com/dreamoutbox/go-stripe-kit"
 	"github.com/dreamoutbox/go-stripe-kit/ginapi"
-	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 

@@ -118,13 +118,13 @@ internal/billings/              # Minecraft server hosting platform billing
   - [x] Delete `internal/billing/`.
 - Done when: `go build ./...`, `go test -race ./...`, and `cd go-stripe-kit && go test -race ./...` pass; `internal/billing/` does not exist; `rg "internal/billing\b" cmd/ internal/ shared/` returns no matches; and `go list -f '{{.Deps}}' ./cmd/nodemanager ./cmd/jobworker` contains neither `go-stripe-kit` nor `stripe-go`.
 
-### Phase 6: Document `./go-stripe-kit`, tidy modules, and verify Docker builds [STATUS: TODO]
+### Phase 6: Document `./go-stripe-kit`, tidy modules, and verify Docker builds [STATUS: DONE]
 - Goal: Prepare `./go-stripe-kit` for future standalone GitHub repository extraction and verify all binaries, tests, and container builds end-to-end.
 - Tasks:
-  - [ ] Add `go-stripe-kit/README.md` covering core `stripekit` usage (checkout sessions, payments, full/partial refunds, webhook callbacks), `ginapi` route registration, adding future framework adapters (Echo/Fiber), and switching from local `replace` to a published GitHub module.
-  - [ ] Run `go mod tidy` in `./go-stripe-kit` and repo root (verifying root `go.mod` drops direct `stripe-go/v81` requirement if unused directly outside `go-stripe-kit`).
-  - [ ] Validate `docker compose -f docker-compose.base.yml -f docker-compose.app.yml config --quiet` and build verification across `./cmd/apiserver`, `./cmd/jobworker`, `./cmd/nodemanager`, and `./fileserver/cmd/fileserver`.
-  - [ ] Mark completed tasks in `TODO.md`.
+  - [x] Add `go-stripe-kit/README.md` covering core `stripekit` usage (checkout sessions, payments, full/partial refunds, webhook callbacks), `ginapi` route registration, adding future framework adapters (Echo/Fiber), and switching from local `replace` to a published GitHub module.
+  - [x] Run `go mod tidy` in `./go-stripe-kit` and repo root (verifying root `go.mod` drops direct `stripe-go/v81` requirement if unused directly outside `go-stripe-kit`).
+  - [x] Validate `docker compose -f docker-compose.base.yml -f docker-compose.app.yml config --quiet` and build verification across `./cmd/apiserver`, `./cmd/jobworker`, `./cmd/nodemanager`, and `./fileserver/cmd/fileserver`.
+  - [x] Mark completed tasks in `TODO.md`.
 - Done when: `go test -race ./...` (root, `./go-stripe-kit`, `./fileserver`), `go build ./cmd/...`, compose config validation, and Docker image builds (`Dockerfile.apiserver`, `Dockerfile.jobworker`, `Dockerfile.nodemanager`, `fileserver/Dockerfile`) all succeed.
 
 ---
