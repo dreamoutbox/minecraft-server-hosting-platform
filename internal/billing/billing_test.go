@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/authkitjwt"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
@@ -74,7 +75,7 @@ func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *domain.
 	_ = db.Create(&server)
 
 	jwtSecret := "billing-jwt-secret"
-	tokens, _ := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
+	tokens, _ := authkitjwt.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
 
 	return service, mockProvider, &user, &server, &plan, tokens.AccessToken
 }

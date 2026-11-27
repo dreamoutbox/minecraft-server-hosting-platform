@@ -1,16 +1,14 @@
-package authkit
+package authkitjwt
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/dreamoutbox/authkit/shared"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -33,10 +31,10 @@ const (
 
 // CustomClaims holds identity and authorization attributes embedded within JWT payloads.
 type CustomClaims struct {
-	UserID    uint      `json:"user_id"`
-	Email     string    `json:"email"`
-	Role      UserRole  `json:"role"`
-	TokenType TokenType `json:"token_type"`
+	UserID    uint            `json:"user_id"`
+	Email     string          `json:"email"`
+	Role      shared.UserRole `json:"role"`
+	TokenType TokenType       `json:"token_type"`
 	jwt.RegisteredClaims
 }
 
@@ -45,60 +43,6 @@ type TokenPair struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
-}
-
-// HashPassword hashes a plaintext password using bcrypt with standard cost.
-//
-// Arguments:
-//   - password: Raw plaintext password to hash.
-//
-// Example usage:
-//
-//	hash, err := authkit.HashPassword("secret-pass")
-//	if err != nil {
-//	    return err
-//	}
-func HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("failed hashing password: %w", err)
-	}
-	return string(bytes), nil
-}
-
-// CheckPassword verifies a plaintext password against a stored bcrypt hash.
-//
-// Arguments:
-//   - hash: Stored bcrypt hashed string.
-//   - password: Plaintext password provided during authentication.
-//
-// Example usage:
-//
-//	if !authkit.CheckPassword(user.PasswordHash, "attempted-pass") {
-//	    return errors.New("invalid credentials")
-//	}
-func CheckPassword(hash, password string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	return err == nil
-}
-
-// GenerateRandomPassword creates a cryptographically random URL-safe password string.
-//
-// Arguments:
-//   - numBytes: Number of random entropy bytes to encode before base64 encoding.
-//
-// Example usage:
-//
-//	pwd, err := authkit.GenerateRandomPassword(32)
-func GenerateRandomPassword(numBytes int) (string, error) {
-	if numBytes <= 0 {
-		return "", errors.New("numBytes must be positive")
-	}
-	buf := make([]byte, numBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("failed reading random bytes: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // signClaims signs CustomClaims using HS256 and the provided HMAC secret.
@@ -118,7 +62,7 @@ func signClaims(claims CustomClaims, secret string) (string, error) {
 //
 // Example usage:
 //
-//	ttl, err := authkit.AccessTokenTTLFromEnv()
+//	ttl, err := authkitjwt.AccessTokenTTLFromEnv()
 func AccessTokenTTLFromEnv() (time.Duration, error) {
 	raw := os.Getenv(AccessTokenTTLEnvVar)
 	if raw == "" {
@@ -145,11 +89,8 @@ func AccessTokenTTLFromEnv() (time.Duration, error) {
 //
 // Example usage:
 //
-//	pair, err := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, "jwt-secret")
-//	if err != nil {
-//	    return nil, err
-//	}
-func GenerateTokenPair(userID uint, email string, role UserRole, secret string) (*TokenPair, error) {
+//	pair, err := authkitjwt.GenerateTokenPair(user.ID, user.Email, user.Role, "jwt-secret")
+func GenerateTokenPair(userID uint, email string, role shared.UserRole, secret string) (*TokenPair, error) {
 	accessTTL, err := AccessTokenTTLFromEnv()
 	if err != nil {
 		return nil, err
@@ -168,8 +109,8 @@ func GenerateTokenPair(userID uint, email string, role UserRole, secret string) 
 //
 // Example usage:
 //
-//	pair, err := authkit.GenerateTokenPairWithTTL(user.ID, user.Email, user.Role, "jwt-secret", 30*time.Minute)
-func GenerateTokenPairWithTTL(userID uint, email string, role UserRole, secret string, accessTTL time.Duration) (*TokenPair, error) {
+//	pair, err := authkitjwt.GenerateTokenPairWithTTL(user.ID, user.Email, user.Role, "jwt-secret", 30*time.Minute)
+func GenerateTokenPairWithTTL(userID uint, email string, role shared.UserRole, secret string, accessTTL time.Duration) (*TokenPair, error) {
 	if accessTTL <= 0 {
 		return nil, errors.New("accessTTL must be positive")
 	}
@@ -226,8 +167,8 @@ func GenerateTokenPairWithTTL(userID uint, email string, role UserRole, secret s
 //
 // Example usage:
 //
-//	tok, exp, jti, err := authkit.GenerateLoginToken(user.ID, user.Email, user.Role, secret, 60*time.Second)
-func GenerateLoginToken(userID uint, email string, role UserRole, secret string, ttl time.Duration) (string, time.Time, string, error) {
+//	tok, exp, jti, err := authkitjwt.GenerateLoginToken(user.ID, user.Email, user.Role, secret, 60*time.Second)
+func GenerateLoginToken(userID uint, email string, role shared.UserRole, secret string, ttl time.Duration) (string, time.Time, string, error) {
 	if ttl <= 0 {
 		return "", time.Time{}, "", errors.New("ttl must be positive")
 	}
@@ -265,10 +206,7 @@ func GenerateLoginToken(userID uint, email string, role UserRole, secret string,
 //
 // Example usage:
 //
-//	claims, err := authkit.ParseAndValidateToken(rawToken, "jwt-secret", authkit.TokenTypeAccess)
-//	if err != nil {
-//	    return nil, err
-//	}
+//	claims, err := authkitjwt.ParseAndValidateToken(rawToken, "jwt-secret", authkitjwt.TokenTypeAccess)
 func ParseAndValidateToken(tokenStr string, secret string, expectedType TokenType) (*CustomClaims, error) {
 	parsedToken, err := jwt.ParseWithClaims(tokenStr, &CustomClaims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {

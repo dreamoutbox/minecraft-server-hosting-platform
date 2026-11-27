@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/authkitjwt"
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
@@ -256,7 +257,7 @@ func setupBackupTestEnv(t *testing.T) (*Service, *mockWorkerForBackup, storage.S
 	_ = db.Create(&server)
 
 	jwtSecret := "backup-secret-key"
-	tokens, _ := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
+	tokens, _ := authkitjwt.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
 
 	return service, mockWorker, sp, &server, &user, tokens.AccessToken
 }
@@ -492,7 +493,7 @@ func TestAdminImageBackupHTTPRoutes(t *testing.T) {
 	mockWorker.volumeData[volID] = []byte("admin-ext4-image-bytes")
 
 	jwtSecret := "backup-secret-key"
-	adminTokens, err := authkit.GenerateTokenPair(user.ID, "admin@example.com", domain.UserRoleAdmin, jwtSecret)
+	adminTokens, err := authkitjwt.GenerateTokenPair(user.ID, "admin@example.com", domain.UserRoleAdmin, jwtSecret)
 	if err != nil {
 		t.Fatalf("failed generating admin token: %v", err)
 	}

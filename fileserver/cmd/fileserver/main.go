@@ -39,9 +39,9 @@ func SetupRouter(cfg *config.Config, st *store.Store) *gin.Engine {
 	apiHandler := api.NewHandler(st, cfg.JWTSecret, cfg.LoginTokenTTL)
 	apiHandler.RegisterRoutes(r, cfg.APIKey)
 
-	sessionStore := session.NewStore(st.DB(), cfg.SessionTTL)
 	cookieCfg := session.DefaultCookieConfig(files.SessionCookieName, cfg.SessionTTL, cfg.CookieSecure)
-	filesHandler := files.NewHandler(st, sessionStore, cfg.JWTSecret, cfg.MaxUploadBytes, cfg.DailyQuotaBytes, cookieCfg)
+	authsessions := session.NewManager(st.DB(), cookieCfg)
+	filesHandler := files.NewHandler(st, authsessions, cfg.JWTSecret, cfg.MaxUploadBytes, cfg.DailyQuotaBytes)
 	filesHandler.RegisterRoutes(r)
 
 	return r

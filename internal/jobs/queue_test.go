@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/authkitjwt"
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
@@ -275,7 +276,7 @@ func TestAsyncQueueRetryAndOperationLogs(t *testing.T) {
 	r := gin.New()
 	jwtSecret := "jobs-test-secret"
 	NewHandler(jobSvc).RegisterRoutes(r, jwtSecret)
-	tokens, _ := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
+	tokens, _ := authkitjwt.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
 
 	wRetry := httptest.NewRecorder()
 	reqRetry, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/jobs/%d/retry", createJob.ID), nil)

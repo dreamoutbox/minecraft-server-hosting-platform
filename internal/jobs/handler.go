@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/dreamoutbox/authkit"
+	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -34,7 +34,7 @@ func NewHandler(service *Service) *Handler {
 //
 //	GET /api/v1/jobs/:id
 func (h *Handler) GetJob(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -46,7 +46,7 @@ func (h *Handler) GetJob(c *gin.Context) {
 		return
 	}
 
-	isStaff := authkit.GetUserRoleFromContext(c).IsStaffOrAdmin()
+	isStaff := authmw.GetUserRoleFromContext(c).IsStaffOrAdmin()
 	job, err := h.service.GetJob(c.Request.Context(), userID, isStaff, uint(jobID))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -65,7 +65,7 @@ func (h *Handler) GetJob(c *gin.Context) {
 //
 //	POST /api/v1/jobs/:id/retry
 func (h *Handler) RetryJob(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -77,7 +77,7 @@ func (h *Handler) RetryJob(c *gin.Context) {
 		return
 	}
 
-	isStaff := authkit.GetUserRoleFromContext(c).IsStaffOrAdmin()
+	isStaff := authmw.GetUserRoleFromContext(c).IsStaffOrAdmin()
 	job, err := h.service.RetryJob(c.Request.Context(), userID, isStaff, uint(jobID))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -101,7 +101,7 @@ func (h *Handler) RetryJob(c *gin.Context) {
 //	jobHandler.RegisterRoutes(router, cfg.JWTSecret)
 func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 	group := r.Group("/api/v1/jobs")
-	group.Use(authkit.AuthMiddleware(jwtSecret))
+	group.Use(authmw.AuthMiddleware(jwtSecret))
 	{
 		group.GET("/:id", h.GetJob)
 		group.POST("/:id/retry", h.RetryJob)

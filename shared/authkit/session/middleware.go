@@ -3,13 +3,13 @@ package session
 import (
 	"net/http"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/shared"
 	"github.com/gin-gonic/gin"
 )
 
 // Middleware validates incoming browser session cookies against the database-backed Store.
-// On success, it loads the live authkit.User record (reflecting current role/existence) and
-// populates authkit context keys. On failure, it clears invalid cookies and either redirects
+// On success, it loads the live shared.User record (reflecting current role/existence) and
+// populates shared context keys. On failure, it clears invalid cookies and either redirects
 // to loginPath (when non-empty) or aborts with HTTP 401 JSON.
 //
 // Arguments:
@@ -36,7 +36,7 @@ func Middleware(store *Store, cfg CookieConfig, loginPath string) gin.HandlerFun
 			return
 		}
 
-		var user authkit.User
+		var user shared.User
 		if err := store.DB().WithContext(c.Request.Context()).First(&user, sess.UserID).Error; err != nil {
 			_ = store.Delete(c.Request.Context(), rawToken)
 			ClearCookie(c, norm)
@@ -44,9 +44,9 @@ func Middleware(store *Store, cfg CookieConfig, loginPath string) gin.HandlerFun
 			return
 		}
 
-		c.Set(authkit.ContextUserIDKey, user.ID)
-		c.Set(authkit.ContextEmailKey, user.Email)
-		c.Set(authkit.ContextRoleKey, user.Role)
+		c.Set(shared.ContextUserIDKey, user.ID)
+		c.Set(shared.ContextEmailKey, user.Email)
+		c.Set(shared.ContextRoleKey, user.Role)
 		c.Next()
 	}
 }

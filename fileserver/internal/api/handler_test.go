@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/authkitjwt"
 	"github.com/dreamoutbox/fileserver/client"
 	"github.com/dreamoutbox/fileserver/internal/store"
 )
@@ -131,7 +132,7 @@ func TestManagementAPIAuthAndLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateLoginToken failed: %v", err)
 	}
-	claims, err := authkit.ParseAndValidateToken(tokResp.Token, jwtSecret, authkit.TokenTypeLogin)
+	claims, err := authkitjwt.ParseAndValidateToken(tokResp.Token, jwtSecret, authkitjwt.TokenTypeLogin)
 	if err != nil {
 		t.Fatalf("issued login token failed validation: %v", err)
 	}

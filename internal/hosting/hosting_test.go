@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/authkitjwt"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 
@@ -165,7 +166,7 @@ func setupHostingTestEnv(t *testing.T) (*gin.Engine, *Service, *mockWorkerClient
 	}
 	_ = db.Create(&user)
 
-	tokens, _ := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
+	tokens, _ := authkitjwt.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
 	return r, service, mockClient, &user, tokens.AccessToken
 }
 

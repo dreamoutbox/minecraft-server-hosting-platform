@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/authkitjwt"
 	"github.com/dreamoutbox/fileserver/client"
 	"github.com/dreamoutbox/fileserver/internal/store"
 )
@@ -182,7 +182,7 @@ func (h *Handler) CreateLoginToken(c *gin.Context) {
 		return
 	}
 
-	tokenStr, expiresAt, _, err := authkit.GenerateLoginToken(user.ID, user.Email, user.Role, h.jwtSecret, h.loginTokenTTL)
+	tokenStr, expiresAt, _, err := authkitjwt.GenerateLoginToken(user.ID, user.Email, user.Role, h.jwtSecret, h.loginTokenTTL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed generating login token"})
 		return

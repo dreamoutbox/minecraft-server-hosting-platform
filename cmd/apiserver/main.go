@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dreamoutbox/authkit"
+	authhandler "github.com/dreamoutbox/authkit/handler"
 	"github.com/dreamoutbox/authkit/session"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
@@ -60,7 +60,7 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 		})
 	})
 
-	authHandler := authkit.NewHandler(db, cfg.JWTSecret)
+	authHandler := authhandler.NewHandler(db, cfg.JWTSecret)
 	authHandler.SetAccessTokenTTL(cfg.JWTAccessTTL)
 	authGroup := r.Group("/api/v1/auth")
 	authGroup.Use(middleware.RateLimitMiddleware(10, 20))
@@ -127,8 +127,8 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 	billingHandler := billing.NewHandler(billingService)
 	billingHandler.RegisterRoutes(r, cfg.JWTSecret)
 
-	sessionStore := session.NewStore(db, cfg.SessionTTL)
 	cookieCfg := session.DefaultCookieConfig(session.DefaultCookieName, cfg.SessionTTL, cfg.CookieSecure)
+	authsessions := session.NewManager(db, cookieCfg)
 	dashboardService := dashboard.NewService(
 		db,
 		hostingService,
@@ -136,8 +136,7 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 		billingService,
 		migrationService,
 		jobService,
-		sessionStore,
-		cookieCfg,
+		authsessions,
 	)
 	dashboardService.RegisterRoutes(r)
 

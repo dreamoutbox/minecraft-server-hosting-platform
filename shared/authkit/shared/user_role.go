@@ -1,8 +1,4 @@
-package authkit
-
-import (
-	"time"
-)
+package shared
 
 // UserRole represents platform permission levels.
 type UserRole string
@@ -47,14 +43,4 @@ func (r UserRole) IsAdmin() bool {
 //	if !role.IsValid() { ... }
 func (r UserRole) IsValid() bool {
 	return r == UserRoleUser || r == UserRoleStaff || r == UserRoleAdmin
-}
-
-// User represents an authenticated account stored in a GORM-managed database.
-type User struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Email        string    `gorm:"uniqueIndex;not null" json:"email"`
-	PasswordHash string    `gorm:"not null" json:"-"`
-	Role         UserRole  `gorm:"type:varchar(32);not null;default:'user'" json:"role"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
 }

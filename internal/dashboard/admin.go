@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dreamoutbox/authkit"
+	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
@@ -38,7 +38,7 @@ type Pagination struct {
 }
 
 func (s *Service) requireAdmin(c *gin.Context, message string) bool {
-	if authkit.GetUserRoleFromContext(c).IsAdmin() {
+	if authmw.GetUserRoleFromContext(c).IsAdmin() {
 		return true
 	}
 	s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
@@ -58,10 +58,10 @@ func (s *Service) renderAdminView(c *gin.Context, page string, data map[string]i
 // effectiveServerUserID returns 0 for staff and admin users so they can inspect and manage
 // any server, and returns the authenticated user ID for regular users.
 func (s *Service) effectiveServerUserID(c *gin.Context) uint {
-	if authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+	if authmw.GetUserRoleFromContext(c).IsStaffOrAdmin() {
 		return 0
 	}
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID, _ := authmw.GetUserIDFromContext(c)
 	return userID
 }
 

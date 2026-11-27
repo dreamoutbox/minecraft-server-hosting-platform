@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/shared"
 )
 
 const (
@@ -31,8 +31,8 @@ var (
 	ErrInvalidTTL = errors.New("session ttl must be positive")
 )
 
-// Session aliases authkit.Session so callers importing authkit/session share the exact same schema.
-type Session = authkit.Session
+// Session aliases shared.Session so callers importing authkit/session share the exact same schema.
+type Session = shared.Session
 
 // HashToken computes the SHA-256 hex digest of a raw opaque session token for safe DB storage.
 //

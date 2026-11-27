@@ -18,6 +18,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/authkitjwt"
+	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/dreamoutbox/authkit/session"
 	"github.com/dreamoutbox/fileserver/internal/store"
 )
@@ -42,8 +44,7 @@ type Breadcrumb struct {
 // Handler serves the browser login endpoint and file manager HTML UI.
 type Handler struct {
 	store           *store.Store
-	sessionStore    *session.Store
-	cookieCfg       session.CookieConfig
+	authsessions    *session.Manager
 	jwtSecret       string
 	maxUploadBytes  int64
 	dailyQuotaBytes int64
@@ -55,20 +56,18 @@ type Handler struct {
 //
 // Arguments:
 //   - st: Fileserver SQLite store for permissions, usage tracking, and token replay protection.
-//   - sessionStore: Database-backed session store for browser authentication.
+//   - authsessions: Session manager handling cookie creation, validation, and logout.
 //   - jwtSecret: HMAC secret used to verify single-use login handoff tokens.
 //   - maxUploadBytes: Maximum allowed multipart upload body size in bytes.
 //   - dailyQuotaBytes: Per-user daily upload/download quota in bytes (0 disables quota enforcement).
-//   - cookieCfg: Session cookie configuration (name, TTL, Secure, SameSite).
 //
 // Example usage:
 //
-//	h := files.NewHandler(st, sessionStore, cfg.JWTSecret, cfg.MaxUploadBytes, cfg.DailyQuotaBytes, cookieCfg)
-func NewHandler(st *store.Store, sessionStore *session.Store, jwtSecret string, maxUploadBytes int64, dailyQuotaBytes int64, cookieCfg session.CookieConfig) *Handler {
+//	h := files.NewHandler(st, authsessions, cfg.JWTSecret, cfg.MaxUploadBytes, cfg.DailyQuotaBytes)
+func NewHandler(st *store.Store, authsessions *session.Manager, jwtSecret string, maxUploadBytes int64, dailyQuotaBytes int64) *Handler {
 	h := &Handler{
 		store:           st,
-		sessionStore:    sessionStore,
-		cookieCfg:       cookieCfg,
+		authsessions:    authsessions,
 		jwtSecret:       jwtSecret,
 		maxUploadBytes:  maxUploadBytes,
 		dailyQuotaBytes: dailyQuotaBytes,
@@ -138,7 +137,7 @@ func (h *Handler) LoginWithToken(c *gin.Context) {
 		return
 	}
 
-	claims, err := authkit.ParseAndValidateToken(rawToken, h.jwtSecret, authkit.TokenTypeLogin)
+	claims, err := authkitjwt.ParseAndValidateToken(rawToken, h.jwtSecret, authkitjwt.TokenTypeLogin)
 	if err != nil {
 		h.renderError(c, http.StatusUnauthorized, "Invalid or Expired Token", "Your file manager login link is invalid or expired. Please click Manage Files again.")
 		return
@@ -154,13 +153,10 @@ func (h *Handler) LoginWithToken(c *gin.Context) {
 		return
 	}
 
-	rawSessionToken, _, err := h.sessionStore.Create(c.Request.Context(), claims.UserID, 0)
-	if err != nil {
+	if err := h.authsessions.SetSession(c, claims.UserID); err != nil {
 		h.renderError(c, http.StatusInternalServerError, "Session Error", "Failed establishing session.")
 		return
 	}
-
-	session.SetCookie(c, h.cookieCfg, rawSessionToken)
 
 	target := strings.TrimSpace(c.Query("target"))
 	if target == "" {
@@ -179,10 +175,7 @@ func (h *Handler) LoginWithToken(c *gin.Context) {
 //
 //	POST /logout
 func (h *Handler) Logout(c *gin.Context) {
-	if rawToken, err := session.ReadCookie(c, h.cookieCfg); err == nil && rawToken != "" {
-		_ = h.sessionStore.Delete(c.Request.Context(), rawToken)
-	}
-	session.ClearCookie(c, h.cookieCfg)
+	_ = h.authsessions.Logout(c)
 	h.renderError(c, http.StatusOK, "Logged Out", "You have been signed out of the file manager. You can close this tab.")
 }
 
@@ -196,7 +189,7 @@ func (h *Handler) Logout(c *gin.Context) {
 //
 //	GET /files?path=/var/lib/mc-platform/mounts/1
 func (h *Handler) Browse(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		h.renderError(c, http.StatusUnauthorized, "Unauthorized", "Please reopen File Manager from your dashboard.")
 		return
@@ -260,7 +253,7 @@ func (h *Handler) Browse(c *gin.Context) {
 //
 //	GET /download?path=/var/lib/mc-platform/mounts/1/server.properties
 func (h *Handler) Download(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
 		return
@@ -305,7 +298,7 @@ func (h *Handler) Download(c *gin.Context) {
 //
 //	GET /download-zip?path=/var/lib/mc-platform/mounts/1/world
 func (h *Handler) DownloadZip(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
 		return
@@ -347,7 +340,7 @@ func (h *Handler) DownloadZip(c *gin.Context) {
 //
 //	POST /download-zip-multi
 func (h *Handler) DownloadZipMulti(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
 		return
@@ -429,7 +422,7 @@ func (h *Handler) resolveFileOwner(ctx context.Context, userID uint) (*FileOwner
 //
 //	POST /upload
 func (h *Handler) Upload(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
 		return
@@ -597,7 +590,7 @@ func redirectUploadError(c *gin.Context, dirPath string, err error) {
 //
 //	POST /mkdir
 func (h *Handler) MakeDir(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
 		return
@@ -633,7 +626,7 @@ func (h *Handler) MakeDir(c *gin.Context) {
 //
 //	POST /create-file
 func (h *Handler) CreateFile(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
 		return
@@ -669,7 +662,7 @@ func (h *Handler) CreateFile(c *gin.Context) {
 //
 //	GET /file-content?path=/var/lib/mc-platform/mounts/1/server.properties
 func (h *Handler) GetFileContent(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
@@ -717,7 +710,7 @@ func (h *Handler) GetFileContent(c *gin.Context) {
 //
 //	POST /edit
 func (h *Handler) EditFile(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
 		return
@@ -753,7 +746,7 @@ func (h *Handler) EditFile(c *gin.Context) {
 //
 //	POST /rename
 func (h *Handler) Rename(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
 		return
@@ -789,7 +782,7 @@ func (h *Handler) Rename(c *gin.Context) {
 //
 //	POST /delete
 func (h *Handler) Delete(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
 		return
@@ -824,7 +817,7 @@ func (h *Handler) Delete(c *gin.Context) {
 //
 //	POST /delete-multi
 func (h *Handler) DeleteMulti(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "unauthorized")
 		return
@@ -867,7 +860,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	r.POST("/logout", h.Logout)
 
 	protected := r.Group("")
-	protected.Use(session.Middleware(h.sessionStore, h.cookieCfg, ""))
+	protected.Use(h.authsessions.Middleware(""))
 	{
 		protected.GET("/", func(c *gin.Context) {
 			c.Redirect(http.StatusFound, "/files")

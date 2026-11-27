@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/authkit"
+	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/dreamoutbox/authkit/session"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -38,8 +40,7 @@ type Service struct {
 	billingSvc   *billing.Service
 	migrationSvc *hosting.MigrationService
 	jobSvc       *jobs.Service
-	sessionStore *session.Store
-	cookieCfg    session.CookieConfig
+	authsessions *session.Manager
 	tmpl         map[string]*template.Template
 }
 
@@ -52,12 +53,11 @@ type Service struct {
 //   - billingSvc: Checkout order and payment history service.
 //   - migrationSvc: Host migration coordinator.
 //   - jobSvc: Async job queue coordinator.
-//   - sessionStore: Database-backed session store for browser authentication.
-//   - cookieCfg: Session cookie configuration (name, TTL, Secure, SameSite).
+//   - authsessions: Session manager handling cookie creation, validation, and logout.
 //
 // Example usage:
 //
-//	dash := dashboard.NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, sessionStore, cookieCfg)
+//	dash := dashboard.NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, authsessions)
 func NewService(
 	db *gorm.DB,
 	hostingSvc *hosting.Service,
@@ -65,8 +65,7 @@ func NewService(
 	billingSvc *billing.Service,
 	migrationSvc *hosting.MigrationService,
 	jobSvc *jobs.Service,
-	sessionStore *session.Store,
-	cookieCfg session.CookieConfig,
+	authsessions *session.Manager,
 ) *Service {
 	s := &Service{
 		db:           db,
@@ -75,8 +74,7 @@ func NewService(
 		billingSvc:   billingSvc,
 		migrationSvc: migrationSvc,
 		jobSvc:       jobSvc,
-		sessionStore: sessionStore,
-		cookieCfg:    cookieCfg,
+		authsessions: authsessions,
 		tmpl:         make(map[string]*template.Template),
 	}
 	s.loadTemplates()
@@ -153,7 +151,7 @@ func (s *Service) renderViewWithStatus(c *gin.Context, status int, page string, 
 	if userVal, exists := c.Get(authkit.ContextEmailKey); exists {
 		data["UserEmail"] = userVal
 	}
-	role := authkit.GetUserRoleFromContext(c)
+	role := authmw.GetUserRoleFromContext(c)
 	data["UserRole"] = role
 	data["IsStaffOrAdmin"] = role.IsStaffOrAdmin()
 	data["IsAdmin"] = role.IsAdmin()
@@ -188,13 +186,11 @@ func (s *Service) ProcessLogin(c *gin.Context) {
 		return
 	}
 
-	rawToken, _, err := s.sessionStore.Create(c.Request.Context(), user.ID, 0)
-	if err != nil {
+	if err := s.authsessions.SetSession(c, user.ID); err != nil {
 		s.renderView(c, "login.html", map[string]interface{}{"FlashError": "Failed generating session"})
 		return
 	}
 
-	session.SetCookie(c, s.cookieCfg, rawToken)
 	c.Redirect(http.StatusFound, "/dashboard")
 }
 
@@ -203,59 +199,26 @@ func (s *Service) ShowRegister(c *gin.Context) {
 	s.renderView(c, "register.html", nil)
 }
 
-// ProcessRegister validates input, creates user account, and signs in automatically.
+// ProcessRegister validates input, creates a user account, and redirects to the login page.
 func (s *Service) ProcessRegister(c *gin.Context) {
-	email := strings.ToLower(strings.TrimSpace(c.PostForm("email")))
-	password := c.PostForm("password")
-
-	if len(password) < 8 {
-		s.renderView(c, "register.html", map[string]interface{}{
-			"FlashError": "Password must be at least 8 characters",
-		})
-		return
-	}
-
-	var existing domain.User
-	if err := s.db.Where("email = ?", email).First(&existing).Error; err == nil {
-		s.renderView(c, "register.html", map[string]interface{}{
-			"FlashError": "An account with this email already exists",
-		})
-		return
-	}
-
-	hashed, err := authkit.HashPassword(password)
+	_, err := authkit.RegisterUser(s.db, c.PostForm("email"), c.PostForm("password"))
 	if err != nil {
-		s.renderView(c, "register.html", map[string]interface{}{"FlashError": "Failed encrypting credentials"})
+		msg := "Failed saving account"
+		if errors.Is(err, authkit.ErrInvalidEmail) ||
+			errors.Is(err, authkit.ErrPasswordTooShort) ||
+			errors.Is(err, authkit.ErrEmailAlreadyExists) {
+			msg = err.Error()
+		}
+		s.renderView(c, "register.html", map[string]interface{}{"FlashError": msg})
 		return
 	}
 
-	newUser := domain.User{
-		User: authkit.User{
-			Email:        email,
-			PasswordHash: hashed,
-			Role:         domain.UserRoleUser,
-		},
-	}
-	if err := s.db.Create(&newUser).Error; err != nil {
-		s.renderView(c, "register.html", map[string]interface{}{"FlashError": "Failed saving account"})
-		return
-	}
-
-	rawToken, _, err := s.sessionStore.Create(c.Request.Context(), newUser.ID, 0)
-	if err != nil {
-		s.renderView(c, "register.html", map[string]interface{}{"FlashError": "Account created, but failed starting session. Please sign in."})
-		return
-	}
-	session.SetCookie(c, s.cookieCfg, rawToken)
-	c.Redirect(http.StatusFound, "/dashboard?success=Welcome+to+your+dashboard!")
+	c.Redirect(http.StatusFound, "/login?success=Account+created.+Please+sign+in.")
 }
 
 // Logout terminates user browser session.
 func (s *Service) Logout(c *gin.Context) {
-	if rawToken, err := session.ReadCookie(c, s.cookieCfg); err == nil && rawToken != "" {
-		_ = s.sessionStore.Delete(c.Request.Context(), rawToken)
-	}
-	session.ClearCookie(c, s.cookieCfg)
+	_ = s.authsessions.Logout(c)
 	c.Redirect(http.StatusFound, "/login?success=Logged+out+successfully")
 }
 
@@ -269,7 +232,7 @@ type ExpiringServerAlert struct {
 
 // ListServers displays all game servers owned by the authenticated user.
 func (s *Service) ListServers(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID, _ := authmw.GetUserIDFromContext(c)
 	servers, err := s.hostingSvc.ListServers(c.Request.Context(), userID)
 	if err != nil {
 		s.renderView(c, "servers_list.html", map[string]interface{}{"FlashError": err.Error()})
@@ -302,7 +265,7 @@ func (s *Service) ListServers(c *gin.Context) {
 
 // ShowCreateServer displays plan selection and direct server creation form (staff/admin only).
 func (s *Service) ShowCreateServer(c *gin.Context) {
-	if !authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+	if !authmw.GetUserRoleFromContext(c).IsStaffOrAdmin() {
 		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
 			"ErrorMessage": "Direct server creation is restricted to staff and admin accounts. Please purchase a server via Checkout.",
 		})
@@ -319,14 +282,14 @@ func (s *Service) ShowCreateServer(c *gin.Context) {
 
 // ProcessCreateServer queues a new Minecraft game server directly (staff/admin only).
 func (s *Service) ProcessCreateServer(c *gin.Context) {
-	if !authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+	if !authmw.GetUserRoleFromContext(c).IsStaffOrAdmin() {
 		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
 			"ErrorMessage": "Direct server creation is restricted to staff and admin accounts.",
 		})
 		return
 	}
 
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID, _ := authmw.GetUserIDFromContext(c)
 	name := strings.TrimSpace(c.PostForm("name"))
 	planIDVal, _ := strconv.ParseUint(c.PostForm("plan_id"), 10, 64)
 
@@ -378,7 +341,7 @@ func (s *Service) ShowBuyServer(c *gin.Context) {
 //
 //	POST /dashboard/servers/buy
 func (s *Service) ProcessBuyServer(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID, _ := authmw.GetUserIDFromContext(c)
 	name := strings.TrimSpace(c.PostForm("name"))
 	planIDVal, _ := strconv.ParseUint(c.PostForm("plan_id"), 10, 64)
 	serverType := domain.ServerType(strings.ToUpper(strings.TrimSpace(c.PostForm("server_type"))))
@@ -430,7 +393,7 @@ func serverExpiryFlags(server *domain.Server, now time.Time) (bool, bool) {
 //
 //	POST /dashboard/servers/:id/extend
 func (s *Service) ExtendServerDuration(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID, _ := authmw.GetUserIDFromContext(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -666,7 +629,7 @@ func (s *Service) ShowServerLogs(c *gin.Context) {
 //
 //	GET /dashboard/servers/:id/jobs
 func (s *Service) ShowServerJobs(c *gin.Context) {
-	if !authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+	if !authmw.GetUserRoleFromContext(c).IsStaffOrAdmin() {
 		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
 			"ErrorMessage": "Background job queue is only available to staff and admin users.",
 		})
@@ -806,7 +769,7 @@ func (s *Service) UpdateServerSettings(c *gin.Context) {
 //
 //	GET /dashboard/servers/:id/host
 func (s *Service) ShowServerHost(c *gin.Context) {
-	if !authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+	if !authmw.GetUserRoleFromContext(c).IsStaffOrAdmin() {
 		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
 			"ErrorMessage": "Host worker status and migration are only available to staff and admin users.",
 		})
@@ -922,8 +885,8 @@ func (s *Service) RestoreBackup(c *gin.Context) {
 //
 //	POST /dashboard/servers/:id/jobs/:job_id/retry
 func (s *Service) RetryJob(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
-	role := authkit.GetUserRoleFromContext(c)
+	userID, _ := authmw.GetUserIDFromContext(c)
+	role := authmw.GetUserRoleFromContext(c)
 	serverIDVal, ok := parseIDParam(c, "id")
 	if !ok {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -957,7 +920,7 @@ func (s *Service) RetryJob(c *gin.Context) {
 
 // TriggerMigration moves the server to a different host. Restricted to staff and admin roles.
 func (s *Service) TriggerMigration(c *gin.Context) {
-	if !authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+	if !authmw.GetUserRoleFromContext(c).IsStaffOrAdmin() {
 		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
 			"ErrorMessage": "Host migration is restricted to staff and admin accounts.",
 		})
@@ -1004,8 +967,8 @@ func serverRedirectURL(serverID uint, subpath, flashKey, message string) string 
 //
 //	GET /dashboard/servers/:id/files/open
 func (s *Service) OpenFileManager(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
-	allowNonOwner := authkit.GetUserRoleFromContext(c).IsStaffOrAdmin()
+	userID, _ := authmw.GetUserIDFromContext(c)
+	allowNonOwner := authmw.GetUserRoleFromContext(c).IsStaffOrAdmin()
 	serverIDVal, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || serverIDVal == 0 {
 		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
@@ -1023,7 +986,7 @@ func (s *Service) OpenFileManager(c *gin.Context) {
 
 // ShowBilling displays customer checkout order history and payment records.
 func (s *Service) ShowBilling(c *gin.Context) {
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID, _ := authmw.GetUserIDFromContext(c)
 
 	orders, _ := s.billingSvc.ListUserOrders(c.Request.Context(), userID)
 	payments, _ := s.billingSvc.ListUserPayments(c.Request.Context(), userID)
@@ -1043,7 +1006,7 @@ func (s *Service) ShowBilling(c *gin.Context) {
 //
 //	GET /dashboard/users
 func (s *Service) ListUsers(c *gin.Context) {
-	if !authkit.GetUserRoleFromContext(c).IsAdmin() {
+	if !authmw.GetUserRoleFromContext(c).IsAdmin() {
 		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
 			"ErrorMessage": "User role management is restricted to administrator accounts.",
 		})
@@ -1068,7 +1031,7 @@ func (s *Service) ListUsers(c *gin.Context) {
 //
 //	POST /dashboard/users/:id/role
 func (s *Service) UpdateUserRole(c *gin.Context) {
-	if !authkit.GetUserRoleFromContext(c).IsAdmin() {
+	if !authmw.GetUserRoleFromContext(c).IsAdmin() {
 		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
 			"ErrorMessage": "User role management is restricted to administrator accounts.",
 		})
@@ -1118,7 +1081,7 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 
 	// Protected dashboard pages
 	dash := r.Group("/dashboard")
-	dash.Use(session.Middleware(s.sessionStore, s.cookieCfg, "/login"))
+	dash.Use(s.authsessions.Middleware("/login"))
 	{
 		dash.GET("", s.ListServers)
 		dash.GET("/servers/new", s.ShowCreateServer)

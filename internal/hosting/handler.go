@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/dreamoutbox/authkit"
+	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
@@ -168,7 +168,7 @@ func (h *Handler) RotateHostKey(c *gin.Context) {
 //
 //	POST /api/v1/servers
 func (h *Handler) CreateServer(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -212,7 +212,7 @@ func (h *Handler) CreateServer(c *gin.Context) {
 //
 //	GET /api/v1/servers
 func (h *Handler) ListServers(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -413,13 +413,13 @@ func (h *Handler) MigrateServer(c *gin.Context) {
 		return
 	}
 
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
-	role := authkit.GetUserRoleFromContext(c)
+	role := authmw.GetUserRoleFromContext(c)
 	if !role.IsStaffOrAdmin() {
 		c.JSON(http.StatusForbidden, gin.H{"error": "host migration requires staff or admin role"})
 		return
@@ -519,11 +519,11 @@ func (h *Handler) SendConsoleCommand(c *gin.Context) {
 // effectiveServerUserID returns 0 for staff/admin callers so they can operate on any server,
 // and returns the authenticated user ID for regular users.
 func effectiveServerUserID(c *gin.Context) (uint, error) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		return 0, err
 	}
-	if authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+	if authmw.GetUserRoleFromContext(c).IsStaffOrAdmin() {
 		return 0, nil
 	}
 	return userID, nil
@@ -561,7 +561,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 
 	// Server endpoints (authenticated user self-service)
 	servers := api.Group("/servers")
-	servers.Use(authkit.AuthMiddleware(jwtSecret))
+	servers.Use(authmw.AuthMiddleware(jwtSecret))
 	{
 		servers.POST("", h.CreateServer)
 		servers.GET("", h.ListServers)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -25,8 +26,8 @@ func setupSessionTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("failed opening sqlite test db: %v", err)
 	}
-	if err := authkit.AutoMigrate(db); err != nil {
-		t.Fatalf("authkit.AutoMigrate failed: %v", err)
+	if err := authkit.SetupDB(db); err != nil {
+		t.Fatalf("authkit.SetupDB failed: %v", err)
 	}
 	return db
 }
@@ -34,7 +35,7 @@ func setupSessionTestDB(t *testing.T) *gorm.DB {
 func TestStoreLifecycle(t *testing.T) {
 	db := setupSessionTestDB(t)
 	if !db.Migrator().HasTable(&Session{}) {
-		t.Fatal("expected sessions table to be created by authkit.AutoMigrate")
+		t.Fatal("expected sessions table to be created by authkit.SetupDB")
 	}
 
 	store := NewStore(db, time.Hour)
@@ -169,8 +170,8 @@ func TestMiddlewareAuthRevocationAndLiveRole(t *testing.T) {
 
 	r := gin.New()
 	r.GET("/ui", Middleware(store, cfg, "/login"), func(c *gin.Context) {
-		uid, _ := authkit.GetUserIDFromContext(c)
-		role := authkit.GetUserRoleFromContext(c)
+		uid, _ := middleware.GetUserIDFromContext(c)
+		role := middleware.GetUserRoleFromContext(c)
 		c.String(http.StatusOK, fmt.Sprintf("%d:%s", uid, role))
 	})
 	r.GET("/api", Middleware(store, cfg, ""), func(c *gin.Context) {
@@ -223,5 +224,81 @@ func TestMiddlewareAuthRevocationAndLiveRole(t *testing.T) {
 	r.ServeHTTP(wDeleted, reqDeleted)
 	if wDeleted.Code != http.StatusFound || wDeleted.Header().Get("Location") != "/login" {
 		t.Fatalf("expected redirect after user deletion, got %d", wDeleted.Code)
+	}
+}
+
+func TestManagerSetSessionAndLogout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupSessionTestDB(t)
+	mgr := NewManager(db, DefaultCookieConfig("sid", time.Hour, true))
+
+	user := authkit.User{
+		Email:        "mgr-user@example.com",
+		PasswordHash: "hash",
+		Role:         authkit.UserRoleUser,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("failed creating user: %v", err)
+	}
+
+	r := gin.New()
+	r.POST("/login", func(c *gin.Context) {
+		if err := mgr.SetSession(c, user.ID); err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+	r.POST("/logout", func(c *gin.Context) {
+		if err := mgr.Logout(c); err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+	r.GET("/protected", mgr.Middleware(""), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	// Login sets session cookie.
+	wLogin := httptest.NewRecorder()
+	reqLogin, _ := http.NewRequest(http.MethodPost, "/login", nil)
+	r.ServeHTTP(wLogin, reqLogin)
+	if wLogin.Code != http.StatusOK || len(wLogin.Result().Cookies()) != 1 {
+		t.Fatalf("expected 200 and 1 session cookie, got %d (%d cookies)", wLogin.Code, len(wLogin.Result().Cookies()))
+	}
+	sessCookie := wLogin.Result().Cookies()[0]
+	if !sessCookie.HttpOnly || !sessCookie.Secure {
+		t.Fatalf("expected HttpOnly+Secure cookie, got %+v", sessCookie)
+	}
+
+	// Protected route succeeds with cookie.
+	wOK := httptest.NewRecorder()
+	reqOK, _ := http.NewRequest(http.MethodGet, "/protected", nil)
+	reqOK.AddCookie(sessCookie)
+	r.ServeHTTP(wOK, reqOK)
+	if wOK.Code != http.StatusOK {
+		t.Fatalf("expected 200 on protected route, got %d", wOK.Code)
+	}
+
+	// Logout revokes session in DB and clears cookie with matching Secure flag.
+	wLogout := httptest.NewRecorder()
+	reqLogout, _ := http.NewRequest(http.MethodPost, "/logout", nil)
+	reqLogout.AddCookie(sessCookie)
+	r.ServeHTTP(wLogout, reqLogout)
+	if wLogout.Code != http.StatusOK {
+		t.Fatalf("expected 200 on logout, got %d", wLogout.Code)
+	}
+	if len(wLogout.Result().Cookies()) != 1 || !wLogout.Result().Cookies()[0].Secure || wLogout.Result().Cookies()[0].MaxAge >= 0 {
+		t.Fatalf("expected cleared Secure cookie on logout, got %+v", wLogout.Result().Cookies())
+	}
+
+	// Replaying old cookie after logout fails with 401.
+	wAfter := httptest.NewRecorder()
+	reqAfter, _ := http.NewRequest(http.MethodGet, "/protected", nil)
+	reqAfter.AddCookie(sessCookie)
+	r.ServeHTTP(wAfter, reqAfter)
+	if wAfter.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after logout, got %d", wAfter.Code)
 	}
 }

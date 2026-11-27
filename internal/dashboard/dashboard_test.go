@@ -213,9 +213,9 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 		"public_ip":            h2.PublicIP,
 	})
 
-	sessionStore := session.NewStore(db, time.Hour)
 	cookieCfg := session.DefaultCookieConfig(session.DefaultCookieName, time.Hour, false)
-	dashService := NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, sessionStore, cookieCfg)
+	authsessions := session.NewManager(db, cookieCfg)
+	dashService := NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, authsessions)
 
 	r := gin.New()
 	dashService.RegisterRoutes(r)
@@ -234,14 +234,14 @@ func extractSessionCookie(resp *http.Response) string {
 
 func mustCreateSessionCookie(t *testing.T, dashSvc *Service, userID uint) *http.Cookie {
 	t.Helper()
-	rawToken, _, err := dashSvc.sessionStore.Create(context.Background(), userID, time.Hour)
+	rawToken, _, err := dashSvc.authsessions.Store().Create(context.Background(), userID, time.Hour)
 	if err != nil {
 		t.Fatalf("failed creating test session for user %d: %v", userID, err)
 	}
 	t.Cleanup(func() {
-		_ = dashSvc.sessionStore.Delete(context.Background(), rawToken)
+		_ = dashSvc.authsessions.Store().Delete(context.Background(), rawToken)
 	})
-	return &http.Cookie{Name: dashSvc.cookieCfg.Name, Value: rawToken}
+	return &http.Cookie{Name: dashSvc.authsessions.CookieConfig().Name, Value: rawToken}
 }
 
 func mustCreateUserWithSession(t *testing.T, dashSvc *Service, email string, role domain.UserRole) (*domain.User, *http.Cookie) {
@@ -257,7 +257,7 @@ func mustCreateUserWithSession(t *testing.T, dashSvc *Service, email string, rol
 		t.Fatalf("failed creating test user %s: %v", email, err)
 	}
 	t.Cleanup(func() {
-		_ = dashSvc.sessionStore.DeleteByUserID(context.Background(), user.ID)
+		_ = dashSvc.authsessions.Store().DeleteByUserID(context.Background(), user.ID)
 		dashSvc.db.Delete(&domain.User{}, user.ID)
 	})
 	return &user, mustCreateSessionCookie(t, dashSvc, user.ID)
@@ -280,7 +280,7 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 		t.Fatalf("login page failed: %d", wLogin.Code)
 	}
 
-	// 2. Register: POST /register
+	// 2. Register: POST /register redirects to /login without issuing a session cookie
 	formReg := url.Values{}
 	formReg.Set("email", uniqueEmail)
 	formReg.Set("password", password)
@@ -289,12 +289,24 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	reqReg.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.ServeHTTP(wReg, reqReg)
 
-	if wReg.Code != http.StatusFound {
-		t.Fatalf("register failed: %d", wReg.Code)
+	if wReg.Code != http.StatusFound || !strings.HasPrefix(wReg.Header().Get("Location"), "/login") {
+		t.Fatalf("register expected redirect to /login, got %d (%s)", wReg.Code, wReg.Header().Get("Location"))
 	}
-	cookieToken := extractSessionCookie(wReg.Result())
+	if extractSessionCookie(wReg.Result()) != "" {
+		t.Fatal("expected no session cookie on registration")
+	}
+
+	// 2b. Login: POST /login establishes session cookie
+	wLoginPost := httptest.NewRecorder()
+	reqLoginPost, _ := http.NewRequest(http.MethodPost, "/login", strings.NewReader(formReg.Encode()))
+	reqLoginPost.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.ServeHTTP(wLoginPost, reqLoginPost)
+	if wLoginPost.Code != http.StatusFound || wLoginPost.Header().Get("Location") != "/dashboard" {
+		t.Fatalf("login failed: %d (%s)", wLoginPost.Code, wLoginPost.Header().Get("Location"))
+	}
+	cookieToken := extractSessionCookie(wLoginPost.Result())
 	if cookieToken == "" {
-		t.Fatal("expected session token cookie on registration")
+		t.Fatal("expected session token cookie on login")
 	}
 
 	authCookie := &http.Cookie{Name: session.DefaultCookieName, Value: cookieToken}

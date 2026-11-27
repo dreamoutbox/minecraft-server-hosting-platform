@@ -54,7 +54,7 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
-### Debug Utils
+## Debug Utils
 
 - [x] add shell debug script to manually mount /var/lib/mc-platform/images/<server-id>.img for inspection.
 
@@ -62,7 +62,7 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
-### 11/18/2026
+## 11/18/2026
 
 - [x] test upload file exceed ext4 mount disk should fail. 
     - [x] add new plan with 1 gb disk
@@ -103,7 +103,7 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
-### 11/20/2026
+## 11/20/2026
 
 - [x] change all env in compose to use `${VAR:-default}` (VAR or default) syntax
 
@@ -119,7 +119,7 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 ---
 
-### 11/22/2026
+## 11/22/2026
 
 - [x] change env `RETENTION_DAYS` to `SERVER_EXPIRED_DATA_RETENTION_DAYS`
 
@@ -146,6 +146,20 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 - [x] move extend server button to new panel in server settings page
 
 - [x] web dashboard add alert if user server is about to expire. add link to navigate to server settings page > extend server panel. 
+
+---
+
+## 11/27/2026
+
+- [ ] rename `cmd/worker` to `cmd/nodemanager`
+
+- [ ] extract `cmd/nodemanager` code in `./internal` to new dir at `./nodemanager`
+
+- [ ] extract `cmd/jobworker` code in `./internal` to new dir at `./jobworker`
+
+- [ ] if any of these new dir shared code in `./internal`, the shared code to `./shared`
+
+- [ ] separate routes in `internal/dashboard/dashboard.go` to own file. one route per one go file. don't mix everything in just one file. separate by category like: users, billings, servers, etc. like internal/dashboard/users/login.go, internal/dashboard/users/register.go, internal/dashboard/billings/buy_server.go, internal/dashboard/servers/create-server.go
 
 ---
 

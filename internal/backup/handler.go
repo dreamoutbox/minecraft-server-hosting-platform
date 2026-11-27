@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/dreamoutbox/authkit"
+	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
@@ -159,10 +159,10 @@ func (h *Handler) RestoreBackup(c *gin.Context) {
 // effectiveServerUserID returns 0 for staff/admin callers so they can backup/restore any server,
 // and returns the authenticated user ID for regular users.
 func effectiveServerUserID(c *gin.Context) uint {
-	if authkit.GetUserRoleFromContext(c).IsStaffOrAdmin() {
+	if authmw.GetUserRoleFromContext(c).IsStaffOrAdmin() {
 		return 0
 	}
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID, _ := authmw.GetUserIDFromContext(c)
 	return userID
 }
 
@@ -205,7 +205,7 @@ func (h *Handler) CreateImageBackup(c *gin.Context) {
 		return
 	}
 
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID, _ := authmw.GetUserIDFromContext(c)
 	if h.jobQueue != nil {
 		record, job, err := h.jobQueue.EnqueueImageBackup(c.Request.Context(), userID, serverID)
 		if err != nil {
@@ -263,7 +263,7 @@ func (h *Handler) CreateAllImageBackups(c *gin.Context) {
 		return
 	}
 
-	userID, _ := authkit.GetUserIDFromContext(c)
+	userID, _ := authmw.GetUserIDFromContext(c)
 	records, err := h.service.BackupAllServerImages(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -297,7 +297,7 @@ func (h *Handler) RestoreImageBackup(c *gin.Context) {
 	}
 
 	if h.jobQueue != nil {
-		userID, _ := authkit.GetUserIDFromContext(c)
+		userID, _ := authmw.GetUserIDFromContext(c)
 		job, err := h.jobQueue.EnqueueImageRestore(c.Request.Context(), userID, serverID, imageBackupID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -319,7 +319,7 @@ func (h *Handler) RestoreImageBackup(c *gin.Context) {
 
 func requireAdminRole() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !authkit.GetUserRoleFromContext(c).IsAdmin() {
+		if !authmw.GetUserRoleFromContext(c).IsAdmin() {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
 			return
 		}
@@ -348,7 +348,7 @@ func parseIDParam(c *gin.Context, paramName string) (uint, error) {
 //	backupHandler.RegisterRoutes(router, cfg.JWTSecret)
 func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 	backups := r.Group("/api/v1/servers/:id/backups")
-	backups.Use(authkit.AuthMiddleware(jwtSecret))
+	backups.Use(authmw.AuthMiddleware(jwtSecret))
 	{
 		backups.POST("", h.CreateBackup)
 		backups.GET("", h.ListBackups)
@@ -356,13 +356,13 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 	}
 
 	adminAllImageBackups := r.Group("/api/v1/admin/image-backups")
-	adminAllImageBackups.Use(authkit.AuthMiddleware(jwtSecret), requireAdminRole())
+	adminAllImageBackups.Use(authmw.AuthMiddleware(jwtSecret), requireAdminRole())
 	{
 		adminAllImageBackups.POST("", h.CreateAllImageBackups)
 	}
 
 	adminImageBackups := r.Group("/api/v1/admin/servers/:id/image-backups")
-	adminImageBackups.Use(authkit.AuthMiddleware(jwtSecret), requireAdminRole())
+	adminImageBackups.Use(authmw.AuthMiddleware(jwtSecret), requireAdminRole())
 	{
 		adminImageBackups.GET("", h.ListImageBackups)
 		adminImageBackups.POST("", h.CreateImageBackup)

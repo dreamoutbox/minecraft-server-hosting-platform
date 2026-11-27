@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/dreamoutbox/authkit"
+	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/middleware"
@@ -37,7 +37,7 @@ func NewHandler(service *Service) *Handler {
 //
 //	GET /api/v1/billing/orders
 func (h *Handler) ListOrders(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -61,7 +61,7 @@ func (h *Handler) ListOrders(c *gin.Context) {
 //
 //	GET /api/v1/billing/payments
 func (h *Handler) ListPayments(c *gin.Context) {
-	userID, err := authkit.GetUserIDFromContext(c)
+	userID, err := authmw.GetUserIDFromContext(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -124,7 +124,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine, jwtSecret string) {
 
 	// User-authenticated billing history queries
 	authenticated := billingGroup.Group("")
-	authenticated.Use(authkit.AuthMiddleware(jwtSecret))
+	authenticated.Use(authmw.AuthMiddleware(jwtSecret))
 	{
 		authenticated.GET("/orders", h.ListOrders)
 		authenticated.GET("/payments", h.ListPayments)

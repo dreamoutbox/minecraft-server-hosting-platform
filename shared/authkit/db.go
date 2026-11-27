@@ -6,19 +6,19 @@ import (
 	"gorm.io/gorm"
 )
 
-// AutoMigrate applies database schema migrations for core authkit tables (users and sessions).
+// SetupDB applies database schema setup for core authkit tables (users and sessions).
 //
 // Arguments:
 //   - db: Active GORM database handle.
 //
 // Example usage:
 //
-//	if err := authkit.AutoMigrate(db); err != nil {
+//	if err := authkit.SetupDB(db); err != nil {
 //	    return err
 //	}
-func AutoMigrate(db *gorm.DB) error {
+func SetupDB(db *gorm.DB) error {
 	if err := db.AutoMigrate(&User{}, &Session{}); err != nil {
-		return fmt.Errorf("failed migrating authkit tables: %w", err)
+		return fmt.Errorf("failed setting up authkit tables: %w", err)
 	}
 	return nil
 }

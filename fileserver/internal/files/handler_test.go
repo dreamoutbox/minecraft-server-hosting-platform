@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/authkitjwt"
 	"github.com/dreamoutbox/authkit/session"
 	"github.com/dreamoutbox/fileserver/internal/store"
 )
@@ -56,9 +57,9 @@ func setupFilesTestRouter(t *testing.T) (*gin.Engine, *store.Store, string, stri
 
 	secret := "files-handler-secret"
 	r := gin.New()
-	sessionStore := session.NewStore(st.DB(), time.Hour)
 	cookieCfg := session.DefaultCookieConfig(SessionCookieName, time.Hour, false)
-	h := NewHandler(st, sessionStore, secret, 10*1024*1024, 5*1024*1024*1024, cookieCfg)
+	authsessions := session.NewManager(st.DB(), cookieCfg)
+	h := NewHandler(st, authsessions, secret, 10*1024*1024, 5*1024*1024*1024)
 	h.RegisterRoutes(r)
 
 	return r, st, secret, serverDir, otherDir
@@ -84,7 +85,7 @@ func TestLoginTokenFlowAndBrowserFileOperations(t *testing.T) {
 		t.Fatalf("expected 401 for tampered token, got %d", wBad.Code)
 	}
 
-	expiredTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, time.Millisecond)
+	expiredTok, _, _, err := authkitjwt.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, time.Millisecond)
 	if err != nil {
 		t.Fatalf("GenerateLoginToken: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestLoginTokenFlowAndBrowserFileOperations(t *testing.T) {
 	}
 
 	// 2. Valid login token sets session cookie and redirects to target
-	loginTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
+	loginTok, _, _, err := authkitjwt.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
 	if err != nil {
 		t.Fatalf("GenerateLoginToken: %v", err)
 	}
@@ -243,7 +244,7 @@ func TestLoginTokenFlowAndBrowserFileOperations(t *testing.T) {
 func TestToolbarModalsWebEditAndZipDownload(t *testing.T) {
 	r, _, secret, serverDir, otherDir := setupFilesTestRouter(t)
 
-	loginTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
+	loginTok, _, _, err := authkitjwt.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
 	if err != nil {
 		t.Fatalf("GenerateLoginToken: %v", err)
 	}
@@ -456,7 +457,7 @@ func TestStreamingUploadConcurrencyAndOutOfOrderFields(t *testing.T) {
 	r, _, secret, serverDir, _ := setupFilesTestRouter(t)
 	h := r // setupFilesTestRouter uses 10MB limit
 
-	loginTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
+	loginTok, _, _, err := authkitjwt.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
 	if err != nil {
 		t.Fatalf("GenerateLoginToken: %v", err)
 	}
@@ -547,7 +548,7 @@ func TestStreamingUploadConcurrencyAndOutOfOrderFields(t *testing.T) {
 func TestMultiSelectDeleteAndZipDownload(t *testing.T) {
 	r, _, secret, serverDir, otherDir := setupFilesTestRouter(t)
 
-	loginTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
+	loginTok, _, _, err := authkitjwt.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
 	if err != nil {
 		t.Fatalf("GenerateLoginToken: %v", err)
 	}
@@ -710,9 +711,9 @@ func TestDailyQuotaEnforcementAndReset(t *testing.T) {
 
 	secret := "quota-secret"
 	const dailyQuota int64 = 100 // 100 bytes per day per direction
-	sessionStore := session.NewStore(st.DB(), time.Hour)
 	cookieCfg := session.DefaultCookieConfig(SessionCookieName, time.Hour, false)
-	h := NewHandler(st, sessionStore, secret, 10*1024*1024, dailyQuota, cookieCfg)
+	authsessions := session.NewManager(st.DB(), cookieCfg)
+	h := NewHandler(st, authsessions, secret, 10*1024*1024, dailyQuota)
 	currentTime := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
 	h.nowFn = func() time.Time { return currentTime }
 
@@ -720,7 +721,7 @@ func TestDailyQuotaEnforcementAndReset(t *testing.T) {
 	h.RegisterRoutes(r)
 
 	loginUser := func(uid uint, email string) *http.Cookie {
-		tok, _, _, err := authkit.GenerateLoginToken(uid, email, authkit.UserRoleUser, secret, 60*time.Second)
+		tok, _, _, err := authkitjwt.GenerateLoginToken(uid, email, authkit.UserRoleUser, secret, 60*time.Second)
 		if err != nil {
 			t.Fatalf("GenerateLoginToken: %v", err)
 		}
@@ -828,7 +829,7 @@ func TestHandlerAppliesUserUIDGIDOnUploadAndCreate(t *testing.T) {
 		t.Fatalf("RegisterUser with uid/gid failed: %v", err)
 	}
 
-	loginTok, _, _, err := authkit.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
+	loginTok, _, _, err := authkitjwt.GenerateLoginToken(1, "owner@example.com", authkit.UserRoleUser, secret, 60*time.Second)
 	if err != nil {
 		t.Fatalf("GenerateLoginToken failed: %v", err)
 	}
