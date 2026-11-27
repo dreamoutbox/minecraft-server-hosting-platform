@@ -2,20 +2,19 @@ FROM golang:1.27-alpine AS builder
 
 WORKDIR /app
 COPY go.work go.mod go.sum ./
-COPY shared/authkit/go.* ./shared/authkit/
 COPY fileserver/go.* ./fileserver/
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/nodemanager ./cmd/nodemanager
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/nodemanager.bin ./cmd/nodemanager
 
 FROM alpine:latest
 # Install filesystem tools required for loop-mounted sparse volumes
 RUN apk --no-cache add ca-certificates tzdata e2fsprogs util-linux docker-cli
 
 WORKDIR /app
-COPY --from=builder /app/nodemanager /app/nodemanager
+COPY --from=builder /app/nodemanager.bin /app/nodemanager.bin
 
 EXPOSE 9090
 # Requires container execution with --cap-add=SYS_ADMIN and device loop access
-ENTRYPOINT ["/app/nodemanager"]
+ENTRYPOINT ["/app/nodemanager.bin"]

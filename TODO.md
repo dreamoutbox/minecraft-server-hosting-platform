@@ -163,6 +163,12 @@ worker stop container failed: stop container failed with code 500: {"error":"fai
 
 - [x] move shared/authkit to new git repo
 
+- [ ] move internal/billing to new reusable module. currently move the code to dir ./go-stripe-kit for now. I will create new github repo later. the gin api route should be ./go-stripe-kit/ginapi. separate the logic code from api code. so we can add other web framework (like echo or fiber) later.
+
+- [ ] move minecraft server hosting platform related code in internal/billing/service.go to internal/billings. don't add it in ./go-stripe-kit.
+
+- [ ] add refund function to ./go-stripe-kit. 
+
 ---
 
 # BACKLOG

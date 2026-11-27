@@ -2,17 +2,16 @@ FROM golang:1.27-alpine AS builder
 
 WORKDIR /app
 COPY go.work go.mod go.sum ./
-COPY shared/authkit/go.* ./shared/authkit/
 COPY fileserver/go.* ./fileserver/
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/jobworker ./cmd/jobworker
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/jobworker.bin ./cmd/jobworker
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /app
-COPY --from=builder /app/jobworker /app/jobworker
+COPY --from=builder /app/jobworker.bin /app/jobworker.bin
 
-ENTRYPOINT ["/app/jobworker"]
+ENTRYPOINT ["/app/jobworker.bin"]
