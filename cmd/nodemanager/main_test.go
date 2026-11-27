@@ -6,29 +6,29 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 type spyContainerManager struct {
 	events *[]string
 }
 
-func (s *spyContainerManager) CreateAndStart(ctx context.Context, req worker.CreateContainerRequest) (*worker.CreateContainerResponse, error) {
-	return &worker.CreateContainerResponse{}, nil
+func (s *spyContainerManager) CreateAndStart(ctx context.Context, req nodemanagerclient.CreateContainerRequest) (*nodemanagerclient.CreateContainerResponse, error) {
+	return &nodemanagerclient.CreateContainerResponse{}, nil
 }
 
 func (s *spyContainerManager) Stop(ctx context.Context, containerID string) error { return nil }
 func (s *spyContainerManager) Delete(ctx context.Context, containerID string) error {
 	return nil
 }
-func (s *spyContainerManager) GetStatus(ctx context.Context, containerID string) (*worker.ContainerStatusResponse, error) {
-	return &worker.ContainerStatusResponse{}, nil
+func (s *spyContainerManager) GetStatus(ctx context.Context, containerID string) (*nodemanagerclient.ContainerStatusResponse, error) {
+	return &nodemanagerclient.ContainerStatusResponse{}, nil
 }
-func (s *spyContainerManager) GetLogs(ctx context.Context, containerID string, tail int) (*worker.ContainerLogsResponse, error) {
-	return &worker.ContainerLogsResponse{}, nil
+func (s *spyContainerManager) GetLogs(ctx context.Context, containerID string, tail int) (*nodemanagerclient.ContainerLogsResponse, error) {
+	return &nodemanagerclient.ContainerLogsResponse{}, nil
 }
-func (s *spyContainerManager) ExecCommand(ctx context.Context, containerID string, user string, command string) (*worker.ExecCommandResponse, error) {
-	return &worker.ExecCommandResponse{}, nil
+func (s *spyContainerManager) ExecCommand(ctx context.Context, containerID string, user string, command string) (*nodemanagerclient.ExecCommandResponse, error) {
+	return &nodemanagerclient.ExecCommandResponse{}, nil
 }
 func (s *spyContainerManager) CountActive(ctx context.Context) (int, error) { return 0, nil }
 func (s *spyContainerManager) CleanupAll(ctx context.Context) error {
@@ -63,8 +63,8 @@ func (s *spyVolumeManager) UploadVolumeBackup(ctx context.Context, volumeID stri
 func (s *spyVolumeManager) RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error {
 	return nil
 }
-func (s *spyVolumeManager) UploadImageBackup(ctx context.Context, volumeID string, presignedURLs []string, maxPartBytes int64) (*worker.UploadImageBackupResponse, error) {
-	return &worker.UploadImageBackupResponse{}, nil
+func (s *spyVolumeManager) UploadImageBackup(ctx context.Context, volumeID string, presignedURLs []string, maxPartBytes int64) (*nodemanagerclient.UploadImageBackupResponse, error) {
+	return &nodemanagerclient.UploadImageBackupResponse{}, nil
 }
 func (s *spyVolumeManager) RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (int64, error) {
 	return 0, nil

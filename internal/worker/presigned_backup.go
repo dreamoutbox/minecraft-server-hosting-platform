@@ -3,7 +3,6 @@ package worker
 import (
 	"archive/tar"
 	"bufio"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -13,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 const (
@@ -179,56 +179,6 @@ func getFromPresignedURL(ctx context.Context, presignedURL string) (io.ReadClose
 	return resp.Body, nil
 }
 
-// PutPresignedBytes uploads an in-memory byte slice via HTTP PUT to a presigned S3 URL.
-//
-// Arguments:
-//   - ctx: Operation cancellation context.
-//   - presignedURL: Pre-signed HTTP PUT target URL.
-//   - data: Payload bytes to upload.
-//   - contentType: Optional MIME Content-Type header matching the presigned signature.
-//
-// Example usage:
-//
-//	n, err := worker.PutPresignedBytes(ctx, putURL, payload, "application/gzip")
-func PutPresignedBytes(ctx context.Context, presignedURL string, data []byte, contentType string) (int64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, presignedURL, bytes.NewReader(data))
-	if err != nil {
-		return 0, fmt.Errorf("failed building presigned PUT request: %w", err)
-	}
-	req.ContentLength = int64(len(data))
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	resp, err := (&http.Client{}).Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("presigned PUT upload failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return 0, fmt.Errorf("presigned PUT rejected with status %d: %s", resp.StatusCode, string(errBody))
-	}
-	return int64(len(data)), nil
-}
-
-// GetPresignedBytes downloads an object into memory via HTTP GET from a presigned S3 URL.
-//
-// Arguments:
-//   - ctx: Operation cancellation context.
-//   - presignedURL: Pre-signed HTTP GET source URL.
-//
-// Example usage:
-//
-//	data, err := worker.GetPresignedBytes(ctx, getURL)
-func GetPresignedBytes(ctx context.Context, presignedURL string) ([]byte, error) {
-	body, err := getFromPresignedURL(ctx, presignedURL)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = body.Close() }()
-	return io.ReadAll(body)
-}
-
 // UploadImageBackup streams volumeID's ext4 .img file through tar+gzip, splitting output into
 // <= maxPartBytes chunks (default 1 GiB) and uploading each chunk via its presigned PUT URL.
 //
@@ -241,7 +191,7 @@ func GetPresignedBytes(ctx context.Context, presignedURL string) ([]byte, error)
 // Example usage:
 //
 //	res, err := vm.UploadImageBackup(ctx, "42", putURLs, 0)
-func (m *LocalVolumeManager) UploadImageBackup(ctx context.Context, volumeID string, presignedURLs []string, maxPartBytes int64) (*UploadImageBackupResponse, error) {
+func (m *LocalVolumeManager) UploadImageBackup(ctx context.Context, volumeID string, presignedURLs []string, maxPartBytes int64) (*nodemanagerclient.UploadImageBackupResponse, error) {
 	if len(presignedURLs) == 0 {
 		return nil, errors.New("at least one presigned PUT URL is required")
 	}
@@ -292,7 +242,7 @@ func (m *LocalVolumeManager) UploadImageBackup(ctx context.Context, volumeID str
 		return nil, err
 	}
 
-	return &UploadImageBackupResponse{
+	return &nodemanagerclient.UploadImageBackupResponse{
 		PartsUploaded: len(uploader.partSizes),
 		PartSizes:     uploader.partSizes,
 		TotalBytes:    uploader.totalBytes,

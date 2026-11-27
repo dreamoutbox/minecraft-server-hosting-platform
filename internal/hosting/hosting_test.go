@@ -18,8 +18,8 @@ import (
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
+	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 // mockWorkerClient records invocations for hosting integration verification.

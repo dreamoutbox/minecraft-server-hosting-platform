@@ -17,8 +17,8 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
+	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 // WorkerClientFactory produces a typed worker client given host credentials.

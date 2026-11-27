@@ -1,4 +1,7 @@
-package worker
+package nodemanagerclient
+
+// APIKeyHeader is the HTTP header used to supply the worker daemon API key.
+const APIKeyHeader = "X-Worker-API-Key"
 
 // ContainerStatus represents the container runtime state reported by the worker daemon.
 type ContainerStatus string

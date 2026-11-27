@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 )
 
 // JobEnqueuer enqueues async server provisioning jobs after checkout payment completes.

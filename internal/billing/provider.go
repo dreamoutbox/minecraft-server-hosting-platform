@@ -20,7 +20,7 @@ import (
 	"github.com/stripe/stripe-go/v81/refund"
 	"github.com/stripe/stripe-go/v81/webhook"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 )
 
 // PaymentResult captures the outcome of a financial transaction.

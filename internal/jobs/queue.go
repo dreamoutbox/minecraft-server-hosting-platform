@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
 )
 

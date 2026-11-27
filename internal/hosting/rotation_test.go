@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 )
 
 func TestRotateHostAPIKey(t *testing.T) {

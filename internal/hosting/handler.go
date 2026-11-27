@@ -8,7 +8,7 @@ import (
 	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 )
 
 // ServerJobQueue enqueues asynchronous server create and delete operations.

@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/storage"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
+	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 var (

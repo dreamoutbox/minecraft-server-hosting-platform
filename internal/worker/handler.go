@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sys/unix"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 // Handler serves HTTP endpoints for the host worker daemon.
@@ -43,13 +44,13 @@ func NewHandler(containers ContainerManager, volumes VolumeManager, maxServers i
 // CreateContainer handles container creation and launch.
 //
 // Arguments:
-//   - c: Active Gin request context containing CreateContainerRequest JSON.
+//   - c: Active Gin request context containing nodemanagerclient.CreateContainerRequest JSON.
 //
 // Example usage:
 //
 //	POST /containers
 func (h *Handler) CreateContainer(c *gin.Context) {
-	var req CreateContainerRequest
+	var req nodemanagerclient.CreateContainerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container request: " + err.Error()})
 		return
@@ -176,7 +177,7 @@ func (h *Handler) GetContainerLogs(c *gin.Context) {
 // ExecContainerCommand executes a Minecraft console command inside a running container.
 //
 // Arguments:
-//   - c: Active Gin request context with URL param 'id' and ExecCommandRequest JSON body.
+//   - c: Active Gin request context with URL param 'id' and nodemanagerclient.ExecCommandRequest JSON body.
 //
 // Example usage:
 //
@@ -188,7 +189,7 @@ func (h *Handler) ExecContainerCommand(c *gin.Context) {
 		return
 	}
 
-	var req ExecCommandRequest
+	var req nodemanagerclient.ExecCommandRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid command request: " + err.Error()})
 		return
@@ -206,13 +207,13 @@ func (h *Handler) ExecContainerCommand(c *gin.Context) {
 // CreateVolume allocates and mounts a storage volume.
 //
 // Arguments:
-//   - c: Active Gin request context containing CreateVolumeRequest JSON.
+//   - c: Active Gin request context containing nodemanagerclient.CreateVolumeRequest JSON.
 //
 // Example usage:
 //
 //	POST /volumes
 func (h *Handler) CreateVolume(c *gin.Context) {
-	var req CreateVolumeRequest
+	var req nodemanagerclient.CreateVolumeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid volume request: " + err.Error()})
 		return
@@ -225,7 +226,7 @@ func (h *Handler) CreateVolume(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, CreateVolumeResponse{
+	c.JSON(http.StatusCreated, nodemanagerclient.CreateVolumeResponse{
 		MountPath: mountPath,
 		ImagePath: imagePath,
 	})
@@ -308,7 +309,7 @@ func (h *Handler) ImportVolume(c *gin.Context) {
 // UploadVolumeBackup compresses volume files to tar.gz and uploads to the provided presigned S3 PUT URL.
 //
 // Arguments:
-//   - c: Active Gin request context with URL param 'id' and UploadVolumeBackupRequest JSON body.
+//   - c: Active Gin request context with URL param 'id' and nodemanagerclient.UploadVolumeBackupRequest JSON body.
 //
 // Example usage:
 //
@@ -320,7 +321,7 @@ func (h *Handler) UploadVolumeBackup(c *gin.Context) {
 		return
 	}
 
-	var req UploadVolumeBackupRequest
+	var req nodemanagerclient.UploadVolumeBackupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid backup upload request: " + err.Error()})
 		return
@@ -332,13 +333,13 @@ func (h *Handler) UploadVolumeBackup(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, UploadVolumeBackupResponse{SizeBytes: sizeBytes})
+	c.JSON(http.StatusOK, nodemanagerclient.UploadVolumeBackupResponse{SizeBytes: sizeBytes})
 }
 
 // RestoreVolumeBackup downloads a backup archive from the provided presigned S3 GET URL and unpacks it.
 //
 // Arguments:
-//   - c: Active Gin request context with URL param 'id' and RestoreVolumeBackupRequest JSON body.
+//   - c: Active Gin request context with URL param 'id' and nodemanagerclient.RestoreVolumeBackupRequest JSON body.
 //
 // Example usage:
 //
@@ -350,7 +351,7 @@ func (h *Handler) RestoreVolumeBackup(c *gin.Context) {
 		return
 	}
 
-	var req RestoreVolumeBackupRequest
+	var req nodemanagerclient.RestoreVolumeBackupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid backup restore request: " + err.Error()})
 		return
@@ -368,7 +369,7 @@ func (h *Handler) RestoreVolumeBackup(c *gin.Context) {
 // .img file into <= 1 GiB parts, and uploads each part to the provided presigned S3 PUT URLs.
 //
 // Arguments:
-//   - c: Active Gin request context with URL param 'id' and UploadImageBackupRequest JSON body.
+//   - c: Active Gin request context with URL param 'id' and nodemanagerclient.UploadImageBackupRequest JSON body.
 //
 // Example usage:
 //
@@ -380,7 +381,7 @@ func (h *Handler) UploadImageBackup(c *gin.Context) {
 		return
 	}
 
-	var req UploadImageBackupRequest
+	var req nodemanagerclient.UploadImageBackupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid image backup request: " + err.Error()})
 		return
@@ -417,7 +418,7 @@ func (h *Handler) UploadImageBackup(c *gin.Context) {
 // them, and atomically replaces the server's ext4 .img file.
 //
 // Arguments:
-//   - c: Active Gin request context with URL param 'id' and RestoreImageBackupRequest JSON body.
+//   - c: Active Gin request context with URL param 'id' and nodemanagerclient.RestoreImageBackupRequest JSON body.
 //
 // Example usage:
 //
@@ -429,7 +430,7 @@ func (h *Handler) RestoreImageBackup(c *gin.Context) {
 		return
 	}
 
-	var req RestoreImageBackupRequest
+	var req nodemanagerclient.RestoreImageBackupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid image restore request: " + err.Error()})
 		return
@@ -441,7 +442,7 @@ func (h *Handler) RestoreImageBackup(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, RestoreImageBackupResponse{SizeBytes: sizeBytes})
+	c.JSON(http.StatusOK, nodemanagerclient.RestoreImageBackupResponse{SizeBytes: sizeBytes})
 }
 
 // GetStatus reports host health, active container count, and disk capacity.
@@ -469,7 +470,7 @@ func (h *Handler) GetStatus(c *gin.Context) {
 		totalBytes = 0
 	}
 
-	c.JSON(http.StatusOK, HostStatusResponse{
+	c.JSON(http.StatusOK, nodemanagerclient.HostStatusResponse{
 		Hostname:         hostname,
 		ActiveContainers: activeCount,
 		MaxServers:       h.maxServers,

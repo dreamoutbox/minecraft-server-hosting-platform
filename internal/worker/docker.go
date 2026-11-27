@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 const (
@@ -26,12 +27,12 @@ const (
 
 // ContainerManager defines lifecycle operations on Docker containers for Minecraft servers.
 type ContainerManager interface {
-	CreateAndStart(ctx context.Context, req CreateContainerRequest) (*CreateContainerResponse, error)
+	CreateAndStart(ctx context.Context, req nodemanagerclient.CreateContainerRequest) (*nodemanagerclient.CreateContainerResponse, error)
 	Stop(ctx context.Context, containerID string) error
 	Delete(ctx context.Context, containerID string) error
-	GetStatus(ctx context.Context, containerID string) (*ContainerStatusResponse, error)
-	GetLogs(ctx context.Context, containerID string, tail int) (*ContainerLogsResponse, error)
-	ExecCommand(ctx context.Context, containerID string, user string, command string) (*ExecCommandResponse, error)
+	GetStatus(ctx context.Context, containerID string) (*nodemanagerclient.ContainerStatusResponse, error)
+	GetLogs(ctx context.Context, containerID string, tail int) (*nodemanagerclient.ContainerLogsResponse, error)
+	ExecCommand(ctx context.Context, containerID string, user string, command string) (*nodemanagerclient.ExecCommandResponse, error)
 	CountActive(ctx context.Context) (int, error)
 	CleanupAll(ctx context.Context) error
 }
@@ -69,7 +70,7 @@ func NewDockerContainerManager() (*DockerContainerManager, error) {
 // Example usage:
 //
 //	resp, err := cm.CreateAndStart(ctx, req)
-func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateContainerRequest) (*CreateContainerResponse, error) {
+func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req nodemanagerclient.CreateContainerRequest) (*nodemanagerclient.CreateContainerResponse, error) {
 	img := req.Image
 	if img == "" {
 		img = "itzg/minecraft-server:latest"
@@ -157,7 +158,7 @@ func (d *DockerContainerManager) CreateAndStart(ctx context.Context, req CreateC
 		return nil, fmt.Errorf("failed starting container: %w", err)
 	}
 
-	return &CreateContainerResponse{
+	return &nodemanagerclient.CreateContainerResponse{
 		ContainerID: resp.ID,
 		Port:        req.Port,
 		MountPath:   req.MountPath,
@@ -217,29 +218,29 @@ func (d *DockerContainerManager) Delete(ctx context.Context, containerID string)
 // Example usage:
 //
 //	status, err := cm.GetStatus(ctx, "abc123container")
-func (d *DockerContainerManager) GetStatus(ctx context.Context, containerID string) (*ContainerStatusResponse, error) {
+func (d *DockerContainerManager) GetStatus(ctx context.Context, containerID string) (*nodemanagerclient.ContainerStatusResponse, error) {
 	inspect, err := d.cli.ContainerInspect(ctx, containerID)
 	if err != nil {
 		if client.IsErrNotFound(err) {
-			return &ContainerStatusResponse{
+			return &nodemanagerclient.ContainerStatusResponse{
 				ContainerID: containerID,
-				Status:      ContainerStatusUnknown,
+				Status:      nodemanagerclient.ContainerStatusUnknown,
 			}, nil
 		}
 		return nil, fmt.Errorf("failed inspecting container %s: %w", containerID, err)
 	}
 
-	var status ContainerStatus
+	var status nodemanagerclient.ContainerStatus
 	switch {
 	case inspect.State.Running:
-		status = ContainerStatusRunning
+		status = nodemanagerclient.ContainerStatusRunning
 	case inspect.State.Status == "exited" || !inspect.State.Running:
-		status = ContainerStatusStopped
+		status = nodemanagerclient.ContainerStatusStopped
 	default:
-		status = ContainerStatusUnknown
+		status = nodemanagerclient.ContainerStatusUnknown
 	}
 
-	return &ContainerStatusResponse{
+	return &nodemanagerclient.ContainerStatusResponse{
 		ContainerID: containerID,
 		Status:      status,
 	}, nil
@@ -255,7 +256,7 @@ func (d *DockerContainerManager) GetStatus(ctx context.Context, containerID stri
 // Example usage:
 //
 //	logs, err := cm.GetLogs(ctx, "abc123container", 200)
-func (d *DockerContainerManager) GetLogs(ctx context.Context, containerID string, tail int) (*ContainerLogsResponse, error) {
+func (d *DockerContainerManager) GetLogs(ctx context.Context, containerID string, tail int) (*nodemanagerclient.ContainerLogsResponse, error) {
 	if tail <= 0 {
 		tail = 200
 	}
@@ -286,7 +287,7 @@ func (d *DockerContainerManager) GetLogs(ctx context.Context, containerID string
 		combined += stderrBuf.String()
 	}
 
-	return &ContainerLogsResponse{
+	return &nodemanagerclient.ContainerLogsResponse{
 		ContainerID: containerID,
 		Logs:        combined,
 	}, nil
@@ -302,7 +303,7 @@ func (d *DockerContainerManager) GetLogs(ctx context.Context, containerID string
 // Example usage:
 //
 //	res, err := cm.ExecCommand(ctx, "abc123container", "list")
-func (d *DockerContainerManager) ExecCommand(ctx context.Context, containerID string, user string, command string) (*ExecCommandResponse, error) {
+func (d *DockerContainerManager) ExecCommand(ctx context.Context, containerID string, user string, command string) (*nodemanagerclient.ExecCommandResponse, error) {
 	trimmed := strings.TrimSpace(command)
 	if trimmed == "" {
 		return nil, errors.New("command cannot be empty")
@@ -340,7 +341,7 @@ func (d *DockerContainerManager) ExecCommand(ctx context.Context, containerID st
 		return nil, fmt.Errorf("mc-send-to-console exited with code %d: %s", inspectResp.ExitCode, output)
 	}
 
-	return &ExecCommandResponse{
+	return &nodemanagerclient.ExecCommandResponse{
 		ContainerID: containerID,
 		Command:     trimmed,
 		Output:      output,

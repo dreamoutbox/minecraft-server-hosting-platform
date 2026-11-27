@@ -11,12 +11,12 @@ import (
 	fsclient "github.com/dreamoutbox/fileserver/client"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/backup"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/config"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/config"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/hosting"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/jobs"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/storage"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
+	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 func main() {

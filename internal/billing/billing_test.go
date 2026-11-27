@@ -19,7 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 )
 
 func setupBillingTestEnv(t *testing.T) (*Service, *MockPaymentProvider, *domain.User, *domain.Server, *domain.Plan, string) {

@@ -21,25 +21,26 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 // mockContainerManager simulates container operations in testing environments.
 type mockContainerManager struct {
 	mu           sync.Mutex
-	containers   map[string]ContainerStatus
+	containers   map[string]nodemanagerclient.ContainerStatus
 	execCommands []string
 }
 
 func newMockContainerManager() *mockContainerManager {
 	return &mockContainerManager{
-		containers: make(map[string]ContainerStatus),
+		containers: make(map[string]nodemanagerclient.ContainerStatus),
 	}
 }
 
-func (m *mockContainerManager) CreateAndStart(ctx context.Context, req CreateContainerRequest) (*CreateContainerResponse, error) {
+func (m *mockContainerManager) CreateAndStart(ctx context.Context, req nodemanagerclient.CreateContainerRequest) (*nodemanagerclient.CreateContainerResponse, error) {
 	id := fmt.Sprintf("mock-ctr-%d", req.ServerID)
-	m.containers[id] = ContainerStatusRunning
-	return &CreateContainerResponse{
+	m.containers[id] = nodemanagerclient.ContainerStatusRunning
+	return &nodemanagerclient.CreateContainerResponse{
 		ContainerID: id,
 		Port:        req.Port,
 		MountPath:   req.MountPath,
@@ -47,7 +48,7 @@ func (m *mockContainerManager) CreateAndStart(ctx context.Context, req CreateCon
 }
 
 func (m *mockContainerManager) Stop(ctx context.Context, containerID string) error {
-	m.containers[containerID] = ContainerStatusStopped
+	m.containers[containerID] = nodemanagerclient.ContainerStatusStopped
 	return nil
 }
 
@@ -56,32 +57,32 @@ func (m *mockContainerManager) Delete(ctx context.Context, containerID string) e
 	return nil
 }
 
-func (m *mockContainerManager) GetStatus(ctx context.Context, containerID string) (*ContainerStatusResponse, error) {
+func (m *mockContainerManager) GetStatus(ctx context.Context, containerID string) (*nodemanagerclient.ContainerStatusResponse, error) {
 	status, exists := m.containers[containerID]
 	if !exists {
-		return &ContainerStatusResponse{
+		return &nodemanagerclient.ContainerStatusResponse{
 			ContainerID: containerID,
-			Status:      ContainerStatusUnknown,
+			Status:      nodemanagerclient.ContainerStatusUnknown,
 		}, nil
 	}
-	return &ContainerStatusResponse{
+	return &nodemanagerclient.ContainerStatusResponse{
 		ContainerID: containerID,
 		Status:      status,
 	}, nil
 }
 
-func (m *mockContainerManager) GetLogs(ctx context.Context, containerID string, tail int) (*ContainerLogsResponse, error) {
-	return &ContainerLogsResponse{
+func (m *mockContainerManager) GetLogs(ctx context.Context, containerID string, tail int) (*nodemanagerclient.ContainerLogsResponse, error) {
+	return &nodemanagerclient.ContainerLogsResponse{
 		ContainerID: containerID,
 		Logs:        "[Server thread/INFO]: Done (1.234s)! For help, type \"help\"\n",
 	}, nil
 }
 
-func (m *mockContainerManager) ExecCommand(ctx context.Context, containerID string, user string, command string) (*ExecCommandResponse, error) {
+func (m *mockContainerManager) ExecCommand(ctx context.Context, containerID string, user string, command string) (*nodemanagerclient.ExecCommandResponse, error) {
 	m.mu.Lock()
 	m.execCommands = append(m.execCommands, command)
 	m.mu.Unlock()
-	return &ExecCommandResponse{
+	return &nodemanagerclient.ExecCommandResponse{
 		ContainerID: containerID,
 		Command:     command,
 		Output:      "Executed: " + command,
@@ -91,7 +92,7 @@ func (m *mockContainerManager) ExecCommand(ctx context.Context, containerID stri
 func (m *mockContainerManager) CountActive(ctx context.Context) (int, error) {
 	active := 0
 	for _, s := range m.containers {
-		if s == ContainerStatusRunning {
+		if s == nodemanagerclient.ContainerStatusRunning {
 			active++
 		}
 	}
@@ -272,7 +273,7 @@ func TestContainerEndpoints(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// 1. Create container
-	createReq := CreateContainerRequest{
+	createReq := nodemanagerclient.CreateContainerRequest{
 		ServerID:    201,
 		Port:        25565,
 		CPULimit:    2,
@@ -291,7 +292,7 @@ func TestContainerEndpoints(t *testing.T) {
 		t.Fatalf("create container failed: %d: %s", wCreate.Code, wCreate.Body.String())
 	}
 
-	var resp CreateContainerResponse
+	var resp nodemanagerclient.CreateContainerResponse
 	_ = json.Unmarshal(wCreate.Body.Bytes(), &resp)
 	if resp.ContainerID != "mock-ctr-201" {
 		t.Errorf("unexpected container id: %s", resp.ContainerID)
@@ -306,9 +307,9 @@ func TestContainerEndpoints(t *testing.T) {
 		t.Fatalf("get container status failed: %d", wStatus.Code)
 	}
 
-	var statusResp ContainerStatusResponse
+	var statusResp nodemanagerclient.ContainerStatusResponse
 	_ = json.Unmarshal(wStatus.Body.Bytes(), &statusResp)
-	if statusResp.Status != ContainerStatusRunning {
+	if statusResp.Status != nodemanagerclient.ContainerStatusRunning {
 		t.Errorf("expected running status, got: %s", statusResp.Status)
 	}
 
@@ -596,7 +597,7 @@ func TestPresignedVolumeBackupUploadAndRestore(t *testing.T) {
 
 	workerSrv := httptest.NewServer(router)
 	defer workerSrv.Close()
-	wClient := NewClient(workerSrv.URL, "worker-secret")
+	wClient := nodemanagerclient.NewClient(workerSrv.URL, "worker-secret")
 
 	// Prepare volume directory with Minecraft files
 	mountDir := filepath.Join(tmpDir, "mounts", "42")
@@ -725,7 +726,7 @@ func TestPresignedImageBackupMultiPartAndRestore(t *testing.T) {
 
 	workerSrv := httptest.NewServer(router)
 	defer workerSrv.Close()
-	wClient := NewClient(workerSrv.URL, "worker-secret")
+	wClient := nodemanagerclient.NewClient(workerSrv.URL, "worker-secret")
 
 	// Create an incompressible 200 KiB .img file so 64 KiB part cap guarantees multiple parts.
 	imagesDir := filepath.Join(tmpDir, "images")
@@ -777,7 +778,7 @@ func TestPresignedImageBackupMultiPartAndRestore(t *testing.T) {
 	}
 
 	const partCap int64 = 64 * 1024
-	upResp, err := wClient.UploadImageBackup(ctx, "77", UploadImageBackupRequest{
+	upResp, err := wClient.UploadImageBackup(ctx, "77", nodemanagerclient.UploadImageBackupRequest{
 		PresignedURLs: putURLs,
 		MaxPartBytes:  partCap,
 		ContainerID:   "ctr-77",
@@ -858,7 +859,7 @@ func TestPresignedImageBackupMultiPartAndRestore(t *testing.T) {
 		s3Srv.URL + "/image-backups/server-78/snap1/part-001.tar.gz",
 		s3Srv.URL + "/image-backups/server-78/snap1/part-002.tar.gz",
 	}
-	singleResp, err := wClient.UploadImageBackup(ctx, "78", UploadImageBackupRequest{
+	singleResp, err := wClient.UploadImageBackup(ctx, "78", nodemanagerclient.UploadImageBackupRequest{
 		PresignedURLs: singlePut,
 		MaxPartBytes:  partCap,
 	})

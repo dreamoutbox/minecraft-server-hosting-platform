@@ -44,14 +44,14 @@ internal/
   - [x] Update `cmd/worker` references in `docs/production-deployment.md`, `docs/worker-deployment.md`, `scripts/backup-ext4-img-to-s3.sh`, and `scripts/restore-ext4-img-from-s3.sh`.
 - Done when: `go build ./cmd/nodemanager ./cmd/apiserver ./cmd/jobworker ./cmd/dev_db_seed` and `go test -race ./cmd/nodemanager/...` pass, and `grep -rn "cmd/worker" cmd/ Dockerfile* dev-docker-build-image.sh .github/` returns no matches.
 
-### Phase 2: Extract shared foundation packages to `shared/` [STATUS: TODO]
+### Phase 2: Extract shared foundation packages to `shared/` [STATUS: DONE]
 - Goal: Move low-level packages shared across `apiserver`, `jobworker`, `nodemanager`, and `dev_db_seed` out of `internal/` into `shared/`.
 - Tasks:
-  - [ ] Move `internal/config` to `shared/config` and update all imports.
-  - [ ] Move `internal/domain` to `shared/domain` and update all imports.
-  - [ ] Move `internal/storage` to `shared/storage` and update all imports.
-  - [ ] Extract `internal/worker/client.go` and `internal/worker/types.go` into `shared/nodemanagerclient` (package `nodemanagerclient`) and update callers in `internal/worker`, `internal/hosting`, `internal/backup`, `internal/jobs`, `internal/dashboard`, `cmd/apiserver`, `cmd/jobworker`, and `cmd/nodemanager`.
-  - [ ] Remove the emptied `internal/config`, `internal/domain`, and `internal/storage` directories.
+  - [x] Move `internal/config` to `shared/config` and update all imports.
+  - [x] Move `internal/domain` to `shared/domain` and update all imports.
+  - [x] Move `internal/storage` to `shared/storage` and update all imports.
+  - [x] Extract `internal/worker/client.go` and `internal/worker/types.go` into `shared/nodemanagerclient` (package `nodemanagerclient`) and update callers in `internal/worker`, `internal/hosting`, `internal/backup`, `internal/jobs`, `internal/dashboard`, `cmd/apiserver`, `cmd/jobworker`, and `cmd/nodemanager`.
+  - [x] Remove the emptied `internal/config`, `internal/domain`, and `internal/storage` directories.
 - Done when: `go build ./...` and `go test -race ./...` pass, and `shared/nodemanagerclient` has zero Docker SDK or `golang.org/x/sys/unix` imports.
 
 ### Phase 3: Extract shared domain services (`backup`, `hosting`) to `shared/` [STATUS: TODO]

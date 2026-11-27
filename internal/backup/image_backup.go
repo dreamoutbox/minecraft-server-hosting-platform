@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
+	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 const minImageBackupPartSlots = 4

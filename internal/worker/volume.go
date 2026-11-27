@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
 
 const (
@@ -34,7 +35,7 @@ type VolumeManager interface {
 	ImportVolume(ctx context.Context, volumeID string, r io.Reader) error
 	UploadVolumeBackup(ctx context.Context, volumeID string, presignedURL string) (int64, error)
 	RestoreVolumeBackup(ctx context.Context, volumeID string, presignedURL string) error
-	UploadImageBackup(ctx context.Context, volumeID string, presignedURLs []string, maxPartBytes int64) (*UploadImageBackupResponse, error)
+	UploadImageBackup(ctx context.Context, volumeID string, presignedURLs []string, maxPartBytes int64) (*nodemanagerclient.UploadImageBackupResponse, error)
 	RestoreImageBackup(ctx context.Context, volumeID string, presignedURLs []string) (int64, error)
 	GetVolumePath(volumeID string) (mountPath string, exists bool)
 }

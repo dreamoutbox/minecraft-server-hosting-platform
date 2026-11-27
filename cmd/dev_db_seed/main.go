@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/config"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/config"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 )
 
 func main() {

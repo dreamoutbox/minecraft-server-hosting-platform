@@ -14,7 +14,7 @@ import (
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/domain"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 )
 
 func doDashboardReq(r *gin.Engine, method, target string, cookie *http.Cookie, form url.Values) *httptest.ResponseRecorder {
