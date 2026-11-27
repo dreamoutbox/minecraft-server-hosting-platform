@@ -13,7 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/worker"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/nodemanager"
 )
 
 const (
@@ -31,7 +31,7 @@ const (
 //
 //	r := SetupWorkerRouter("secret-worker-key", handler)
 //	r.Run(":9090")
-func SetupWorkerRouter(apiKey string, handler *worker.Handler) *gin.Engine {
+func SetupWorkerRouter(apiKey string, handler *nodemanager.Handler) *gin.Engine {
 	r := gin.Default()
 	handler.RegisterRoutes(r, apiKey)
 	return r
@@ -47,7 +47,7 @@ func SetupWorkerRouter(apiKey string, handler *worker.Handler) *gin.Engine {
 // Example usage:
 //
 //	shutdownWorker(srv, cm, vm)
-func shutdownWorker(srv *http.Server, cm worker.ContainerManager, vm worker.VolumeManager) {
+func shutdownWorker(srv *http.Server, cm nodemanager.ContainerManager, vm nodemanager.VolumeManager) {
 	if srv != nil {
 		httpCtx, cancelHTTP := context.WithTimeout(context.Background(), httpShutdownTimeout)
 		if err := srv.Shutdown(httpCtx); err != nil {
@@ -94,13 +94,13 @@ func main() {
 
 	useLoopMount := os.Getenv("WORKER_LOOP_DEVICE_ENABLED") == "true"
 
-	cm, err := worker.NewDockerContainerManager()
+	cm, err := nodemanager.NewDockerContainerManager()
 	if err != nil {
 		log.Fatalf("failed initializing docker container manager: %v", err)
 	}
 
-	vm := worker.NewLocalVolumeManager(baseDir, useLoopMount)
-	handler := worker.NewHandler(cm, vm, maxServers, baseDir)
+	vm := nodemanager.NewLocalVolumeManager(baseDir, useLoopMount)
+	handler := nodemanager.NewHandler(cm, vm, maxServers, baseDir)
 
 	r := SetupWorkerRouter(apiKey, handler)
 	srv := &http.Server{
