@@ -15,8 +15,8 @@ import (
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 
-	"github.com/dreamoutbox/authkit"
-	"github.com/dreamoutbox/authkit/session"
+	"github.com/dreamoutbox/go-authkit"
+	"github.com/dreamoutbox/go-authkit/session"
 )
 
 var (

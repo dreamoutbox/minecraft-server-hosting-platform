@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dreamoutbox/authkit"
-	"github.com/dreamoutbox/authkit/authkitjwt"
+	"github.com/dreamoutbox/go-authkit"
+	"github.com/dreamoutbox/go-authkit/authkitjwt"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 

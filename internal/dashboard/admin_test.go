@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/go-authkit"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 

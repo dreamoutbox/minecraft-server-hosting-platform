@@ -1,7 +1,7 @@
 package billings
 
 import (
-	authmw "github.com/dreamoutbox/authkit/middleware"
+	authmw "github.com/dreamoutbox/go-authkit/middleware"
 	"github.com/gin-gonic/gin"
 )
 

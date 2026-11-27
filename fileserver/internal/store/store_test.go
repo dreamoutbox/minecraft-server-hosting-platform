@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/go-authkit"
 )
 
 func newTestStore(t *testing.T, mountsDir string) *Store {

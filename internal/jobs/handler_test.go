@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dreamoutbox/authkit/authkitjwt"
+	"github.com/dreamoutbox/go-authkit/authkitjwt"
 	"github.com/gin-gonic/gin"
 
 	jobworkerjobs "github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	authmw "github.com/dreamoutbox/authkit/middleware"
+	authmw "github.com/dreamoutbox/go-authkit/middleware"
 	jobworkerjobs "github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
 	"github.com/gin-gonic/gin"
 )

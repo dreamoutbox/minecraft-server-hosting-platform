@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	authmw "github.com/dreamoutbox/authkit/middleware"
+	authmw "github.com/dreamoutbox/go-authkit/middleware"
 	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"

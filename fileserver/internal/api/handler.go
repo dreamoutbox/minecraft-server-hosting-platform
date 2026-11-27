@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/authkit/authkitjwt"
+	"github.com/dreamoutbox/go-authkit/authkitjwt"
 	"github.com/dreamoutbox/fileserver/client"
 	"github.com/dreamoutbox/fileserver/internal/store"
 )

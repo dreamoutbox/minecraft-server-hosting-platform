@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	authhandler "github.com/dreamoutbox/authkit/handler"
-	"github.com/dreamoutbox/authkit/session"
+	authhandler "github.com/dreamoutbox/go-authkit/handler"
+	"github.com/dreamoutbox/go-authkit/session"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

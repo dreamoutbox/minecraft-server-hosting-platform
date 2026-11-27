@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/go-authkit"
 )
 
 // HostStatus represents host availability states in the cluster.

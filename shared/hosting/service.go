@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/go-authkit"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/google/uuid"
 	"gorm.io/gorm"

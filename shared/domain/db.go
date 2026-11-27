@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/dreamoutbox/authkit"
-	"github.com/dreamoutbox/authkit/session"
+	"github.com/dreamoutbox/go-authkit"
+	"github.com/dreamoutbox/go-authkit/session"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

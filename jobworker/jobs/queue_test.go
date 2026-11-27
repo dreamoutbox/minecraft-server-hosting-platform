@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/go-authkit"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"

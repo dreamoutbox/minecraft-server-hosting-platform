@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/go-authkit"
 	"github.com/gin-gonic/gin"
 )
 

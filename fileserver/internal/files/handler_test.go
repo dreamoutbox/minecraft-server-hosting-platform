@@ -20,9 +20,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/dreamoutbox/authkit"
-	"github.com/dreamoutbox/authkit/authkitjwt"
-	"github.com/dreamoutbox/authkit/session"
+	"github.com/dreamoutbox/go-authkit"
+	"github.com/dreamoutbox/go-authkit/authkitjwt"
+	"github.com/dreamoutbox/go-authkit/session"
 	"github.com/dreamoutbox/fileserver/internal/store"
 )
 

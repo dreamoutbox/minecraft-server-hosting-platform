@@ -6,8 +6,8 @@ import (
 	"html/template"
 	"net/http"
 
-	"github.com/dreamoutbox/authkit"
-	authmw "github.com/dreamoutbox/authkit/middleware"
+	"github.com/dreamoutbox/go-authkit"
+	authmw "github.com/dreamoutbox/go-authkit/middleware"
 	"github.com/gin-gonic/gin"
 )
 

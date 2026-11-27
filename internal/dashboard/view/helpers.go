@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	authmw "github.com/dreamoutbox/authkit/middleware"
+	authmw "github.com/dreamoutbox/go-authkit/middleware"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 

@@ -3,7 +3,7 @@ package store
 import (
 	"time"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/go-authkit"
 )
 
 // User extends authkit.User with optional Unix UID/GID ownership applied to files

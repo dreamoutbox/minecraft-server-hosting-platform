@@ -3,7 +3,7 @@ package dashboard
 import (
 	"net/http"
 
-	"github.com/dreamoutbox/authkit/session"
+	"github.com/dreamoutbox/go-authkit/session"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 

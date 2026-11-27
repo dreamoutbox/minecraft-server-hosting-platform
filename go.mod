@@ -9,8 +9,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.6
 	github.com/docker/docker v26.1.5+incompatible
 	github.com/docker/go-connections v0.5.0
-	github.com/dreamoutbox/authkit v0.0.0
 	github.com/dreamoutbox/fileserver v0.0.0
+	github.com/dreamoutbox/go-authkit v0.0.0-20261127132312-4bb8c5a8aae2
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/robfig/cron/v3 v3.0.1
@@ -97,7 +97,4 @@ require (
 	gotest.tools/v3 v3.5.2 // indirect
 )
 
-replace (
-	github.com/dreamoutbox/authkit => ./shared/authkit
-	github.com/dreamoutbox/fileserver => ./fileserver
-)
+replace github.com/dreamoutbox/fileserver => ./fileserver

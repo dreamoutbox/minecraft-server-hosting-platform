@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/go-authkit"
 )
 
 // getTestDSN returns the PostgreSQL connection string for integration testing.
