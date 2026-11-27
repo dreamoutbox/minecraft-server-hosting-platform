@@ -3,20 +3,15 @@ package jobs
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/dreamoutbox/authkit"
-	"github.com/dreamoutbox/authkit/authkitjwt"
-	"github.com/gin-gonic/gin"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
@@ -267,23 +262,13 @@ func TestAsyncQueueRetryAndOperationLogs(t *testing.T) {
 		t.Fatalf("expected server status error after exhausted retries, got %s", updatedSrv.Status)
 	}
 
-	// 2. Manual Retry via HTTP API succeeds once failCreateVol has drained (failCreateVol went 4 -> 1 remaining, so let's reset to 0)
+	// 2. Manual Retry succeeds once failCreateVol has drained (failCreateVol went 4 -> 1 remaining, so let's reset to 0)
 	mockWorker.mu.Lock()
 	mockWorker.failCreateVol = 0
 	mockWorker.mu.Unlock()
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	jwtSecret := "jobs-test-secret"
-	NewHandler(jobSvc).RegisterRoutes(r, jwtSecret)
-	tokens, _ := authkitjwt.GenerateTokenPair(user.ID, user.Email, user.Role, jwtSecret)
-
-	wRetry := httptest.NewRecorder()
-	reqRetry, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/jobs/%d/retry", createJob.ID), nil)
-	reqRetry.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
-	r.ServeHTTP(wRetry, reqRetry)
-	if wRetry.Code != http.StatusAccepted {
-		t.Fatalf("expected 202 from manual retry API, got %d (%s)", wRetry.Code, wRetry.Body.String())
+	if _, err := jobSvc.RetryJob(ctx, user.ID, false, createJob.ID); err != nil {
+		t.Fatalf("RetryJob failed: %v", err)
 	}
 
 	processed, procErr := jobSvc.ProcessNext(ctx)
@@ -334,18 +319,13 @@ func TestAsyncQueueRetryAndOperationLogs(t *testing.T) {
 		t.Errorf("expected completed restore job, got %s", updatedRestoreJob.Status)
 	}
 
-	// Verify GET /api/v1/jobs/:id returns completed job JSON
-	wGet := httptest.NewRecorder()
-	reqGet, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/jobs/%d", restoreJob.ID), nil)
-	reqGet.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
-	r.ServeHTTP(wGet, reqGet)
-	if wGet.Code != http.StatusOK {
-		t.Fatalf("GET /api/v1/jobs/:id failed: %d", wGet.Code)
+	// Verify GetJob returns completed job
+	fetchedJob, err := jobSvc.GetJob(ctx, user.ID, false, restoreJob.ID)
+	if err != nil {
+		t.Fatalf("GetJob failed: %v", err)
 	}
-	var fetchedJob domain.ServerJob
-	_ = json.Unmarshal(wGet.Body.Bytes(), &fetchedJob)
 	if fetchedJob.Status != domain.JobStatusCompleted {
-		t.Errorf("expected completed status from API, got %s", fetchedJob.Status)
+		t.Errorf("expected completed status from GetJob, got %s", fetchedJob.Status)
 	}
 
 	// 6. EnqueueDeleteServer -> deletes server and logs 'delete' success

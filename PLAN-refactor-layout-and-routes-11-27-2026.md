@@ -70,12 +70,12 @@ internal/
   - [x] Remove the emptied `internal/worker/` directory.
 - Done when: `go build ./...` and `go test -race ./nodemanager/... ./cmd/nodemanager/...` pass, `internal/worker` no longer exists, and `go list -f '{{.Deps}}' ./cmd/nodemanager` contains no `internal/` or AWS/S3 SDK packages.
 
-### Phase 5: Extract `cmd/jobworker` queue to `./jobworker/jobs` and split one job per file [STATUS: TODO]
+### Phase 5: Extract `cmd/jobworker` queue to `./jobworker/jobs` and split one job per file [STATUS: DONE]
 - Goal: Move the async job queue out of `internal/jobs` into `jobworker/jobs/` and break `queue.go` into one file per job/cron.
 - Tasks:
-  - [ ] Move `internal/jobs/queue.go` and `internal/jobs/queue_test.go` to `jobworker/jobs/`.
-  - [ ] Keep `internal/jobs/handler.go` in `internal/jobs` (updating it to wrap `*jobs.Service` from `jobworker/jobs`) so `jobworker/jobs` has no Gin HTTP dependency.
-  - [ ] Split `jobworker/jobs/queue.go` into:
+  - [x] Move `internal/jobs/queue.go` and `internal/jobs/queue_test.go` to `jobworker/jobs/`.
+  - [x] Keep `internal/jobs/handler.go` in `internal/jobs` (updating it to wrap `*jobs.Service` from `jobworker/jobs`) so `jobworker/jobs` has no Gin HTTP dependency.
+  - [x] Split `jobworker/jobs/queue.go` into:
     - `service.go` (`Service`, `NewService`, `SetTimings`, `Start`, `drainReadyJobs`, `ProcessNext`, `executeJob`, `handleJobFailure`, `createJob`, `notifyWorker`, `GetJob`, `ListServerJobs`, `RetryJob`)
     - `create_server.go` (`EnqueueCreateServer`, `EnqueueCreateServerWithExpiry`, execution helper)
     - `delete_server.go` (`EnqueueDeleteServer`, execution helper)
@@ -88,7 +88,7 @@ internal/
     - `lifecycle_cron.go` (`StartLifecycleCron`)
     - `enqueue_all_image_backups.go` (`EnqueueAllImageBackups`, `EnqueueScheduledImageBackups`)
     - `image_backup_cron.go` (`StartImageBackupCron`)
-  - [ ] Update imports in `cmd/jobworker/main.go`, `cmd/apiserver/main.go`, `internal/jobs/handler.go`, and `internal/dashboard/`.
+  - [x] Update imports in `cmd/jobworker/main.go`, `cmd/apiserver/main.go`, `internal/jobs/handler.go`, and `internal/dashboard/`.
 - Done when: `go build ./...` and `go test -race ./jobworker/... ./internal/jobs/... ./cmd/...` pass, and `go list -f '{{.Deps}}' ./cmd/jobworker` contains no `internal/` packages.
 
 ### Phase 6: Extract shared dashboard renderer and helpers in `internal/dashboard` [STATUS: TODO]

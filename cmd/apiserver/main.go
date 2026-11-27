@@ -20,6 +20,7 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/hosting"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/jobs"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/middleware"
+	jobqueue "github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
 	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
@@ -39,7 +40,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	return r
 }
 
-func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
+func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobqueue.Service) {
 	r := gin.Default()
 	r.Use(middleware.RequestIDMiddleware())
 
@@ -105,7 +106,7 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 	backupHandler := backup.NewHandler(backupService)
 	backupHandler.RegisterRoutes(r, cfg.JWTSecret)
 
-	jobService := jobs.NewService(db, hostingService, backupService)
+	jobService := jobqueue.NewService(db, hostingService, backupService)
 	hostingHandler.SetJobQueue(jobService)
 	backupHandler.SetJobQueue(jobService)
 	jobHandler := jobs.NewHandler(jobService)

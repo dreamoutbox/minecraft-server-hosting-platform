@@ -5,12 +5,13 @@ import (
 	"strconv"
 
 	authmw "github.com/dreamoutbox/authkit/middleware"
+	jobworkerjobs "github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
 	"github.com/gin-gonic/gin"
 )
 
 // Handler exposes HTTP API endpoints to inspect queued jobs and manually retry failed jobs.
 type Handler struct {
-	service *Service
+	service *jobworkerjobs.Service
 }
 
 // NewHandler constructs a job queue HTTP controller.
@@ -21,7 +22,7 @@ type Handler struct {
 // Example usage:
 //
 //	jobHandler := jobs.NewHandler(jobSvc)
-func NewHandler(service *Service) *Handler {
+func NewHandler(service *jobworkerjobs.Service) *Handler {
 	return &Handler{service: service}
 }
 

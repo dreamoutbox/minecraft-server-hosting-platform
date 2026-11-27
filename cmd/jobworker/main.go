@@ -14,7 +14,7 @@ import (
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/config"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/hosting"
-	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/jobs"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/storage"
 	worker "github.com/dreamoutbox/minecraft-server-hosting-platform/shared/nodemanagerclient"
 )
