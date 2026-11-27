@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/session"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -126,6 +127,8 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 	billingHandler := billing.NewHandler(billingService)
 	billingHandler.RegisterRoutes(r, cfg.JWTSecret)
 
+	sessionStore := session.NewStore(db, cfg.SessionTTL)
+	cookieCfg := session.DefaultCookieConfig(session.DefaultCookieName, cfg.SessionTTL, cfg.CookieSecure)
 	dashboardService := dashboard.NewService(
 		db,
 		hostingService,
@@ -133,7 +136,8 @@ func buildRouter(db *gorm.DB, cfg *config.Config) (*gin.Engine, *jobs.Service) {
 		billingService,
 		migrationService,
 		jobService,
-		cfg.JWTSecret,
+		sessionStore,
+		cookieCfg,
 	)
 	dashboardService.RegisterRoutes(r)
 

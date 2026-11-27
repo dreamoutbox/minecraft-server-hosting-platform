@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -15,6 +16,7 @@ const (
 	defaultBackupMaxCount             = 8
 	defaultBackupPresignTTL           = time.Hour
 	defaultJWTAccessTTL               = 15 * time.Minute
+	defaultSessionTTL                 = 24 * time.Hour
 )
 
 // Config encapsulates runtime configuration settings for the platform orchestrator.
@@ -25,6 +27,8 @@ type Config struct {
 	PortRangeMax                 int
 	JWTSecret                    string
 	JWTAccessTTL                 time.Duration
+	SessionTTL                   time.Duration
+	CookieSecure                 bool
 	AppBaseURL                   string
 	RetentionDays                int
 	CronMCServerDataBackup       string
@@ -73,6 +77,17 @@ func LoadFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("JWT_ACCESS_TTL must be positive: got %s", jwtAccessTTL)
 	}
 	appBaseURL := getEnv("APP_BASE_URL", "http://localhost:8080")
+	sessionTTL, err := parseEnvDuration("SESSION_TTL", defaultSessionTTL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid SESSION_TTL: %w", err)
+	}
+	if sessionTTL <= 0 {
+		return nil, fmt.Errorf("SESSION_TTL must be positive: got %s", sessionTTL)
+	}
+	cookieSecure, err := parseEnvBool("COOKIE_SECURE", strings.HasPrefix(strings.ToLower(appBaseURL), "https://"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid COOKIE_SECURE: %w", err)
+	}
 	retentionDays, err := parseEnvInt("SERVER_EXPIRED_DATA_RETENTION_DAYS", defaultServerExpiredRetentionDays)
 	if err != nil || retentionDays <= 0 {
 		retentionDays = defaultServerExpiredRetentionDays
@@ -159,6 +174,8 @@ func LoadFromEnv() (*Config, error) {
 		PortRangeMax:                 maxPort,
 		JWTSecret:                    jwtSecret,
 		JWTAccessTTL:                 jwtAccessTTL,
+		SessionTTL:                   sessionTTL,
+		CookieSecure:                 cookieSecure,
 		AppBaseURL:                   appBaseURL,
 		RetentionDays:                retentionDays,
 		CronMCServerDataBackup:       cronMCServerDataBackup,
@@ -232,6 +249,18 @@ func parseEnvDuration(key string, fallback time.Duration) (time.Duration, error)
 	parsed, err := time.ParseDuration(val)
 	if err != nil {
 		return 0, err
+	}
+	return parsed, nil
+}
+
+func parseEnvBool(key string, fallback bool) (bool, error) {
+	val := os.Getenv(key)
+	if val == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return false, err
 	}
 	return parsed, nil
 }

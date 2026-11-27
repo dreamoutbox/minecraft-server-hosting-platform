@@ -8,6 +8,7 @@ import (
 	"log"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/session"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -47,6 +48,9 @@ func InitDB(dsn string) (*gorm.DB, error) {
 //	    log.Fatalf("database migration failed: %v", err)
 //	}
 func AutoMigrate(db *gorm.DB) error {
+	if err := session.AutoMigrate(db); err != nil {
+		return err
+	}
 	return db.AutoMigrate(
 		&User{},
 		&Plan{},

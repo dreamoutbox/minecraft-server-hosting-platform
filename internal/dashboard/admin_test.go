@@ -210,13 +210,9 @@ func TestAdminMenuSearchPaginationAndPlanCRUD(t *testing.T) {
 		dashSvc.db.Delete(&domain.User{}, []uint{userRecord.ID, adminRecord.ID})
 	})
 
-	userTokens, _ := authkit.GenerateTokenPair(userRecord.ID, userEmail, domain.UserRoleUser, dashSvc.jwtSecret)
-	staffTokens, _ := authkit.GenerateTokenPair(999997, "staff-admin-test@example.com", domain.UserRoleStaff, dashSvc.jwtSecret)
-	adminTokens, _ := authkit.GenerateTokenPair(adminRecord.ID, adminEmail, domain.UserRoleAdmin, dashSvc.jwtSecret)
-
-	userCookie := &http.Cookie{Name: "token", Value: userTokens.AccessToken}
-	staffCookie := &http.Cookie{Name: "token", Value: staffTokens.AccessToken}
-	adminCookie := &http.Cookie{Name: "token", Value: adminTokens.AccessToken}
+	userCookie := mustCreateSessionCookie(t, dashSvc, userRecord.ID)
+	_, staffCookie := mustCreateUserWithSession(t, dashSvc, fmt.Sprintf("staff-admin-test-%d@example.com", suffix), domain.UserRoleStaff)
+	adminCookie := mustCreateSessionCookie(t, dashSvc, adminRecord.ID)
 
 	// 1. Navbar visibility: regular/staff do not see Admin dropdown; admin does
 	wDashStaff := doDashboardReq(r, http.MethodGet, "/dashboard", staffCookie, nil)
@@ -485,13 +481,9 @@ func TestStaffAndAdminCrossUserServerActions(t *testing.T) {
 		dashSvc.db.Delete(&domain.User{}, []uint{owner.ID, otherUser.ID, staffUser.ID, adminUser.ID})
 	})
 
-	otherTokens, _ := authkit.GenerateTokenPair(otherUser.ID, otherUser.Email, otherUser.Role, dashSvc.jwtSecret)
-	staffTokens, _ := authkit.GenerateTokenPair(staffUser.ID, staffUser.Email, staffUser.Role, dashSvc.jwtSecret)
-	adminTokens, _ := authkit.GenerateTokenPair(adminUser.ID, adminUser.Email, adminUser.Role, dashSvc.jwtSecret)
-
-	otherCookie := &http.Cookie{Name: "token", Value: otherTokens.AccessToken}
-	staffCookie := &http.Cookie{Name: "token", Value: staffTokens.AccessToken}
-	adminCookie := &http.Cookie{Name: "token", Value: adminTokens.AccessToken}
+	otherCookie := mustCreateSessionCookie(t, dashSvc, otherUser.ID)
+	staffCookie := mustCreateSessionCookie(t, dashSvc, staffUser.ID)
+	adminCookie := mustCreateSessionCookie(t, dashSvc, adminUser.ID)
 
 	// Regular non-owner user must be denied across all actions.
 	for _, tc := range []struct {
@@ -644,30 +636,30 @@ func TestStaffAndAdminOpenFileManagerOnOtherUserServer(t *testing.T) {
 		dashSvc.db.Delete(&domain.User{}, []uint{owner.ID, other.ID, staff.ID, admin.ID})
 	})
 
-	otherTokens, _ := authkit.GenerateTokenPair(other.ID, other.Email, other.Role, dashSvc.jwtSecret)
-	staffTokens, _ := authkit.GenerateTokenPair(staff.ID, staff.Email, staff.Role, dashSvc.jwtSecret)
-	adminTokens, _ := authkit.GenerateTokenPair(admin.ID, admin.Email, admin.Role, dashSvc.jwtSecret)
+	otherCookie := mustCreateSessionCookie(t, dashSvc, other.ID)
+	staffCookie := mustCreateSessionCookie(t, dashSvc, staff.ID)
+	adminCookie := mustCreateSessionCookie(t, dashSvc, admin.ID)
 
 	// Non-owner regular user must be rejected.
-	wDenied := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/files/open", srv.ID), &http.Cookie{Name: "token", Value: otherTokens.AccessToken}, nil)
+	wDenied := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/files/open", srv.ID), otherCookie, nil)
 	if wDenied.Code != http.StatusFound || !strings.Contains(wDenied.Header().Get("Location"), "error=unauthorized+access+to+server") {
 		t.Fatalf("expected unauthorized redirect for non-owner, got code=%d loc=%s", wDenied.Code, wDenied.Header().Get("Location"))
 	}
 
 	// Both staff and admin receive fileserver access provisioned under their own account.
 	for _, actor := range []struct {
-		label string
-		user  domain.User
-		token string
+		label  string
+		user   domain.User
+		cookie *http.Cookie
 	}{
-		{"staff", staff, staffTokens.AccessToken},
-		{"admin", admin, adminTokens.AccessToken},
+		{"staff", staff, staffCookie},
+		{"admin", admin, adminCookie},
 	} {
 		registeredUsers = nil
 		grantedPerms = nil
 		tokenPaths = nil
 
-		w := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/files/open", srv.ID), &http.Cookie{Name: "token", Value: actor.token}, nil)
+		w := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/files/open", srv.ID), actor.cookie, nil)
 		loc := w.Header().Get("Location")
 		if w.Code != http.StatusFound || !strings.HasPrefix(loc, fakeFS.URL+"/login?") || !strings.Contains(loc, "token=staff-admin-tok") {
 			t.Fatalf("%s open file manager failed: code=%d loc=%s", actor.label, w.Code, loc)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/session"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
@@ -37,7 +38,8 @@ type Service struct {
 	billingSvc   *billing.Service
 	migrationSvc *hosting.MigrationService
 	jobSvc       *jobs.Service
-	jwtSecret    string
+	sessionStore *session.Store
+	cookieCfg    session.CookieConfig
 	tmpl         map[string]*template.Template
 }
 
@@ -50,11 +52,12 @@ type Service struct {
 //   - billingSvc: Checkout order and payment history service.
 //   - migrationSvc: Host migration coordinator.
 //   - jobSvc: Async job queue coordinator.
-//   - jwtSecret: Secret key to verify and issue session tokens.
+//   - sessionStore: Database-backed session store for browser authentication.
+//   - cookieCfg: Session cookie configuration (name, TTL, Secure, SameSite).
 //
 // Example usage:
 //
-//	dash := dashboard.NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, "jwt-secret")
+//	dash := dashboard.NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, sessionStore, cookieCfg)
 func NewService(
 	db *gorm.DB,
 	hostingSvc *hosting.Service,
@@ -62,7 +65,8 @@ func NewService(
 	billingSvc *billing.Service,
 	migrationSvc *hosting.MigrationService,
 	jobSvc *jobs.Service,
-	jwtSecret string,
+	sessionStore *session.Store,
+	cookieCfg session.CookieConfig,
 ) *Service {
 	s := &Service{
 		db:           db,
@@ -71,7 +75,8 @@ func NewService(
 		billingSvc:   billingSvc,
 		migrationSvc: migrationSvc,
 		jobSvc:       jobSvc,
-		jwtSecret:    jwtSecret,
+		sessionStore: sessionStore,
+		cookieCfg:    cookieCfg,
 		tmpl:         make(map[string]*template.Template),
 	}
 	s.loadTemplates()
@@ -183,13 +188,13 @@ func (s *Service) ProcessLogin(c *gin.Context) {
 		return
 	}
 
-	tokens, err := authkit.GenerateTokenPair(user.ID, user.Email, user.Role, s.jwtSecret)
+	rawToken, _, err := s.sessionStore.Create(c.Request.Context(), user.ID, 0)
 	if err != nil {
 		s.renderView(c, "login.html", map[string]interface{}{"FlashError": "Failed generating session"})
 		return
 	}
 
-	authkit.SetSessionCookie(c, "token", tokens.AccessToken, 3600*24, false)
+	session.SetCookie(c, s.cookieCfg, rawToken)
 	c.Redirect(http.StatusFound, "/dashboard")
 }
 
@@ -236,14 +241,21 @@ func (s *Service) ProcessRegister(c *gin.Context) {
 		return
 	}
 
-	tokens, _ := authkit.GenerateTokenPair(newUser.ID, newUser.Email, newUser.Role, s.jwtSecret)
-	authkit.SetSessionCookie(c, "token", tokens.AccessToken, 3600*24, false)
+	rawToken, _, err := s.sessionStore.Create(c.Request.Context(), newUser.ID, 0)
+	if err != nil {
+		s.renderView(c, "register.html", map[string]interface{}{"FlashError": "Account created, but failed starting session. Please sign in."})
+		return
+	}
+	session.SetCookie(c, s.cookieCfg, rawToken)
 	c.Redirect(http.StatusFound, "/dashboard?success=Welcome+to+your+dashboard!")
 }
 
 // Logout terminates user browser session.
 func (s *Service) Logout(c *gin.Context) {
-	authkit.ClearSessionCookie(c, "token")
+	if rawToken, err := session.ReadCookie(c, s.cookieCfg); err == nil && rawToken != "" {
+		_ = s.sessionStore.Delete(c.Request.Context(), rawToken)
+	}
+	session.ClearCookie(c, s.cookieCfg)
 	c.Redirect(http.StatusFound, "/login?success=Logged+out+successfully")
 }
 
@@ -1106,7 +1118,7 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 
 	// Protected dashboard pages
 	dash := r.Group("/dashboard")
-	dash.Use(authkit.CookieAuthMiddleware(s.jwtSecret, "token", "/login"))
+	dash.Use(session.Middleware(s.sessionStore, s.cookieCfg, "/login"))
 	{
 		dash.GET("", s.ListServers)
 		dash.GET("/servers/new", s.ShowCreateServer)

@@ -29,16 +29,16 @@
   - [x] Add unit tests in `shared/authkit/session/session_test.go` covering session creation, validation, expiration, server-side logout revocation, live role reflection, and cookie `HttpOnly`/`SameSite`/`Secure` attributes on both set and clear.
 - Done when: `go test ./...` in `shared/authkit` passes and external packages can import `"github.com/dreamoutbox/authkit/session"`.
 
-### Phase 4: Migrate `dashboard` to `authkit/session` and secure cookie config [STATUS: TODO]
+### Phase 4: Migrate `dashboard` to `authkit/session` and secure cookie config [STATUS: DONE]
 - Goal: Switch `internal/dashboard` from JWT-in-cookie to DB-backed sessions, remove hardcoded `secure = false`, and fix the ignored error in `ProcessRegister`.
 - Tasks:
-  - [ ] Update `internal/domain/db.go` `AutoMigrate` to run `session.AutoMigrate(db)` (or `authkit.AutoMigrate(db)`) so the `sessions` table is created in PostgreSQL.
-  - [ ] Add `CookieSecure bool` (from `COOKIE_SECURE`, defaulting to `true` when `APP_BASE_URL` uses `https://` and `false` for local `http://`) and `SessionTTL time.Duration` (from `SESSION_TTL`, defaulting to `24h`) to `internal/config/config.go`.
-  - [ ] Update `internal/dashboard/dashboard.go` and `cmd/apiserver/main.go` to inject `*session.Store` and `session.CookieConfig` into `dashboard.Service`.
-  - [ ] Update `ProcessLogin` and `ProcessRegister` in `internal/dashboard/dashboard.go` to create a DB session and call `session.SetCookie`, handling any session-creation error in `ProcessRegister` instead of ignoring it.
-  - [ ] Update `Logout` in `internal/dashboard/dashboard.go` to revoke the session in `session.Store` and call `session.ClearCookie` with the configured `CookieConfig`.
-  - [ ] Replace `authkit.CookieAuthMiddleware` with `session.Middleware` in `internal/dashboard/dashboard.go`.
-  - [ ] Update `internal/dashboard/dashboard_test.go` and `internal/dashboard/admin_test.go` to authenticate via `session.Store` cookies.
+  - [x] Update `internal/domain/db.go` `AutoMigrate` to run `session.AutoMigrate(db)` (or `authkit.AutoMigrate(db)`) so the `sessions` table is created in PostgreSQL.
+  - [x] Add `CookieSecure bool` (from `COOKIE_SECURE`, defaulting to `true` when `APP_BASE_URL` uses `https://` and `false` for local `http://`) and `SessionTTL time.Duration` (from `SESSION_TTL`, defaulting to `24h`) to `internal/config/config.go`.
+  - [x] Update `internal/dashboard/dashboard.go` and `cmd/apiserver/main.go` to inject `*session.Store` and `session.CookieConfig` into `dashboard.Service`.
+  - [x] Update `ProcessLogin` and `ProcessRegister` in `internal/dashboard/dashboard.go` to create a DB session and call `session.SetCookie`, handling any session-creation error in `ProcessRegister` instead of ignoring it.
+  - [x] Update `Logout` in `internal/dashboard/dashboard.go` to revoke the session in `session.Store` and call `session.ClearCookie` with the configured `CookieConfig`.
+  - [x] Replace `authkit.CookieAuthMiddleware` with `session.Middleware` in `internal/dashboard/dashboard.go`.
+  - [x] Update `internal/dashboard/dashboard_test.go` and `internal/dashboard/admin_test.go` to authenticate via `session.Store` cookies.
 - Done when: `go test ./...` passes in `.`; dashboard login persists a session row, logout deletes it, expired sessions redirect to `/login`, and cookie `Secure` flag reflects config.
 
 ### Phase 5: Migrate `fileserver` browser UI to `authkit/session` and remove legacy cookie-JWT helpers [STATUS: TODO]

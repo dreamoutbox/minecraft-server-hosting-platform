@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/dreamoutbox/authkit"
+	"github.com/dreamoutbox/authkit/session"
 	fsclient "github.com/dreamoutbox/fileserver/client"
 	"github.com/gin-gonic/gin"
 
@@ -159,7 +160,6 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 		return mockWorker
 	}
 
-	jwtSecret := "dashboard-test-jwt-secret"
 	scheduler := hosting.NewLeastLoadedScheduler(db)
 	portMin := 25700
 	portMax := 25750
@@ -213,7 +213,9 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 		"public_ip":            h2.PublicIP,
 	})
 
-	dashService := NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, jwtSecret)
+	sessionStore := session.NewStore(db, time.Hour)
+	cookieCfg := session.DefaultCookieConfig(session.DefaultCookieName, time.Hour, false)
+	dashService := NewService(db, hostingSvc, backupSvc, billingSvc, migrationSvc, jobSvc, sessionStore, cookieCfg)
 
 	r := gin.New()
 	dashService.RegisterRoutes(r)
@@ -221,13 +223,44 @@ func setupDashboardTestEnv(t *testing.T) (*gin.Engine, *Service, string) {
 	return r, dashService, fakeFS.URL
 }
 
-func extractTokenCookie(resp *http.Response) string {
+func extractSessionCookie(resp *http.Response) string {
 	for _, c := range resp.Cookies() {
-		if c.Name == "token" {
+		if c.Name == session.DefaultCookieName {
 			return c.Value
 		}
 	}
 	return ""
+}
+
+func mustCreateSessionCookie(t *testing.T, dashSvc *Service, userID uint) *http.Cookie {
+	t.Helper()
+	rawToken, _, err := dashSvc.sessionStore.Create(context.Background(), userID, time.Hour)
+	if err != nil {
+		t.Fatalf("failed creating test session for user %d: %v", userID, err)
+	}
+	t.Cleanup(func() {
+		_ = dashSvc.sessionStore.Delete(context.Background(), rawToken)
+	})
+	return &http.Cookie{Name: dashSvc.cookieCfg.Name, Value: rawToken}
+}
+
+func mustCreateUserWithSession(t *testing.T, dashSvc *Service, email string, role domain.UserRole) (*domain.User, *http.Cookie) {
+	t.Helper()
+	user := domain.User{
+		User: authkit.User{
+			Email:        email,
+			PasswordHash: "hash",
+			Role:         role,
+		},
+	}
+	if err := dashSvc.db.Create(&user).Error; err != nil {
+		t.Fatalf("failed creating test user %s: %v", email, err)
+	}
+	t.Cleanup(func() {
+		_ = dashSvc.sessionStore.DeleteByUserID(context.Background(), user.ID)
+		dashSvc.db.Delete(&domain.User{}, user.ID)
+	})
+	return &user, mustCreateSessionCookie(t, dashSvc, user.ID)
 }
 
 func TestDashboardEndToEndBrowserFlow(t *testing.T) {
@@ -259,12 +292,12 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	if wReg.Code != http.StatusFound {
 		t.Fatalf("register failed: %d", wReg.Code)
 	}
-	cookieToken := extractTokenCookie(wReg.Result())
+	cookieToken := extractSessionCookie(wReg.Result())
 	if cookieToken == "" {
 		t.Fatal("expected session token cookie on registration")
 	}
 
-	authCookie := &http.Cookie{Name: "token", Value: cookieToken}
+	authCookie := &http.Cookie{Name: session.DefaultCookieName, Value: cookieToken}
 
 	// 3. Billing page displays Order History and Payment History without Saved Payment Method
 	wBilling := httptest.NewRecorder()
@@ -330,8 +363,7 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	}
 
 	// 5. Staff/Admin can access /dashboard/servers/new and queue direct server creation
-	staffCreateTokens, _ := authkit.GenerateTokenPair(999999, "staff@example.com", domain.UserRoleStaff, dashSvc.jwtSecret)
-	staffCreateCookie := &http.Cookie{Name: "token", Value: staffCreateTokens.AccessToken}
+	_, staffCreateCookie := mustCreateUserWithSession(t, dashSvc, fmt.Sprintf("staff-create-%d@example.com", time.Now().UnixNano()), domain.UserRoleStaff)
 
 	wNewSrv := httptest.NewRecorder()
 	reqNewSrv, _ := http.NewRequest(http.MethodGet, "/dashboard/servers/new", nil)
@@ -530,8 +562,7 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 	}
 
 	// Issue staff session cookie
-	staffTokens, _ := authkit.GenerateTokenPair(999999, "staff@example.com", domain.UserRoleStaff, dashSvc.jwtSecret)
-	staffCookie := &http.Cookie{Name: "token", Value: staffTokens.AccessToken}
+	staffCookie := staffCreateCookie
 
 	wHostStaff := httptest.NewRecorder()
 	reqHostStaff, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/dashboard/servers/%d/host", server.ID), nil)
@@ -571,8 +602,7 @@ func TestDashboardEndToEndBrowserFlow(t *testing.T) {
 		t.Fatalf("expected 403 on /dashboard/users for staff role, got %d", wUsersForbidden.Code)
 	}
 
-	adminTokens, _ := authkit.GenerateTokenPair(999998, "admin@example.com", domain.UserRoleAdmin, dashSvc.jwtSecret)
-	adminCookie := &http.Cookie{Name: "token", Value: adminTokens.AccessToken}
+	_, adminCookie := mustCreateUserWithSession(t, dashSvc, fmt.Sprintf("admin-dash-%d@example.com", time.Now().UnixNano()), domain.UserRoleAdmin)
 
 	wUsersAdmin := httptest.NewRecorder()
 	reqUsersAdmin, _ := http.NewRequest(http.MethodGet, "/dashboard/users", nil)
@@ -689,8 +719,7 @@ func TestExtendServerPanelInSettings(t *testing.T) {
 		dashSvc.db.Delete(&domain.User{}, owner.ID)
 	})
 
-	tokens, _ := authkit.GenerateTokenPair(owner.ID, owner.Email, owner.Role, dashSvc.jwtSecret)
-	cookie := &http.Cookie{Name: "token", Value: tokens.AccessToken}
+	cookie := mustCreateSessionCookie(t, dashSvc, owner.ID)
 
 	// Overview page must not have the inline Extend 30 Days form, and must link to settings#extend-server.
 	wDetail := doDashboardReq(r, http.MethodGet, fmt.Sprintf("/dashboard/servers/%d", srv.ID), cookie, nil)
@@ -785,8 +814,7 @@ func TestDashboardExpiringServerAlerts(t *testing.T) {
 		dashSvc.db.Delete(&domain.User{}, owner.ID)
 	})
 
-	tokens, _ := authkit.GenerateTokenPair(owner.ID, owner.Email, owner.Role, dashSvc.jwtSecret)
-	cookie := &http.Cookie{Name: "token", Value: tokens.AccessToken}
+	cookie := mustCreateSessionCookie(t, dashSvc, owner.ID)
 
 	// Main dashboard list shows alert banner with links for soon + expired servers, not far/no-expiry servers.
 	wList := doDashboardReq(r, http.MethodGet, "/dashboard", cookie, nil)

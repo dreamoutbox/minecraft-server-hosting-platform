@@ -16,6 +16,9 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 		"BACKUP_MAX_COUNT",
 		"BACKUP_PRESIGN_TTL",
 		"JWT_ACCESS_TTL",
+		"SESSION_TTL",
+		"COOKIE_SECURE",
+		"APP_BASE_URL",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatalf("failed unsetting %s: %v", key, err)
@@ -50,6 +53,12 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.JWTAccessTTL != 15*time.Minute {
 		t.Errorf("expected default JWTAccessTTL 15m, got: %s", cfg.JWTAccessTTL)
+	}
+	if cfg.SessionTTL != 24*time.Hour {
+		t.Errorf("expected default SessionTTL 24h, got: %s", cfg.SessionTTL)
+	}
+	if cfg.CookieSecure {
+		t.Errorf("expected default CookieSecure false for http://localhost:8080")
 	}
 	if cfg.DefaultWorkerKey != "dev-worker-key" {
 		t.Errorf("expected default DefaultWorkerKey dev-worker-key, got: %s", cfg.DefaultWorkerKey)
@@ -154,6 +163,47 @@ func TestLoadFromEnvJWTAccessTTL(t *testing.T) {
 		t.Setenv("JWT_ACCESS_TTL", "0s")
 		if _, err := LoadFromEnv(); err == nil {
 			t.Fatal("expected error for zero JWT_ACCESS_TTL")
+		}
+	})
+}
+
+func TestLoadFromEnvSessionAndCookieSecure(t *testing.T) {
+	t.Run("https APP_BASE_URL defaults CookieSecure true", func(t *testing.T) {
+		t.Setenv("APP_BASE_URL", "https://panel.example.com")
+		t.Setenv("COOKIE_SECURE", "")
+		cfg, err := LoadFromEnv()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.CookieSecure {
+			t.Fatal("expected CookieSecure true when APP_BASE_URL is https")
+		}
+	})
+
+	t.Run("explicit overrides", func(t *testing.T) {
+		t.Setenv("APP_BASE_URL", "http://localhost:8080")
+		t.Setenv("COOKIE_SECURE", "true")
+		t.Setenv("SESSION_TTL", "12h")
+		cfg, err := LoadFromEnv()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.CookieSecure || cfg.SessionTTL != 12*time.Hour {
+			t.Fatalf("unexpected overrides: secure=%v ttl=%s", cfg.CookieSecure, cfg.SessionTTL)
+		}
+	})
+
+	t.Run("invalid COOKIE_SECURE", func(t *testing.T) {
+		t.Setenv("COOKIE_SECURE", "not-a-bool")
+		if _, err := LoadFromEnv(); err == nil {
+			t.Fatal("expected error for invalid COOKIE_SECURE")
+		}
+	})
+
+	t.Run("invalid SESSION_TTL", func(t *testing.T) {
+		t.Setenv("SESSION_TTL", "-1h")
+		if _, err := LoadFromEnv(); err == nil {
+			t.Fatal("expected error for negative SESSION_TTL")
 		}
 	})
 }
