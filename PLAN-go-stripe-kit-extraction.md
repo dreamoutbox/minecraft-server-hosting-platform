@@ -65,18 +65,18 @@ internal/billings/              # Minecraft server hosting platform billing
   - [x] Update `Dockerfile.apiserver`, `Dockerfile.jobworker`, `Dockerfile.nodemanager`, and `fileserver/Dockerfile` to `COPY go-stripe-kit/go.* ./go-stripe-kit/` before `go mod download` / `go build`.
 - Done when: `go build ./go-stripe-kit/...` and `go build ./...` pass, and `go list -m github.com/dreamoutbox/go-stripe-kit` resolves to `./go-stripe-kit`.
 
-### Phase 2: Implement `StripePaymentProvider`, `MockPaymentProvider`, and refund operations [STATUS: TODO]
+### Phase 2: Implement `StripePaymentProvider`, `MockPaymentProvider`, and refund operations [STATUS: DONE]
 - Goal: Implement live Stripe and in-memory mock providers with full/partial refund support and generic webhook verification, verified by standalone unit tests.
 - Tasks:
-  - [ ] Create `go-stripe-kit/stripe_provider.go` (`StripePaymentProvider` using an instance-scoped `stripe-go/v81` API client rather than mutating global `stripe.Key`):
+  - [x] Create `go-stripe-kit/stripe_provider.go` (`StripePaymentProvider` using an instance-scoped `stripe-go/v81` API client rather than mutating global `stripe.Key`):
     - Implement `CreatePayment`, `GetPayment`, and `CreateCheckoutSession` (default currency `usd`, forwarding `ClientReferenceID` and arbitrary `Metadata`).
     - Implement `Refund(ctx context.Context, req RefundRequest) (*RefundResult, error)` supporting full refunds (`AmountCents == 0`), partial refunds (`AmountCents > 0`), `Reason`, `Metadata`, and `IdempotencyKey`, mapping Stripe refund statuses to `RefundStatus`.
     - Implement `VerifyWebhookSignature` handling `checkout.session.completed`, `payment_intent.succeeded`, `payment_intent.payment_failed`, and `charge.refunded`, copying Stripe object `metadata` generically without app-specific fields.
-  - [ ] Create `go-stripe-kit/mock_provider.go` (`MockPaymentProvider`):
+  - [x] Create `go-stripe-kit/mock_provider.go` (`MockPaymentProvider`):
     - Track created payments and cumulative refunded amounts in memory.
     - Implement `Refund(ctx context.Context, req RefundRequest) (*RefundResult, error)` with full and partial refund support, rejecting unknown payments, negative amounts, over-refunds, invalid reasons, and already fully refunded payments; transition payment status to `PaymentStatusRefunded` once fully refunded.
     - Implement `CreateCheckoutSession`, `GenerateSignedWebhook`, and `VerifyWebhookSignature` supporting `charge.refunded` and arbitrary `Metadata`.
-  - [ ] Add `go-stripe-kit/provider_test.go` covering checkout session creation, payment create/get, full refund, partial refund, refund validation/over-refund errors, and webhook signing/verification (valid, missing header, tampered signature, `checkout.session.completed`, `charge.refunded`).
+  - [x] Add `go-stripe-kit/provider_test.go` covering checkout session creation, payment create/get, full refund, partial refund, refund validation/over-refund errors, and webhook signing/verification (valid, missing header, tampered signature, `checkout.session.completed`, `charge.refunded`).
 - Done when: `cd go-stripe-kit && go test -v -race ./...` passes with zero DB or network dependencies, and `go list -f '{{.Deps}}' ./go-stripe-kit` contains no web framework (`gin`, `echo`, `fiber`) or GORM imports.
 
 ### Phase 3: Implement framework-agnostic core `Service` in `./go-stripe-kit` [STATUS: TODO]
