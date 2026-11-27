@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,14 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dreamoutbox/authkit"
 	authmw "github.com/dreamoutbox/authkit/middleware"
 	"github.com/dreamoutbox/authkit/session"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billing"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/billings"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/dashboard/view"
+	"github.com/dreamoutbox/minecraft-server-hosting-platform/internal/users"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/jobworker/jobs"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/backup"
 	"github.com/dreamoutbox/minecraft-server-hosting-platform/shared/domain"
@@ -82,60 +82,6 @@ func (s *Service) renderView(c *gin.Context, page string, data map[string]interf
 
 func (s *Service) renderViewWithStatus(c *gin.Context, status int, page string, data map[string]interface{}) {
 	s.renderer.RenderViewWithStatus(c, status, page, data)
-}
-
-// ShowLogin renders the login page.
-func (s *Service) ShowLogin(c *gin.Context) {
-	s.renderView(c, "login.html", nil)
-}
-
-// ProcessLogin authenticates credentials and establishes browser session cookie.
-func (s *Service) ProcessLogin(c *gin.Context) {
-	email := c.PostForm("email")
-	password := c.PostForm("password")
-
-	user, err := authkit.Authenticate(s.db, email, password)
-	if err != nil {
-		s.renderView(c, "login.html", map[string]interface{}{
-			"FlashError": "Invalid email or password",
-		})
-		return
-	}
-
-	if err := s.authsessions.SetSession(c, user.ID); err != nil {
-		s.renderView(c, "login.html", map[string]interface{}{"FlashError": "Failed generating session"})
-		return
-	}
-
-	c.Redirect(http.StatusFound, "/dashboard")
-}
-
-// ShowRegister renders the account creation page.
-func (s *Service) ShowRegister(c *gin.Context) {
-	s.renderView(c, "register.html", nil)
-}
-
-// ProcessRegister validates input, creates a user account, and redirects to the login page.
-func (s *Service) ProcessRegister(c *gin.Context) {
-	_, err := authkit.RegisterUser(s.db, c.PostForm("email"), c.PostForm("password"))
-	if err != nil {
-		msg := "Failed saving account"
-		if errors.Is(err, authkit.ErrInvalidEmail) ||
-			errors.Is(err, authkit.ErrPasswordTooShort) ||
-			errors.Is(err, authkit.ErrEmailAlreadyExists) {
-			msg = err.Error()
-		}
-		s.renderView(c, "register.html", map[string]interface{}{"FlashError": msg})
-		return
-	}
-
-	c.Redirect(http.StatusFound, "/login?success=Account+created.+Please+sign+in.")
-}
-
-// Logout terminates user browser session.
-func (s *Service) Logout(c *gin.Context) {
-	_ = s.authsessions.Logout(c)
-	c.Redirect(http.StatusFound, "/login?success=Logged+out+successfully")
 }
 
 // ExpiringServerAlert represents a dashboard warning entry for a server that is expiring soon or recently expired.
@@ -230,61 +176,6 @@ func (s *Service) ProcessCreateServer(c *gin.Context) {
 	c.Redirect(http.StatusFound, serverRedirectURL(server.ID, "", "success", "Server creation queued!"))
 }
 
-// ShowBuyServer displays the Stripe Checkout server purchase page for users.
-//
-// Arguments:
-//   - c: Active Gin request context.
-//
-// Example usage:
-//
-//	GET /dashboard/servers/buy
-func (s *Service) ShowBuyServer(c *gin.Context) {
-	var plans []domain.Plan
-	_ = s.db.Find(&plans)
-
-	s.renderView(c, "server_buy.html", map[string]interface{}{
-		"Plans":       plans,
-		"ServerTypes": domain.AllServerTypes(),
-	})
-}
-
-// ProcessBuyServer creates a Stripe Checkout session for a new server and redirects the user to Stripe.
-//
-// Arguments:
-//   - c: Active Gin request context with form fields name, plan_id, server_type, server_version.
-//
-// Example usage:
-//
-//	POST /dashboard/servers/buy
-func (s *Service) ProcessBuyServer(c *gin.Context) {
-	userID, _ := authmw.GetUserIDFromContext(c)
-	name := strings.TrimSpace(c.PostForm("name"))
-	planIDVal, _ := strconv.ParseUint(c.PostForm("plan_id"), 10, 64)
-	serverType := domain.ServerType(strings.ToUpper(strings.TrimSpace(c.PostForm("server_type"))))
-	serverVersion := strings.TrimSpace(c.PostForm("server_version"))
-
-	cs, _, err := s.billingSvc.CreateServerCheckout(
-		c.Request.Context(),
-		userID,
-		uint(planIDVal),
-		name,
-		serverType,
-		serverVersion,
-	)
-	if err != nil {
-		var plans []domain.Plan
-		_ = s.db.Find(&plans)
-		s.renderView(c, "server_buy.html", map[string]interface{}{
-			"Plans":       plans,
-			"ServerTypes": domain.AllServerTypes(),
-			"FlashError":  "Failed initiating checkout: " + err.Error(),
-		})
-		return
-	}
-
-	c.Redirect(http.StatusSeeOther, cs.CheckoutURL)
-}
-
 // serverExpiryFlags computes expiration and extension eligibility flags for a server.
 //
 // Arguments:
@@ -296,31 +187,6 @@ func (s *Service) ProcessBuyServer(c *gin.Context) {
 //	isExpired, canExtend := serverExpiryFlags(server, time.Now())
 func serverExpiryFlags(server *domain.Server, now time.Time) (bool, bool) {
 	return view.ServerExpiryFlags(server, now)
-}
-
-// ExtendServerDuration creates a Stripe Checkout session to extend a server by 30 days.
-//
-// Arguments:
-//   - c: Active Gin request context with URL parameter 'id'.
-//
-// Example usage:
-//
-//	POST /dashboard/servers/:id/extend
-func (s *Service) ExtendServerDuration(c *gin.Context) {
-	userID, _ := authmw.GetUserIDFromContext(c)
-	serverIDVal, ok := parseIDParam(c, "id")
-	if !ok {
-		c.Redirect(http.StatusFound, "/dashboard?error=Invalid+server+ID")
-		return
-	}
-
-	cs, _, err := s.billingSvc.CreateExtendCheckout(c.Request.Context(), userID, serverIDVal)
-	if err != nil {
-		c.Redirect(http.StatusFound, serverRedirectURL(serverIDVal, "/settings", "error", err.Error())+"#extend-server")
-		return
-	}
-
-	c.Redirect(http.StatusSeeOther, cs.CheckoutURL)
 }
 
 // ShowServerDetail renders the server overview page.
@@ -890,85 +756,6 @@ func (s *Service) OpenFileManager(c *gin.Context) {
 	c.Redirect(http.StatusFound, targetURL)
 }
 
-// ShowBilling displays customer checkout order history and payment records.
-func (s *Service) ShowBilling(c *gin.Context) {
-	userID, _ := authmw.GetUserIDFromContext(c)
-
-	orders, _ := s.billingSvc.ListUserOrders(c.Request.Context(), userID)
-	payments, _ := s.billingSvc.ListUserPayments(c.Request.Context(), userID)
-
-	s.renderView(c, "billing.html", map[string]interface{}{
-		"Orders":   orders,
-		"Payments": payments,
-	})
-}
-
-// ListUsers renders the admin-only user role management page.
-//
-// Arguments:
-//   - c: Active Gin request context.
-//
-// Example usage:
-//
-//	GET /dashboard/users
-func (s *Service) ListUsers(c *gin.Context) {
-	if !authmw.GetUserRoleFromContext(c).IsAdmin() {
-		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
-			"ErrorMessage": "User role management is restricted to administrator accounts.",
-		})
-		return
-	}
-
-	var users []domain.User
-	_ = s.db.WithContext(c.Request.Context()).Order("id asc").Find(&users).Error
-
-	s.renderAdminView(c, "users.html", map[string]interface{}{
-		"Users": users,
-		"Roles": []domain.UserRole{domain.UserRoleUser, domain.UserRoleStaff, domain.UserRoleAdmin},
-	})
-}
-
-// UpdateUserRole updates a user's platform role (user, staff, or admin).
-//
-// Arguments:
-//   - c: Active Gin request context with URL parameter 'id' and form field 'role'.
-//
-// Example usage:
-//
-//	POST /dashboard/users/:id/role
-func (s *Service) UpdateUserRole(c *gin.Context) {
-	if !authmw.GetUserRoleFromContext(c).IsAdmin() {
-		s.renderViewWithStatus(c, http.StatusForbidden, "forbidden.html", map[string]interface{}{
-			"ErrorMessage": "User role management is restricted to administrator accounts.",
-		})
-		return
-	}
-
-	targetUserID, ok := parseIDParam(c, "id")
-	if !ok {
-		c.Redirect(http.StatusFound, "/dashboard/users?error=Invalid+user+ID")
-		return
-	}
-
-	newRole := domain.UserRole(strings.TrimSpace(c.PostForm("role")))
-	if !newRole.IsValid() {
-		c.Redirect(http.StatusFound, "/dashboard/users?error=Invalid+role")
-		return
-	}
-
-	res := s.db.WithContext(c.Request.Context()).Model(&domain.User{}).Where("id = ?", targetUserID).Update("role", newRole)
-	if res.Error != nil {
-		c.Redirect(http.StatusFound, "/dashboard/users?error="+url.QueryEscape(res.Error.Error()))
-		return
-	}
-	if res.RowsAffected == 0 {
-		c.Redirect(http.StatusFound, "/dashboard/users?error=User+not+found")
-		return
-	}
-
-	c.Redirect(http.StatusFound, "/dashboard/users?success=User+role+updated")
-}
-
 // RegisterRoutes registers all dashboard web pages and form actions onto the router.
 //
 // Arguments:
@@ -978,12 +765,11 @@ func (s *Service) UpdateUserRole(c *gin.Context) {
 //
 //	dashService.RegisterRoutes(router)
 func (s *Service) RegisterRoutes(r *gin.Engine) {
+	usersHandler := users.NewHandler(s.db, s.authsessions, s.renderer)
+	billingsHandler := billings.NewHandler(s.db, s.billingSvc, s.renderer)
+
 	// Public auth pages
-	r.GET("/login", s.ShowLogin)
-	r.POST("/login", s.ProcessLogin)
-	r.GET("/register", s.ShowRegister)
-	r.POST("/register", s.ProcessRegister)
-	r.GET("/logout", s.Logout)
+	usersHandler.RegisterPublicRoutes(r)
 
 	// Protected dashboard pages
 	dash := r.Group("/dashboard")
@@ -992,10 +778,7 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 		dash.GET("", s.ListServers)
 		dash.GET("/servers/new", s.ShowCreateServer)
 		dash.POST("/servers/new", s.ProcessCreateServer)
-		dash.GET("/servers/buy", s.ShowBuyServer)
-		dash.POST("/servers/buy", s.ProcessBuyServer)
 		dash.GET("/servers/:id", s.ShowServerDetail)
-		dash.POST("/servers/:id/extend", s.ExtendServerDuration)
 		dash.GET("/servers/:id/console", s.ShowServerConsole)
 		dash.GET("/servers/:id/console/logs", s.GetServerConsoleLogsJSON)
 		dash.POST("/servers/:id/console/command", s.SendConsoleCommand)
@@ -1016,10 +799,8 @@ func (s *Service) RegisterRoutes(r *gin.Engine) {
 
 		dash.GET("/servers/:id/files/open", s.OpenFileManager)
 
-		dash.GET("/billing", s.ShowBilling)
-
-		dash.GET("/users", s.ListUsers)
-		dash.POST("/users/:id/role", s.UpdateUserRole)
+		billingsHandler.RegisterRoutes(dash)
+		usersHandler.RegisterDashboardRoutes(dash)
 
 		admin := dash.Group("/admin")
 		{

@@ -99,20 +99,20 @@ internal/
   - [x] Refactor `internal/dashboard/dashboard.go` and `internal/dashboard/admin.go` to delegate to `view.Renderer` and the exported helpers.
 - Done when: `go test -race ./internal/dashboard/...` passes with zero behavior or route changes.
 
-### Phase 7: Split `users` and `billings` routes into `internal/users/` and `internal/billings/` [STATUS: TODO]
+### Phase 7: Split `users` and `billings` routes into `internal/users/` and `internal/billings/` [STATUS: DONE]
 - Goal: Move auth/user management routes and billing/purchase routes out of `internal/dashboard/dashboard.go` into dedicated category packages with one route per file.
 - Tasks:
-  - [ ] Create `internal/users/` with `handler.go` (struct + `RegisterRoutes`) and one file per route:
+  - [x] Create `internal/users/` with `handler.go` (struct + `RegisterRoutes`) and one file per route:
     - `login.go` (`GET/POST /login`)
     - `register.go` (`GET/POST /register`)
     - `logout.go` (`GET /logout`)
     - `list_users.go` (`GET /dashboard/users`)
     - `update_user_role.go` (`POST /dashboard/users/:id/role`)
-  - [ ] Create `internal/billings/` (plural to avoid colliding with `internal/billing`) with `handler.go` (struct + `RegisterRoutes`) and one file per route:
+  - [x] Create `internal/billings/` (plural to avoid colliding with `internal/billing`) with `handler.go` (struct + `RegisterRoutes`) and one file per route:
     - `buy_server.go` (`GET/POST /dashboard/servers/buy`)
     - `extend_server.go` (`POST /dashboard/servers/:id/extend`)
     - `show_billing.go` (`GET /dashboard/billing`)
-  - [ ] Wire `users.Handler` and `billings.Handler` in `internal/dashboard/dashboard.go` `RegisterRoutes` and remove the migrated methods from `dashboard.go`.
+  - [x] Wire `users.Handler` and `billings.Handler` in `internal/dashboard/dashboard.go` `RegisterRoutes` and remove the migrated methods from `dashboard.go`.
 - Done when: `go build ./...` and `go test -race ./internal/dashboard/... ./internal/users/... ./internal/billings/...` pass.
 
 ### Phase 8: Split Minecraft server routes into `internal/mcservers/` [STATUS: TODO]
